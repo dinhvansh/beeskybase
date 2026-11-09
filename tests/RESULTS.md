@@ -146,9 +146,9 @@ PASS: miner back: BACK_ONLINE printed + webhook received
 PASS: logfile channel recorded all three events
 
 Captured webhook payloads:
-{"ts": 1794219346.5572197, "time": "2026-11-09 10:15:46", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
-{"ts": 1794219346.9761698, "time": "2026-11-09 10:15:46", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "OFFLINE", "severity": "critical", "detail": "miner went offline / unreachable", "data": {"last_seen": 1794219346.8004332}}
-{"ts": 1794219347.5016665, "time": "2026-11-09 10:15:47", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "BACK_ONLINE", "severity": "info", "detail": "miner is back online", "data": {}}
+{"ts": 1794220198.6325831, "time": "2026-11-09 10:29:58", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
+{"ts": 1794220199.1460683, "time": "2026-11-09 10:29:59", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "OFFLINE", "severity": "critical", "detail": "miner went offline / unreachable", "data": {"last_seen": 1794220198.9229498}}
+{"ts": 1794220199.7964227, "time": "2026-11-09 10:29:59", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "BACK_ONLINE", "severity": "info", "detail": "miner is back online", "data": {}}
 
 WATCH TEST PASSED
 ```

@@ -1,0 +1,19 @@
+# BeeSky web dashboard.
+#
+#   BEESKY_TARGET=192.168.1.0/24 docker compose up -d --build
+#   -> http://<host>:8787
+#
+# CAVEAT (see docs/web.md): the service scans from the network the host /
+# container sits on. For a mining farm, run this on a machine inside the
+# farm LAN. On Linux, uncomment `network_mode: host` so the container
+# scans the host's LAN directly instead of the Docker bridge network.
+services:
+  beesky-web:
+    build: .
+    # network_mode: host        # Linux only — needed to reach the farm LAN
+    ports:
+      - "8787:8787"
+    environment:
+      BEESKY_TARGET: ${BEESKY_TARGET:-192.168.1.0/24}
+      BEESKY_INTERVAL: ${BEESKY_INTERVAL:-30}
+    restart: unless-stopped

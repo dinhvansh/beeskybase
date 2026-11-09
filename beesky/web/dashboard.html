@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BeeSky — Giám sát máy đào</title>
+<style>
+  :root {
+    --yellow: #F5D800;
+    --bg: #000000;
+    --panel: #141414;
+    --panel2: #1d1d1d;
+    --line: #2c2c2c;
+    --text: #ffffff;
+    --muted: #a8a8a8;
+    --ok: #4caf7d;
+    --warn: #d8a723;
+    --bad: #d9534f;
+    --orange: #d97b29;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+    font-size: 14px;
+  }
+  header {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 14px 20px; border-bottom: 3px solid var(--yellow);
+    background: #0a0a0a;
+  }
+  .logo {
+    font-size: 26px; font-weight: 800; letter-spacing: 1px; color: var(--text);
+  }
+  .logo .bee { color: var(--yellow); }
+  .logo .mark {
+    display: inline-block; background: var(--yellow); color: #000;
+    border-radius: 6px; padding: 0 8px; margin-right: 8px; font-weight: 900;
+  }
+  header .sub { color: var(--muted); font-size: 13px; }
+  header .spacer { flex: 1; }
+  header .meta { color: var(--muted); font-size: 12px; text-align: right; }
+  button {
+    background: var(--yellow); color: #000; border: 0; border-radius: 6px;
+    padding: 8px 16px; font-weight: 700; cursor: pointer; font-size: 13px;
+  }
+  button:hover { filter: brightness(1.1); }
+  button:disabled { opacity: .5; cursor: default; }
+  main { padding: 18px 20px 30px; max-width: 1280px; margin: 0 auto; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-top: 3px solid var(--yellow); border-radius: 8px; padding: 14px 16px;
+  }
+  .card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+  .card .value { font-size: 30px; font-weight: 800; margin-top: 4px; }
+  .card .value small { font-size: 14px; color: var(--muted); font-weight: 400; }
+  .card.alert .value { color: var(--bad); }
+  h2 { margin: 26px 0 10px; font-size: 17px; }
+  h2 .accent { color: var(--yellow); }
+  .tablewrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  table { width: 100%; border-collapse: collapse; min-width: 860px; }
+  th, td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: var(--panel2); color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .4px; }
+  tr:last-child td { border-bottom: 0; }
+  tr.offline td { opacity: .45; }
+  .pill {
+    display: inline-block; padding: 2px 9px; border-radius: 20px;
+    font-size: 12px; font-weight: 700;
+  }
+  .pill.ok { background: #123526; color: var(--ok); }
+  .pill.check { background: #3d1512; color: var(--bad); }
+  .pill.off { background: #2c2c2c; color: var(--muted); }
+  .problems { color: #f0b3ae; font-size: 12px; margin-top: 4px; line-height: 1.5; }
+  .events { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  .event {
+    display: flex; gap: 10px; align-items: baseline; padding: 9px 14px;
+    border-bottom: 1px solid var(--line); flex-wrap: wrap;
+  }
+  .event:last-child { border-bottom: 0; }
+  .event .time { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .event .who { font-weight: 700; white-space: nowrap; }
+  .event .detail { color: #ddd; }
+  .sev { font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 4px; text-transform: uppercase; white-space: nowrap; }
+  .sev.info { background: #26313d; color: #9db8cc; }
+  .sev.warning { background: #3a2f10; color: var(--warn); }
+  .sev.major { background: #3d2410; color: var(--orange); }
+  .sev.critical { background: #3d1512; color: var(--bad); }
+  .empty { color: var(--muted); padding: 16px; text-align: center; }
+  footer { color: var(--muted); font-size: 12px; text-align: center; padding: 0 20px 22px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"><span class="mark">B</span><span class="bee">Bee</span>Sky</div>
+  <div class="sub">Giám sát &amp; chẩn đoán máy đào ASIC</div>
+  <div class="spacer"></div>
+  <div class="meta">
+    <div>Mục tiêu quét: <span id="meta-target">…</span></div>
+    <div>Quét mỗi <span id="meta-interval">…</span>s · Lần quét cuối: <span id="meta-last">…</span></div>
+  </div>
+  <button id="scan-btn" type="button">Quét ngay</button>
+</header>
+
+<main>
+  <section class="cards">
+    <div class="card"><div class="label">Tổng số máy</div><div class="value" id="card-total">–</div></div>
+    <div class="card"><div class="label">Tổng hashrate</div><div class="value" id="card-hashrate">–</div></div>
+    <div class="card" id="card-problems-wrap"><div class="label">Máy có vấn đề</div><div class="value" id="card-problems">–</div></div>
+    <div class="card"><div class="label">Nhiệt độ cao nhất</div><div class="value" id="card-temp">–</div></div>
+  </section>
+
+  <h2>Danh sách máy <span class="accent">· Miners</span></h2>
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr>
+          <th>IP</th><th>Model</th><th>Nguồn</th><th>Hashrate</th>
+          <th>Chip sống/tổng</th><th>Nhiệt độ max</th><th>Quạt (RPM)</th><th>Trạng thái</th>
+        </tr>
+      </thead>
+      <tbody id="miners-body">
+        <tr><td colspan="8" class="empty">Đang tải…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Sự kiện gần đây <span class="accent">· Events</span></h2>
+  <div class="events" id="events-list">
+    <div class="empty">Đang tải…</div>
+  </div>
+</main>
+
+<footer>BeeSky v0.4 — dữ liệu tự làm mới mỗi 10 giây · Chỉ dùng trong mạng nội bộ của trại/xưởng</footer>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+
+function fmtThs(v) {
+  if (v === null || v === undefined) return "–";
+  return v.toFixed(2) + " TH/s";
+}
+function esc(s) {
+  return String(s === null || s === undefined ? "" : s)
+    .replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+async function refreshStatus() {
+  try {
+    const r = await fetch("/api/status");
+    const s = await r.json();
+    $("meta-target").textContent = s.target;
+    $("meta-interval").textContent = s.interval;
+    $("meta-last").textContent = s.last_scan_at || "chưa có";
+  } catch (e) { /* server tạm thời chưa trả lời, lần poll sau thử lại */ }
+}
+
+async function refreshMiners() {
+  try {
+    const r = await fetch("/api/miners");
+    const data = await r.json();
+    const miners = data.miners || [];
+    let totalThs = 0, problems = 0, maxTemp = null;
+    const rows = miners.map((m) => {
+      if (m.online && m.ths !== null && m.ths !== undefined) totalThs += m.ths;
+      if (m.status !== "OK") problems += 1;
+      if (m.max_temp_c !== null && m.max_temp_c !== undefined) {
+        maxTemp = maxTemp === null ? m.max_temp_c : Math.max(maxTemp, m.max_temp_c);
+      }
+      const fans = (m.fans_rpm || []).join(" / ") || "–";
+      const chips = m.chips_total ? (m.chips_alive + "/" + m.chips_total) : "–";
+      const temp = (m.max_temp_c === null || m.max_temp_c === undefined) ? "–" : m.max_temp_c.toFixed(0) + " °C";
+      let statusHtml;
+      if (!m.online) statusHtml = '<span class="pill off">MẤT KẾT NỐI</span>';
+      else if (m.status === "OK") statusHtml = '<span class="pill ok">OK</span>';
+      else statusHtml = '<span class="pill check">CẦN KIỂM TRA</span>';
+      const probHtml = (m.problems && m.problems.length)
+        ? '<div class="problems">' + m.problems.map((p) => "• " + esc(p.detail)).join("<br>") + "</div>"
+        : "";
+      return "<tr" + (m.online ? "" : ' class="offline"') + ">" +
+        "<td>" + esc(m.ip) + "</td>" +
+        "<td>" + esc(m.model) + "</td>" +
+        "<td>" + esc(m.source || "–") + "</td>" +
+        "<td>" + fmtThs(m.ths) + "</td>" +
+        "<td>" + chips + "</td>" +
+        "<td>" + temp + "</td>" +
+        "<td>" + esc(fans) + "</td>" +
+        "<td>" + statusHtml + probHtml + "</td></tr>";
+    });
+    $("miners-body").innerHTML = rows.length
+      ? rows.join("")
+      : '<tr><td colspan="8" class="empty">Chưa phát hiện máy nào — kiểm tra lại mục tiêu quét.</td></tr>';
+    $("card-total").textContent = miners.length;
+    $("card-hashrate").innerHTML = miners.length ? totalThs.toFixed(2) + " <small>TH/s</small>" : "–";
+    $("card-problems").textContent = miners.length ? problems : "–";
+    $("card-problems-wrap").classList.toggle("alert", problems > 0);
+    $("card-temp").innerHTML = maxTemp === null ? "–" : maxTemp.toFixed(0) + " <small>°C</small>";
+  } catch (e) { /* giữ nguyên dữ liệu cũ khi poll lỗi */ }
+}
+
+const SEV_LABEL = { info: "Thông tin", warning: "Cảnh báo", major: "Nghiêm trọng", critical: "Khẩn cấp" };
+const TYPE_LABEL = {
+  OFFLINE: "Mất kết nối", BACK_ONLINE: "Đã kết nối lại",
+  HASHRATE_DROP: "Sụt hashrate", OVER_TEMP: "Quá nhiệt",
+  CHIPS_LOST: "Mất chip", CHAIN_DOWN: "Board ngắt"
+};
+
+async function refreshEvents() {
+  try {
+    const r = await fetch("/api/events?n=50");
+    const data = await r.json();
+    const events = data.events || [];
+    $("events-list").innerHTML = events.length
+      ? events.map((ev) =>
+          '<div class="event">' +
+          '<span class="time">' + esc(ev.time || "") + "</span>" +
+          '<span class="sev ' + esc(ev.severity) + '">' + esc(SEV_LABEL[ev.severity] || ev.severity) + "</span>" +
+          '<span class="who">' + esc(ev.ip) + " · " + esc(TYPE_LABEL[ev.type] || ev.type) + "</span>" +
+          '<span class="detail">' + esc(ev.detail) + "</span>" +
+          "</div>").join("")
+      : '<div class="empty">Chưa có sự kiện nào.</div>';
+  } catch (e) { /* giữ nguyên dữ liệu cũ khi poll lỗi */ }
+}
+
+async function refreshAll() {
+  await Promise.all([refreshStatus(), refreshMiners(), refreshEvents()]);
+}
+
+$("scan-btn").addEventListener("click", async () => {
+  const btn = $("scan-btn");
+  btn.disabled = true;
+  try {
+    await fetch("/api/scan", { method: "POST" });
+    setTimeout(refreshAll, 1500);
+  } finally {
+    setTimeout(() => { btn.disabled = false; }, 2000);
+  }
+});
+
+refreshAll();
+setInterval(refreshAll, 10000);
+</script>
+</body>
+</html>

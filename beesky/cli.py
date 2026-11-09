@@ -9,6 +9,10 @@
     python -m beesky watch <target> [--interval 30] [--notify config.json]
                                     [--state state.json] [--once]
                                     (plus the scan options above)
+
+    python -m beesky serve <target> [--port 8787] [--interval 30]
+                                    [--host 127.0.0.1] [--notify config.json]
+                                    (plus the scan options above)
 """
 
 from __future__ import annotations
@@ -26,6 +30,7 @@ from .core.cgminer import CgminerClient, CgminerError
 from .core.dashd import DashdClient, DashdError
 from .core.discover import Candidate, discover
 from .core.events import EventEngine
+from .web.server import MonitorService, run_server
 
 
 def _fetch_record(cand: Candidate, args: argparse.Namespace) -> dict:
@@ -180,6 +185,35 @@ def cmd_watch(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# serve — watch engine behind the web dashboard
+# ---------------------------------------------------------------------------
+
+def _load_notify_config(path: str | None) -> dict | None:
+    """Read a notify config JSON; None (with a message) when unreadable."""
+    if not path:
+        return {}
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"cannot read notify config {path}: {exc}", file=sys.stderr)
+        return None
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    config = _load_notify_config(args.notify)
+    if config is None:
+        return 2
+    service = MonitorService(lambda: _scan_records(args), target=args.target,
+                             interval=args.interval, notify_config=config)
+    try:
+        run_server(service, host=args.host, port=args.port)
+    except OSError as exc:
+        print(f"cannot bind {args.host}:{args.port}: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # argument parsing
 # ---------------------------------------------------------------------------
 
@@ -229,6 +263,20 @@ def main(argv: list[str] | None = None) -> int:
     watch.add_argument("--once", action="store_true",
                        help="run a single pass and exit")
     watch.set_defaults(func=cmd_watch)
+
+    serve = sub.add_parser(
+        "serve", help="serve the web dashboard, scanning on an interval")
+    _add_common_args(serve)
+    serve.add_argument("--port", type=int, default=8787,
+                       help="HTTP port for the dashboard (default 8787)")
+    serve.add_argument("--host", default="127.0.0.1",
+                       help="bind address (default 127.0.0.1; no auth in "
+                            "v0.4 — widen only on a trusted LAN)")
+    serve.add_argument("--interval", type=float, default=30,
+                       help="seconds between scan passes (default 30)")
+    serve.add_argument("--notify", metavar="CONFIG",
+                       help="notify config JSON (see docs/notify.example.json)")
+    serve.set_defaults(func=cmd_serve)
 
     args = parser.parse_args(argv)
     return args.func(args)
