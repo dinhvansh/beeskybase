@@ -69,26 +69,79 @@ class DashdClient:
         self.token = token
 
     # -- transport ---------------------------------------------------------
-    def get_json(self, path: str):
-        """GET one API path and return the parsed JSON body."""
-        url = f"http://{self.host}:{self.port}{API_BASE}{path}"
+    def _headers(self) -> dict:
         headers = {"Accept": "application/json", "User-Agent": "BeeSky"}
         if self.api_key:
             headers["x-api-key"] = self.api_key
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
-        request = urllib.request.Request(url, headers=headers, method="GET")
+        return headers
+
+    def _request(self, method: str, path: str, payload=None,
+                 headers: dict | None = None):
+        """One HTTP call; returns the parsed JSON body ({} when empty)."""
+        url = f"http://{self.host}:{self.port}{API_BASE}{path}"
+        data = None
+        hdrs = self._headers()
+        if headers:
+            hdrs.update(headers)
+        if payload is not None:
+            data = json.dumps(payload).encode("utf-8")
+            hdrs["Content-Type"] = "application/json"
+        request = urllib.request.Request(url, headers=hdrs, data=data,
+                                         method=method)
         try:
             with _OPENER.open(request, timeout=self.timeout) as resp:
                 body = resp.read()
         except urllib.error.HTTPError as exc:
-            raise DashdError(f"GET {path} -> HTTP {exc.code}") from exc
+            detail = ""
+            try:
+                parsed = json.loads(exc.read().decode("utf-8", "replace"))
+                if isinstance(parsed, dict) and parsed.get("err"):
+                    detail = f" ({parsed['err']})"
+            except Exception:  # noqa: BLE001 — body is best-effort context
+                pass
+            raise DashdError(f"{method} {path} -> HTTP {exc.code}{detail}") \
+                from exc
         except (urllib.error.URLError, OSError) as exc:
             raise DashdError(f"cannot reach {url} ({exc})") from exc
+        if not body.strip():
+            return {}
         try:
             return json.loads(body.decode("utf-8", errors="replace"))
         except json.JSONDecodeError as exc:
-            raise DashdError(f"GET {path} -> non-JSON reply") from exc
+            raise DashdError(f"{method} {path} -> non-JSON reply") from exc
+
+    def get_json(self, path: str):
+        """GET one API path and return the parsed JSON body."""
+        return self._request("GET", path)
+
+    def unlock(self, password: str) -> str:
+        """Mint a bearer JWT via POST /unlock (doc: body {"pw": ...}).
+
+        Stores the token on this client so later calls carry it.
+        """
+        data = self._request("POST", "/unlock", {"pw": password},
+                             headers={})
+        token = data.get("token") if isinstance(data, dict) else None
+        if not token:
+            raise DashdError("POST /unlock -> reply without a token")
+        self.token = str(token)
+        return self.token
+
+    def post_json(self, path: str, payload=None, password: str | None = None):
+        """POST one API path (write endpoints need auth — see module doc).
+
+        With neither a token nor an API key configured, a supplied
+        *password* is first exchanged for a JWT via /unlock, exactly as
+        the firmware's own UI does.
+        """
+        if not self.token and not self.api_key and password:
+            try:
+                self.unlock(password)
+            except DashdError:
+                pass  # the POST below will surface the real error (401)
+        return self._request("POST", path, payload)
 
     # -- endpoints -----------------------------------------------------------
     def summary(self) -> dict:

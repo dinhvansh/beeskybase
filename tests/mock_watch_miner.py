@@ -13,12 +13,19 @@ JSON *control file* that the test driver rewrites between watch passes:
 A missing/unreadable control file falls back to a healthy S19 Pro.
 Offline phases are simulated by the driver killing this process.
 
+Remote actions (v0.6): the privileged ``restart`` RPC is answered like
+a real unit — accepted (STATUS S) and recorded in a state file next to
+the control file (``<control>.state.json``, ``{"restarts": n}``), or,
+when the control file sets ``"api_writable": false``, refused with the
+STATUS E "Access denied" a read-only-provisioned API returns.
+
 Usage: python3 tests/mock_watch_miner.py --port 14028 --control ctrl.json
 """
 
 import argparse
 import json
 import socketserver
+import time
 from pathlib import Path
 
 CONTROL: Path | None = None
@@ -33,6 +40,32 @@ def _control() -> dict:
         return {**DEFAULTS, **data}
     except (OSError, json.JSONDecodeError, TypeError):
         return dict(DEFAULTS)
+
+
+def _state_path() -> Path:
+    return CONTROL.with_name(CONTROL.name + ".state.json")
+
+
+def _record_restart() -> None:
+    path = _state_path()
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        state = {}
+    state["restarts"] = int(state.get("restarts") or 0) + 1
+    state["last_restart_at"] = time.time()
+    path.write_text(json.dumps(state), encoding="utf-8")
+
+
+def restart_reply(ctrl: dict) -> dict:
+    if ctrl.get("api_writable", True) is False:
+        return {"STATUS": [{"STATUS": "E", "When": 1700000000, "Code": 45,
+                            "Msg": "Access denied to 'restart' command",
+                            "Description": "mockwatchminer 1.0"}], "id": 1}
+    _record_restart()
+    return {"STATUS": [{"STATUS": "S", "When": 1700000000, "Code": 142,
+                        "Msg": "Restarting", "Description": "mockwatchminer 1.0"}],
+            "id": 1}
 
 
 def _acs(total: int, dead=()) -> str:
@@ -116,6 +149,8 @@ class Handler(socketserver.BaseRequestHandler):
             payload = stats_reply(ctrl)
         elif command == "pools":
             payload = pools_reply()
+        elif command == "restart":
+            payload = restart_reply(ctrl)
         else:
             payload = {"STATUS": [{"STATUS": "E", "Code": 14,
                                    "Msg": f"Invalid command: {command}"}],

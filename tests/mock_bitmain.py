@@ -15,18 +15,34 @@ digest code is exercised end to end:
 The miner is healthy: 3 chains x 114 chips all responding, temps <= 70 C,
 ~95 TH/s — the scanner must report it OK.
 
+Remote actions (v0.6): ``GET /cgi-bin/reboot.cgi`` (digest-auth, like
+everything else here) answers 200 with an HTML page and records the
+hit to the JSON state file named by BEESKY_MOCK_BITMAIN_STATE.
+
 Run directly to serve forever:  python3 tests/mock_bitmain.py [host] [port]
 """
 
 import hashlib
 import json
+import os
 import re
 import secrets
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 HOST = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.3"
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 80
+STATE_PATH = os.environ.get("BEESKY_MOCK_BITMAIN_STATE")
+_REBOOTS: list[float] = []
+
+
+def _record_reboot() -> None:
+    _REBOOTS.append(time.time())
+    if STATE_PATH:
+        Path(STATE_PATH).write_text(
+            json.dumps({"reboots": _REBOOTS}), encoding="utf-8")
 
 USERNAME = "root"
 PASSWORD = "root"
@@ -152,6 +168,15 @@ class Handler(BaseHTTPRequestHandler):
         if not auth.startswith("Digest ") or not _check_digest(
                 auth[len("Digest "):], "GET", self.path):
             self._challenge()
+            return
+        if self.path == "/cgi-bin/reboot.cgi":
+            _record_reboot()
+            body = b"<html><body>Rebooting...</body></html>"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
             return
         payload_fn = _ROUTES.get(self.path)
         if payload_fn is None:

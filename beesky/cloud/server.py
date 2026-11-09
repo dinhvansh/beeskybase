@@ -14,6 +14,16 @@ key's SHA-256 is stored — see :mod:`beesky.cloud.store`):
   POST /api/ingest         {"site", "ts", "interval", "miners": [...]}
   POST /api/ingest/events  {"site", "ts", "events": [...]}
 
+Remote actions (v0.6) ride the same two channels — the cloud never
+reaches into a farm LAN, so commands travel down the agent's own
+poll (see :mod:`beesky.core.actions` and docs/actions.md):
+
+  GET  /api/agent/commands              claim this agent's pending
+                                        commands (marks them ``sent``)
+  POST /api/agent/commands/{id}/result  {"status": "done"|"failed",
+                                        "result": "..."} — own
+                                        commands only
+
 Viewer (browser), behind a single admin password taken from the
 ``BEESKY_CLOUD_PASSWORD`` environment variable:
 
@@ -22,6 +32,9 @@ Viewer (browser), behind a single admin password taken from the
   GET  /api/miners    latest records, ``?site=`` filters, each record
                       annotated with its ``site``
   GET  /api/events    newest-first stored events (``?n=``, ``?site=``)
+  POST /api/commands  {"site", "ip", "type", "payload"} -> queue a
+                      remote action for that site's agent
+  GET  /api/commands  command history, newest first (``?n=``, ``?site=``)
   GET|POST /login     password form -> session cookie (in-memory)
   GET  /logout
 
@@ -35,6 +48,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import re
 import secrets
 import sys
 import time
@@ -43,6 +57,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from ..core.actions import COMMAND_TYPES
 from .store import CloudStore
 
 MAX_BODY_BYTES = 16 * 1024 * 1024
@@ -145,7 +160,7 @@ def make_handler(store: CloudStore, dashboard_html: bytes,
     sessions = SessionStore()
 
     class Handler(BaseHTTPRequestHandler):
-        server_version = "BeeSkyCloud/0.5"
+        server_version = "BeeSkyCloud/0.6"
         protocol_version = "HTTP/1.1"
 
         def log_message(self, *_args):  # noqa: D102 — silence access log
@@ -241,6 +256,9 @@ def make_handler(store: CloudStore, dashboard_html: bytes,
                     "Set-Cookie": f"{SESSION_COOKIE}=; HttpOnly; Path=/; "
                                   "Max-Age=0"})
                 return
+            if path == "/api/agent/commands":
+                self._handle_agent_claim(parse_qs(parsed.query))
+                return
             if not self._viewer_gate(path):
                 return
             query = parse_qs(parsed.query)
@@ -268,6 +286,17 @@ def make_handler(store: CloudStore, dashboard_html: bytes,
                 self._send_json(200, {
                     "generated_at": _stamp(now), "generated_ts": now,
                     "events": store.list_events(n, site)})
+            elif path == "/api/commands":
+                raw_n = (query.get("n") or ["50"])[0]
+                try:
+                    n = int(raw_n)
+                except ValueError:
+                    n = 50
+                site = (query.get("site") or [None])[0]
+                now = time.time()
+                self._send_json(200, {
+                    "generated_at": _stamp(now), "generated_ts": now,
+                    "commands": store.list_commands(site, n)})
             else:
                 self._send_json(404, {"error": "not found", "path": path})
 
@@ -276,15 +305,99 @@ def make_handler(store: CloudStore, dashboard_html: bytes,
         def do_POST(self):  # noqa: N802 — stdlib handler API
             parsed = urlparse(self.path)
             path = parsed.path
+            result_match = re.fullmatch(r"/api/agent/commands/(\d+)/result",
+                                        path)
             if path == "/login":
                 self._handle_login()
             elif path in ("/api/ingest", "/api/ingest/events"):
                 self._handle_ingest(events_only=(path == "/api/ingest/events"))
+            elif result_match:
+                self._handle_command_result(int(result_match.group(1)))
+            elif path == "/api/commands":
+                if self._viewer_gate(path):
+                    self._handle_create_command()
             else:
                 length = int(self.headers.get("Content-Length") or 0)
                 if length:
                     self.rfile.read(length)  # drain unknown bodies
                 self._send_json(404, {"error": "not found", "path": path})
+
+        # -- commands (v0.6 remote actions) ------------------------------
+
+        def _handle_create_command(self) -> None:
+            body = self._read_json_body()
+            if body is None:
+                self._send_json(400, {"error": "invalid JSON body"})
+                return
+            site = body.get("site")
+            ip = body.get("ip")
+            command_type = body.get("type")
+            payload = body.get("payload") or {}
+            if not isinstance(site, str) or not site \
+                    or not isinstance(ip, str) or not ip:
+                self._send_json(400, {"error": "site and ip are required"})
+                return
+            if command_type not in COMMAND_TYPES:
+                self._send_json(400, {
+                    "error": f"unknown command type {command_type!r}",
+                    "types": list(COMMAND_TYPES)})
+                return
+            if not isinstance(payload, dict):
+                self._send_json(400, {"error": "payload must be an object"})
+                return
+            agent = store.agent_by_site(site)
+            if agent is None:
+                self._send_json(404, {"error": f"no agent for site {site!r}"})
+                return
+            command = store.create_command(agent["id"], site, ip,
+                                           command_type, payload)
+            self._send_json(201, {"ok": True, "command": command})
+
+        def _handle_agent_claim(self, query: dict) -> None:
+            agent = self._agent()
+            if agent is None:
+                self._send_json(401, {"error": "invalid agent key"})
+                return
+            raw_limit = (query.get("limit") or ["20"])[0]
+            try:
+                limit = int(raw_limit)
+            except ValueError:
+                limit = 20
+            commands = store.claim_pending(agent["id"], limit)
+            store.touch_agent(agent["id"], time.time())
+            self._send_json(200, {"ok": True, "commands": commands})
+
+        def _handle_command_result(self, command_id: int) -> None:
+            agent = self._agent()
+            if agent is None:
+                self._send_json(401, {"error": "invalid agent key"})
+                return
+            existing = store.get_command(command_id)
+            if existing is None:
+                self._send_json(404, {"error": "no such command"})
+                return
+            if existing["agent_id"] != agent["id"]:
+                self._send_json(403, {
+                    "error": "command belongs to another agent"})
+                return
+            body = self._read_json_body()
+            if body is None:
+                self._send_json(400, {"error": "invalid JSON body"})
+                return
+            status = body.get("status")
+            if status not in ("done", "failed"):
+                self._send_json(400, {
+                    "error": "status must be 'done' or 'failed'"})
+                return
+            result = body.get("result")
+            updated = store.finish_command(
+                command_id, agent["id"], status,
+                "" if result is None else str(result))
+            if updated is None:
+                self._send_json(409, {
+                    "error": "command already finished"})
+                return
+            self._send_json(200, {"ok": True, "command": updated})
 
         def _handle_login(self) -> None:
             if not password:

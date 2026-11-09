@@ -146,9 +146,9 @@ PASS: miner back: BACK_ONLINE printed + webhook received
 PASS: logfile channel recorded all three events
 
 Captured webhook payloads:
-{"ts": 1794220468.3522942, "time": "2026-11-09 10:34:28", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
-{"ts": 1794220468.9117506, "time": "2026-11-09 10:34:28", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "OFFLINE", "severity": "critical", "detail": "miner went offline / unreachable", "data": {"last_seen": 1794220468.6523325}}
-{"ts": 1794220469.5609396, "time": "2026-11-09 10:34:29", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "BACK_ONLINE", "severity": "info", "detail": "miner is back online", "data": {}}
+{"ts": 1794228167.9737449, "time": "2026-11-09 12:42:47", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
+{"ts": 1794228168.4293294, "time": "2026-11-09 12:42:48", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "OFFLINE", "severity": "critical", "detail": "miner went offline / unreachable", "data": {"last_seen": 1794228168.2307932}}
+{"ts": 1794228168.9808505, "time": "2026-11-09 12:42:48", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "BACK_ONLINE", "severity": "info", "detail": "miner is back online", "data": {}}
 
 WATCH TEST PASSED
 ```
@@ -178,7 +178,7 @@ PASS: hashrate drop phase: /api/events gains HASHRATE_DROP
 PASS: drop event: severity major, drop_pct ~= 40
 
 Captured drop event:
-{"ts": 1794220474.673141, "time": "2026-11-09 10:34:34", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
+{"ts": 1794228174.054749, "time": "2026-11-09 12:42:54", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
 
 WEB TEST PASSED
 ```
@@ -219,8 +219,71 @@ PASS: hashrate drop: HASHRATE_DROP arrives at the cloud
 PASS: drop event: severity major, drop_pct ~= 40, site tag
 
 Captured cloud event:
-{"ts": 1794220482.144803, "time": "2026-11-09 10:34:42", "site": "Xưởng 1", "agent_id": 1, "ip": "127.0.0.1", "model": "Antminer S19 Pro", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
+{"ts": 1794228181.3739717, "time": "2026-11-09 12:43:01", "site": "Xưởng 1", "agent_id": 1, "ip": "127.0.0.1", "model": "Antminer S19 Pro", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
 PASS: /api/miners?site= shows ~66 TH/s, record annotated with site
 
 CLOUD TEST PASSED
+```
+
+---
+
+# v0.6 mock test — remote actions via cloud (command queue)
+
+`tests/mock_actions_test.py` builds the full command path on
+127.0.0.1: one `beesky cloud` (:18791, password set) with
+three minted agents — site "Xưởng 1" runs the control-file
+cgminer miner (:14032), site "Xưởng 2" the api-doc dashd mock
+(:18082, x-api-key auth), site "Xưởng 3" the digest-auth stock
+mock (:18083). Assertions: agent poll no/wrong key -> 401;
+viewer POST /api/commands without login -> 401; agent A can
+neither claim nor finish agent B's command (403, stays
+pending); cgminer reboot finishes done with the restart RPC
+recorded by the mock, and fails honestly with the miner's own
+"Access denied" when its API is read-only; switch_pool to a
+cgminer miner fails "not supported"; dashd reboot lands on
+POST /system/reboot, switch_pool {pool_id} activates slot 1,
+switch_pool {url,user} rewrites slot 0 via GET/POST /settings
+and activates it; stock reboot hits /cgi-bin/reboot.cgi; the
+dashboard carries the action UI; /api/commands shows history.
+
+## Assertions + captured commands
+
+```
+PASS: cloud-add-agent mints keys for all three sites
+PASS: cloud starts and serves /login
+PASS: agent command poll with no key -> 401
+PASS: agent command poll with wrong key -> 401
+PASS: viewer POST /api/commands without login -> 401
+PASS: viewer login with the right password
+PASS: viewer creates a reboot command for site 2 -> 201
+PASS: new command starts out pending
+PASS: agent A cannot claim agent B's command
+PASS: agent A finishing agent B's command -> 403
+PASS: B's command is still pending after A's attempts
+PASS: dashboard HTML has the reboot button + commands panel
+PASS: site 2 command finishes
+PASS: dashd reboot: status done, result from /system/reboot
+
+Captured dashd reboot command:
+{"id": 1, "agent_id": 2, "site": "Xưởng 2", "ip": "127.0.0.1", "type": "reboot", "payload": {}, "status": "done", "result": "dashd accepted reboot (system reboots in 3s)", "created_at": "2026-11-09 12:43:02", "created_ts": 1794228182.9425256, "claimed_at": "2026-11-09 12:43:03", "finished_at": "2026-11-09 12:43:03"}
+PASS: dashd mock recorded exactly one POST /system/reboot
+PASS: dashd switch_pool {pool_id: 1} finishes done
+PASS: dashd mock activated pool slot 1
+PASS: dashd switch_pool {url,user} finishes done via /settings
+PASS: dashd mock pool slot 0 now carries the new url/user
+PASS: site 1 agent reports its cgminer miner
+PASS: cgminer reboot finishes done
+
+Captured cgminer reboot command:
+{"id": 4, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "type": "reboot", "payload": {}, "status": "done", "result": "cgminer accepted the privileged 'restart' command", "created_at": "2026-11-09 12:43:05", "created_ts": 1794228185.778913, "claimed_at": "2026-11-09 12:43:06", "finished_at": "2026-11-09 12:43:06"}
+PASS: cgminer mock recorded the restart RPC
+PASS: cgminer reboot on a read-only API -> failed
+PASS: failure result carries the miner's 'Access denied'
+PASS: switch_pool to a cgminer miner -> failed 'not supported'
+PASS: site 3 agent reports its stock miner
+PASS: stock reboot finishes done
+PASS: stock mock recorded the reboot.cgi hit
+PASS: GET /api/commands?site= returns site 1 history newest-first
+
+ACTIONS TEST PASSED
 ```

@@ -26,6 +26,7 @@ with legacy no-qop fallback) — the stdlib has no digest client helper.
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import re
 import secrets
@@ -208,6 +209,42 @@ class BitmainClient:
             return json.loads(body.decode("utf-8", errors="replace"))
         except json.JSONDecodeError as exc:
             raise BitmainError(f"GET {path} -> non-JSON reply") from exc
+
+    def get_status_code(self, path: str) -> int:
+        """GET one path with digest auth; return just the HTTP status.
+
+        For action CGIs such as /cgi-bin/reboot.cgi whose reply body is
+        HTML (or dropped mid-flight as the control board goes down) —
+        the status line is the whole answer.
+        """
+        url = f"http://{self.host}:{self.port}{path}"
+        status, headers = self._raw_status(url, path, signed=False)
+        if status == 401:
+            challenge = headers.get("WWW-Authenticate", "")
+            if "digest" not in challenge.lower():
+                return status
+            self.auth.learn(challenge)
+            status, _headers = self._raw_status(url, path, signed=True)
+        return status
+
+    def _raw_status(self, url: str, uri: str, signed: bool):
+        headers = {"User-Agent": "BeeSky"}
+        if signed:
+            auth_header = self.auth.header("GET", uri)
+            if auth_header:
+                headers["Authorization"] = auth_header
+        request = urllib.request.Request(url, headers=headers, method="GET")
+        try:
+            with _OPENER.open(request, timeout=self.timeout) as resp:
+                try:
+                    resp.read()
+                except (OSError, http.client.HTTPException):
+                    pass  # body is irrelevant; the board may already be down
+                return resp.status, resp.headers
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.headers
+        except (urllib.error.URLError, OSError) as exc:
+            raise BitmainError(f"cannot reach {url} ({exc})") from exc
 
     def _raw_get(self, url: str, uri: str, signed: bool):
         headers = {"Accept": "application/json", "User-Agent": "BeeSky"}

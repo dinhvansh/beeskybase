@@ -78,6 +78,8 @@ Agent side — `Authorization: Bearer <agent-key>` (or `X-Agent-Key`):
 |-------|---------------|
 | `POST /api/ingest` | `{"site", "ts", "interval", "miners": [records]}` → stores the snapshot, marks the agent seen |
 | `POST /api/ingest/events` | `{"site", "ts", "events": [engine events]}` → stores the events |
+| `GET /api/agent/commands?limit=` | claims this agent's pending remote actions (v0.6, see docs/actions.md) |
+| `POST /api/agent/commands/{id}/result` | `{"status": "done"\|"failed", "result": "..."}` → finishes an own command (403 for another agent's) |
 
 Viewer side — session cookie after `POST /login`:
 
@@ -87,6 +89,8 @@ Viewer side — session cookie after `POST /login`:
 | `GET /api/sites` | `[{site, agent_id, last_seen_at, online, miner_count, ok_count, problem_count, total_ths, max_temp}]` |
 | `GET /api/miners?site=` | Latest records (all sites merged when `site` is omitted), each annotated with `"site"` |
 | `GET /api/events?n=&site=` | Stored events, newest first |
+| `POST /api/commands` | `{"site", "ip", "type", "payload"}` → queue a remote action (reboot, switch_pool) for that site's agent — v0.6, see docs/actions.md |
+| `GET /api/commands?n=&site=` | Remote-action history, newest first |
 
 ## Security notes
 

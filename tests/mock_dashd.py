@@ -11,15 +11,63 @@ Payloads are shaped after the firmware's own OpenAPI document
   * board 2: chip temperature max 87 C — above the 85 C flag threshold
   * board 3: healthy
 
+Remote actions (v0.6) follow the same api-doc: the write endpoints
+``POST /api/v1/system/reboot`` and ``POST /api/v1/mining/switch-pool``,
+plus ``GET|POST /api/v1/settings`` and ``POST /api/v1/unlock``, are
+implemented with the doc's auth shape — an ``x-api-key`` header equal
+to ``mock-api-key`` or a bearer JWT ``mock-jwt`` (minted by /unlock
+for password ``mock-pw``); ``GET /settings`` accepts the API key
+only, like the doc says. Every action hit is recorded to the JSON
+state file named by the BEESKY_MOCK_DASHD_STATE env var (when set).
+
 Run directly to serve forever:  python3 tests/mock_dashd.py [host] [port]
 """
 
 import json
+import os
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 HOST = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.2"
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 80
+
+API_KEY = "mock-api-key"
+UNLOCK_PASSWORD = "mock-pw"
+JWT = "mock-jwt"
+STATE_PATH = os.environ.get("BEESKY_MOCK_DASHD_STATE")
+
+_POOLS = [
+    {"url": "stratum+tcp://pool.example.com:3333", "user": "mockworker.001",
+     "pass": "x", "use_tls": False},
+    {"url": "stratum+tcp://backup.example.com:3333", "user": "mockworker.002",
+     "pass": "x", "use_tls": False},
+]
+_ACTION_STATE = {"reboots": [], "switch_pools": [], "settings_posts": [],
+                 "unlocks": 0, "active_pool": 0}
+
+
+def _record_state() -> None:
+    if not STATE_PATH:
+        return
+    snapshot = {**_ACTION_STATE, "pools": _POOLS}
+    Path(STATE_PATH).write_text(json.dumps(snapshot), encoding="utf-8")
+
+
+def settings_payload() -> dict:
+    return {
+        "miner": {
+            "pools": _POOLS,
+            "cooling": {"mode": "auto"},
+            "misc": None,
+            "overclock": None,
+        },
+        "network": {"dhcp": True},
+        "password": {},
+        "regional": {"lang": "en"},
+        "ui": {"theme": "dark"},
+    }
 
 CHIPS_PER_BOARD = 114
 DEAD_BOARD1 = (10, 55)  # 1-based chip positions, grade "red"
@@ -199,18 +247,82 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):  # keep test output clean
         pass
 
-    def do_GET(self):
-        payload_fn = _ROUTES.get(self.path)
-        if payload_fn is None:
-            body = json.dumps({"error": "not found"}).encode()
-            self.send_response(404)
-        else:
-            body = json.dumps(payload_fn()).encode()
-            self.send_response(200)
+    def _send_json(self, code: int, payload) -> None:
+        body = json.dumps(payload).encode()
+        self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _authed(self, api_key_only: bool = False) -> bool:
+        if self.headers.get("x-api-key") == API_KEY:
+            return True
+        if api_key_only:
+            return False
+        return self.headers.get("Authorization") == f"Bearer {JWT}"
+
+    def _read_body(self) -> dict:
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        raw = self.rfile.read(length) if length > 0 else b""
+        try:
+            data = json.loads(raw.decode("utf-8")) if raw else {}
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def do_GET(self):
+        if self.path == "/api/v1/settings":
+            # Per the api-doc, GET /settings is apikeyAuth-only.
+            if not self._authed(api_key_only=True):
+                self._send_json(401, {"err": "unauthorized"})
+            else:
+                self._send_json(200, settings_payload())
+            return
+        payload_fn = _ROUTES.get(self.path)
+        if payload_fn is None:
+            self._send_json(404, {"error": "not found"})
+        else:
+            self._send_json(200, payload_fn())
+
+    def do_POST(self):
+        body = self._read_body()
+        if self.path == "/api/v1/unlock":
+            if body.get("pw") == UNLOCK_PASSWORD:
+                _ACTION_STATE["unlocks"] += 1
+                _record_state()
+                self._send_json(200, {"token": JWT})
+            else:
+                self._send_json(403, {"err": "invalid password"})
+            return
+        if self.path in ("/api/v1/system/reboot",
+                         "/api/v1/mining/switch-pool",
+                         "/api/v1/settings"):
+            if not self._authed():
+                self._send_json(401, {"err": "unauthorized"})
+                return
+            if self.path == "/api/v1/system/reboot":
+                _ACTION_STATE["reboots"].append(time.time())
+                _record_state()
+                self._send_json(200, {"after": 3})
+            elif self.path == "/api/v1/mining/switch-pool":
+                _ACTION_STATE["switch_pools"].append(body)
+                if isinstance(body.get("pool_id"), int):
+                    _ACTION_STATE["active_pool"] = body["pool_id"]
+                _record_state()
+                self._send_json(200, {})
+            else:  # /api/v1/settings — full-config save
+                _ACTION_STATE["settings_posts"].append(body)
+                pools = (body.get("miner") or {}).get("pools")
+                if isinstance(pools, list):
+                    _POOLS[:] = [p for p in pools if isinstance(p, dict)]
+                _record_state()
+                self._send_json(200, {})
+            return
+        self._send_json(404, {"error": "not found"})
 
 
 def main():

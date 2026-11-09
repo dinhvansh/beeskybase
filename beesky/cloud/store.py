@@ -12,6 +12,10 @@ Tables:
              a short history (100 per agent) is kept for debugging.
   events     fleet events pushed by agents, newest first; pruned to
              the most recent 5000 rows.
+  commands   remote actions (v0.6) issued by the viewer for the agent
+             of one site to execute on its LAN: pending -> sent
+             (claimed by the agent) -> done | failed, with the
+             executor's result text.
 
 All access is serialised through one lock, so the store is safe to
 share between the threads of a ``ThreadingHTTPServer``.
@@ -27,6 +31,7 @@ import time
 
 SNAPSHOT_HISTORY = 100
 EVENT_HISTORY = 5000
+COMMAND_HISTORY = 5000
 
 
 def hash_key(key: str) -> str:
@@ -80,6 +85,21 @@ class CloudStore:
                     data_json TEXT NOT NULL DEFAULT '{}'
                 );
                 CREATE INDEX IF NOT EXISTS idx_events_id ON events(id);
+                CREATE TABLE IF NOT EXISTS commands (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    agent_id    INTEGER NOT NULL REFERENCES agents(id),
+                    site        TEXT NOT NULL,
+                    ip          TEXT NOT NULL,
+                    type        TEXT NOT NULL,
+                    payload_json TEXT NOT NULL DEFAULT '{}',
+                    status      TEXT NOT NULL DEFAULT 'pending',
+                    result_text TEXT,
+                    created_at  REAL NOT NULL,
+                    claimed_at  REAL,
+                    finished_at REAL
+                );
+                CREATE INDEX IF NOT EXISTS idx_commands_agent
+                    ON commands(agent_id, status, id);
                 """
             )
 
@@ -113,6 +133,21 @@ class CloudStore:
             rows = self._db.execute(
                 "SELECT * FROM agents ORDER BY id").fetchall()
         return [dict(r) for r in rows]
+
+    def agent_by_site(self, site: str) -> dict | None:
+        """The (first) agent registered for *site*, or None."""
+        with self._lock:
+            row = self._db.execute(
+                "SELECT * FROM agents WHERE site = ? ORDER BY id LIMIT 1",
+                (site,)).fetchone()
+        return dict(row) if row else None
+
+    def get_agent(self, agent_id: int) -> dict | None:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT * FROM agents WHERE id = ?",
+                (agent_id,)).fetchone()
+        return dict(row) if row else None
 
     def touch_agent(self, agent_id: int, ts: float,
                     interval_s: float | None = None) -> None:
@@ -218,6 +253,123 @@ class CloudStore:
                 "data": data,
             })
         return events
+
+    # ------------------------------------------------------------------
+    # commands — remote actions (v0.6)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _command_view(row: sqlite3.Row) -> dict:
+        try:
+            payload = json.loads(row["payload_json"] or "{}")
+        except json.JSONDecodeError:
+            payload = {}
+        return {
+            "id": row["id"],
+            "agent_id": row["agent_id"],
+            "site": row["site"],
+            "ip": row["ip"],
+            "type": row["type"],
+            "payload": payload if isinstance(payload, dict) else {},
+            "status": row["status"],
+            "result": row["result_text"],
+            "created_at": _stamp(row["created_at"]),
+            "created_ts": row["created_at"],
+            "claimed_at": _stamp(row["claimed_at"]),
+            "finished_at": _stamp(row["finished_at"]),
+        }
+
+    def create_command(self, agent_id: int, site: str, ip: str,
+                       command_type: str, payload: dict | None) -> dict:
+        """Queue a command for one agent; returns its public view."""
+        with self._lock, self._db:
+            cur = self._db.execute(
+                "INSERT INTO commands (agent_id, site, ip, type, "
+                "payload_json, status, created_at) "
+                "VALUES (?, ?, ?, ?, ?, 'pending', ?)",
+                (agent_id, site, ip, command_type,
+                 json.dumps(payload or {}, ensure_ascii=False),
+                 time.time()))
+            cmd_id = int(cur.lastrowid)
+            self._db.execute(
+                "DELETE FROM commands WHERE id NOT IN "
+                "(SELECT id FROM commands ORDER BY id DESC LIMIT ?)",
+                (COMMAND_HISTORY,))
+            row = self._db.execute(
+                "SELECT * FROM commands WHERE id = ?", (cmd_id,)).fetchone()
+        return self._command_view(row)
+
+    def claim_pending(self, agent_id: int, limit: int = 20) -> list[dict]:
+        """Atomically claim this agent's pending commands (oldest first).
+
+        Claimed rows flip to status ``sent`` with a claimed_at stamp in
+        the same transaction, so two concurrent polls never hand the
+        same command out twice.
+        """
+        limit = max(1, min(int(limit), 100))
+        with self._lock, self._db:
+            rows = self._db.execute(
+                "SELECT * FROM commands WHERE agent_id = ? "
+                "AND status = 'pending' ORDER BY id LIMIT ?",
+                (agent_id, limit)).fetchall()
+            now = time.time()
+            views = []
+            for row in rows:
+                self._db.execute(
+                    "UPDATE commands SET status = 'sent', claimed_at = ? "
+                    "WHERE id = ?", (now, row["id"]))
+                fresh = self._db.execute(
+                    "SELECT * FROM commands WHERE id = ?",
+                    (row["id"],)).fetchone()
+                views.append(self._command_view(fresh))
+        return views
+
+    def finish_command(self, command_id: int, agent_id: int, status: str,
+                       result_text: str) -> dict | None:
+        """Mark a claimed command done|failed — owner agent only.
+
+        Returns the updated view, or None when the command does not
+        exist, belongs to another agent, or is already finished.
+        """
+        if status not in ("done", "failed"):
+            raise ValueError(f"bad finish status {status!r}")
+        with self._lock, self._db:
+            row = self._db.execute(
+                "SELECT * FROM commands WHERE id = ?",
+                (command_id,)).fetchone()
+            if row is None or row["agent_id"] != agent_id \
+                    or row["status"] in ("done", "failed"):
+                return None
+            self._db.execute(
+                "UPDATE commands SET status = ?, result_text = ?, "
+                "finished_at = ? WHERE id = ?",
+                (status, result_text, time.time(), command_id))
+            fresh = self._db.execute(
+                "SELECT * FROM commands WHERE id = ?",
+                (command_id,)).fetchone()
+        return self._command_view(fresh)
+
+    def get_command(self, command_id: int) -> dict | None:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT * FROM commands WHERE id = ?",
+                (command_id,)).fetchone()
+        return self._command_view(row) if row else None
+
+    def list_commands(self, site: str | None = None,
+                      limit: int = 50) -> list[dict]:
+        """Newest-first command history, optionally filtered by site."""
+        limit = max(1, min(int(limit), COMMAND_HISTORY))
+        query = "SELECT * FROM commands"
+        params: list = []
+        if site:
+            query += " WHERE site = ?"
+            params.append(site)
+        query += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
+        with self._lock:
+            rows = self._db.execute(query, params).fetchall()
+        return [self._command_view(r) for r in rows]
 
     # ------------------------------------------------------------------
     # viewer summaries

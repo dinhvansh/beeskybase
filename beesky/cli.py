@@ -238,9 +238,16 @@ def cmd_agent(args: argparse.Namespace) -> int:
     config = _load_notify_config(args.notify)
     if config is None:
         return 2
+    # Command executors (v0.6) talk to the miners with the very same
+    # credentials/ports the scan adapters above already use.
+    creds = {"user": args.user, "password": args.password,
+             "api_key": args.api_key, "token": args.token,
+             "http_port": args.http_port, "cgminer_port": args.cgminer_port,
+             "timeout": max(args.timeout, 2.0)}
     service = AgentService(lambda: _scan_records(args), cloud_url=args.cloud,
                            key=args.key, site=args.site,
-                           interval=args.interval, notify_config=config)
+                           interval=args.interval, notify_config=config,
+                           creds=creds)
     service.run(once=args.once)
     return 0
 
