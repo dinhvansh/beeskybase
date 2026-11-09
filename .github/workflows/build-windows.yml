@@ -17,6 +17,14 @@
 # mock suite is re-run here under Git Bash as a smoke check only
 # (non-blocking: loopback/bash quirks on the Windows runner must not
 # block packaging — compileall + --help below are the hard gates).
+#
+# Code signing (optional, tag builds only): if the repo carries the
+# ESIGNER_* secrets (SSL.com eSigner cloud signing), a tag build signs
+# dist\beesky.exe BEFORE Inno Setup embeds it, then signs the
+# installer — 2 signings per release, nothing more (eSigner tiers
+# meter the number of signings, so manual/workflow_dispatch builds
+# never sign). Without the secrets every step below behaves exactly
+# as an unsigned build. Owner setup checklist: docs/signing.md.
 
 name: Build Windows installer
 
@@ -33,6 +41,24 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Signing is opt-in via repo secrets (set up once by the owner —
+      # docs/signing.md). Secrets cannot be read in `if:` conditions,
+      # so this probe maps the one fact later steps need into an
+      # output. It never fails the build.
+      - name: Check code signing configuration
+        id: signcheck
+        shell: bash
+        env:
+          ESIGNER_USERNAME: ${{ secrets.ESIGNER_USERNAME }}
+        run: |
+          if [ -n "$ESIGNER_USERNAME" ]; then
+            echo "has_signing=true" >> "$GITHUB_OUTPUT"
+            echo "eSigner secrets found - tag builds will be code-signed."
+          else
+            echo "has_signing=false" >> "$GITHUB_OUTPUT"
+            echo "No eSigner secrets - builds stay unsigned (docs/signing.md)."
+          fi
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -66,6 +92,35 @@ jobs:
       - name: Smoke check (frozen exe)
         run: .\dist\beesky.exe --help
 
+      # Sign the exe BEFORE Inno Setup runs: the installer embeds
+      # dist\beesky.exe, so it must already carry its signature.
+      # Tag builds only (see header note on signing quota).
+      - name: Sign beesky.exe (SSL.com eSigner)
+        if: steps.signcheck.outputs.has_signing == 'true' && startsWith(github.ref, 'refs/tags/')
+        uses: SSLcom/esigner-codesign@v1.3.2
+        with:
+          command: sign
+          username: ${{ secrets.ESIGNER_USERNAME }}
+          password: ${{ secrets.ESIGNER_PASSWORD }}
+          totp_secret: ${{ secrets.ESIGNER_TOTP_SECRET }}
+          credential_id: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          input_file_path: ${{ github.workspace }}\dist\beesky.exe
+          output_file_path: ${{ github.workspace }}\signed
+          override: true
+
+      - name: Use signed beesky.exe
+        if: steps.signcheck.outputs.has_signing == 'true' && startsWith(github.ref, 'refs/tags/')
+        shell: powershell
+        run: |
+          # With override, CodeSignTool normally replaces the input
+          # file in place; if the signed copy landed in the output
+          # dir instead, swap it in — either way Inno Setup below
+          # embeds the signed dist\beesky.exe.
+          if (Test-Path signed\beesky.exe) {
+            Copy-Item signed\beesky.exe dist\beesky.exe -Force
+          }
+          if (-not (Test-Path dist\beesky.exe)) { exit 1 }
+
       - name: Build installer (Inno Setup)
         shell: powershell
         run: |
@@ -76,6 +131,62 @@ jobs:
           if (-not $iscc) { $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" }
           & $iscc packaging\installer.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # The signer needs one concrete path, but the installer name
+      # carries the version (BeeSkySetup-<version>.exe) — resolve it.
+      - name: Locate installer for signing
+        id: installerpath
+        if: steps.signcheck.outputs.has_signing == 'true' && startsWith(github.ref, 'refs/tags/')
+        shell: powershell
+        run: |
+          $f = Get-ChildItem dist\BeeSkySetup-*.exe | Select-Object -First 1
+          if (-not $f) { Write-Error "No BeeSkySetup-*.exe found in dist"; exit 1 }
+          "path=$($f.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "name=$($f.Name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Sign installer (SSL.com eSigner)
+        if: steps.signcheck.outputs.has_signing == 'true' && startsWith(github.ref, 'refs/tags/')
+        uses: SSLcom/esigner-codesign@v1.3.2
+        with:
+          command: sign
+          username: ${{ secrets.ESIGNER_USERNAME }}
+          password: ${{ secrets.ESIGNER_PASSWORD }}
+          totp_secret: ${{ secrets.ESIGNER_TOTP_SECRET }}
+          credential_id: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          input_file_path: ${{ steps.installerpath.outputs.path }}
+          output_file_path: ${{ github.workspace }}\signed
+          override: true
+
+      - name: Use signed installer
+        if: steps.signcheck.outputs.has_signing == 'true' && startsWith(github.ref, 'refs/tags/')
+        shell: powershell
+        run: |
+          # Same convergence as the exe step: if the signed installer
+          # is in the output dir, swap it over the unsigned one so the
+          # artifact/Release steps below pick up the signed file.
+          $signedFile = Join-Path signed "${{ steps.installerpath.outputs.name }}"
+          if (Test-Path $signedFile) {
+            Copy-Item $signedFile "${{ steps.installerpath.outputs.path }}" -Force
+          }
+
+      # Report-only: a signature quirk must never kill a release.
+      - name: Verify signatures (non-blocking)
+        if: steps.signcheck.outputs.has_signing == 'true' && startsWith(github.ref, 'refs/tags/')
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $files = @((Resolve-Path dist\beesky.exe).Path)
+          $files += Get-ChildItem dist\BeeSkySetup-*.exe | ForEach-Object { $_.FullName }
+          foreach ($f in $files) {
+            $sig = Get-AuthenticodeSignature $f
+            Write-Host "$f -> $($sig.Status)"
+            if ($sig.SignerCertificate) {
+              Write-Host "    signer: $($sig.SignerCertificate.Subject)"
+            }
+            if ($sig.TimeStamperCertificate) {
+              Write-Host "    timestamp: $($sig.TimeStamperCertificate.Subject)"
+            }
+          }
 
       - name: Upload artifact (installer + bare exe)
         uses: actions/upload-artifact@v4
