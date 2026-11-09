@@ -1,0 +1,96 @@
+# BeeSky Windows build — produces the user-facing installer.
+#
+# BeeSky is developed/tested on Linux, but PyInstaller cannot
+# cross-compile, so the Windows exe is built here on a windows-latest
+# runner:
+#
+#   python source --PyInstaller--> dist\beesky.exe
+#                 --Inno Setup---> dist\BeeSkySetup-<version>.exe
+#
+# Runs:
+#   * manually (Actions tab -> "Build Windows installer" -> Run workflow)
+#     -> download the "BeeSky-Windows" artifact from the run page.
+#   * on every tag v* -> the same files are also attached to a GitHub
+#     Release, which is the stable download link for users.
+#
+# The Ubuntu CI workflow (ci.yml) remains the correctness gate; the
+# mock suite is re-run here under Git Bash as a smoke check only
+# (non-blocking: loopback/bash quirks on the Windows runner must not
+# block packaging — compileall + --help below are the hard gates).
+
+name: Build Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # attach files to the Release on tags
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Smoke checks (source)
+        run: |
+          python -m compileall beesky
+          python -m beesky --help
+
+      - name: Mock test suite (Git Bash, non-blocking)
+        continue-on-error: true
+        shell: bash
+        run: |
+          # The scripts call `python3`; give them a shim to the
+          # runner's `python` (Git Bash has no python3.exe).
+          mkdir -p .shim
+          printf '#!/bin/sh\nexec python "$@"\n' > .shim/python3
+          chmod +x .shim/python3
+          export PATH="$PWD/.shim:$PATH"
+          bash tests/run_mock_test.sh
+          bash tests/run_mock_test_v2.sh
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller
+
+      - name: Build beesky.exe (single file)
+        run: pyinstaller packaging/beesky.spec --noconfirm
+
+      - name: Smoke check (frozen exe)
+        run: .\dist\beesky.exe --help
+
+      - name: Build installer (Inno Setup)
+        shell: powershell
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            choco install innosetup -y --no-progress
+          }
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" }
+          & $iscc packaging\installer.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload artifact (installer + bare exe)
+        uses: actions/upload-artifact@v4
+        with:
+          name: BeeSky-Windows
+          path: |
+            dist/BeeSkySetup-*.exe
+            dist/beesky.exe
+          if-no-files-found: error
+
+      - name: Attach to GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/BeeSkySetup-*.exe
+            dist/beesky.exe
+          fail_on_unmatched_files: true

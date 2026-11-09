@@ -15,7 +15,33 @@ and what to check first.*
 Pure **Python 3 standard library** — no pip installs, runs anywhere Python 3
 does (Windows / macOS / Linux), fully offline, no analytics, no phone-home.
 
-## Usage
+## Install on Windows (for users)
+
+No Python, no admin rights, nothing to configure:
+
+1. **Download `BeeSkySetup-<version>.exe`** — either from the repo's
+   [Releases](../../releases) page, or from the latest
+   **Actions → "Build Windows installer"** run (the `BeeSky-Windows`
+   artifact contains the installer plus a bare `beesky.exe`).
+2. **Run the installer.** It installs per-user into
+   `%LocalAppData%\Programs\BeeSky`, adds `beesky` to your PATH, and
+   puts a **BeeSky** shortcut in the Start Menu. (Windows SmartScreen
+   may warn about an unsigned installer — the builds are produced by
+   GitHub Actions from this repo's source; choose "More info → Run
+   anyway".)
+3. **Open "BeeSky" from the Start Menu** — a console opens, ready to go:
+
+```bat
+beesky scan 192.168.1.0/24
+beesky scan 192.168.1.50 --tickets tickets\
+beesky watch 192.168.1.0/24 --notify notify.json
+```
+
+An example notification config (`notify.example.json`) and this README
+are copied into the install folder. Uninstall from Windows Settings →
+Apps, like any other program.
+
+## Usage (developers / from source)
 
 ```bash
 # Scan one miner
@@ -163,4 +189,13 @@ tests/
   run_mock_test.sh  # v0.1 end-to-end mock test -> tests/RESULTS.md
   run_mock_test_v2.sh  # v0.2 three-adapter mock test (appends to RESULTS.md)
   run_mock_test_v3.sh  # v0.3 full suite + watch test (appends to RESULTS.md)
+packaging/
+  entry.py          # PyInstaller entry shim (hands argv to beesky.cli)
+  beesky.spec       # PyInstaller single-file console exe build
+  installer.iss     # Inno Setup per-user installer (no admin, PATH +
+                    # Start Menu console shortcut, uninstaller)
+  beesky.ico        # brand icon (from the VNish patch-test assets)
+.github/workflows/
+  build-windows.yml # windows-latest runner: PyInstaller + Inno Setup ->
+                    # BeeSky-Windows artifact; Releases on v* tags
 ```
