@@ -54,10 +54,10 @@ Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 [Icons]
 ; A console that stays open (/k) with beesky on PATH.
 Name: "{autoprograms}\BeeSky"; Filename: "{cmd}"; Parameters: "/k"; \
-  WorkingDir: "{userprofile}"; IconFilename: "{app}\beesky.exe"; \
+  WorkingDir: "{userdocs}"; IconFilename: "{app}\beesky.exe"; \
   Comment: "BeeSky console - try: beesky scan 192.168.1.0/24"
 Name: "{autodesktop}\BeeSky"; Filename: "{cmd}"; Parameters: "/k"; \
-  WorkingDir: "{userprofile}"; IconFilename: "{app}\beesky.exe"; \
+  WorkingDir: "{userdocs}"; IconFilename: "{app}\beesky.exe"; \
   Comment: "BeeSky console - try: beesky scan 192.168.1.0/24"; \
   Tasks: desktopicon
 
