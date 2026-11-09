@@ -28,6 +28,12 @@ python -m beesky scan 192.168.1.10-192.168.1.60
 # Save machine-readable results and repair tickets
 python -m beesky scan 192.168.1.0/24 --json out.json --tickets tickets/
 
+# Watch a farm: repeated scans -> events -> notifications (webhook /
+# Telegram / logfile). Ctrl-C to stop. --once runs a single pass; pair
+# it with --state so successive invocations still detect changes.
+python -m beesky watch 192.168.1.0/24 --interval 30 --notify notify.json
+python -m beesky watch 192.168.1.50 --once --state state.json --notify notify.json
+
 # Non-default credentials (stock web UI / dashd), non-standard ports
 python -m beesky scan 192.168.1.0/24 --user root --password <pw> \
     --api-key <dashd-key> --http-port 80 --cgminer-port 4028
@@ -55,6 +61,29 @@ Found 3 miner(s), 1 need(s) checking.
 For each flagged miner, `--tickets <dir>` writes one `ticket-<ip>.txt` with the
 problems, per-board chip/temp detail, and repair suggestions in Vietnamese.
 
+### Watch mode & notifications
+
+`watch` re-scans on an interval and diffs every miner against its own
+history (`beesky/core/events.py`), emitting events: **OFFLINE**,
+**BACK_ONLINE**, **HASHRATE_DROP** (vs the miner's rolling baseline),
+**OVER_TEMP** (rise vs baseline, or ≥ 85 °C absolute), **CHIPS_LOST** and
+**CHAIN_DOWN**. The design copies EMCD Monitoring's two layers: detection
+is sensitive (> 5 % drop / > 5 °C rise already detects) while severity
+follows their 3-step scales — 15/30/50 % and 10/20/30 °C →
+warning/major/critical. A per-miner latch + cooldown (default 300 s)
+stops repeat alerts while a condition persists.
+
+Events are routed per type to channels (`beesky/core/notify.py`) from one
+JSON config — see [`docs/notify.example.json`](docs/notify.example.json):
+
+- **webhook** — the event POSTed as JSON to any URL. This is the channel
+  EMCD lacks: point an OVER_TEMP webhook at a local controller (Home
+  Assistant, relay box, smart PDU) and the farm can switch on extra
+  exhaust fans or water-mist pumps by itself.
+- **telegram** — Bot API `sendMessage` (token/chat from config or the
+  `BEESKY_TELEGRAM_BOT_TOKEN` / `BEESKY_TELEGRAM_CHAT_ID` env vars).
+- **logfile** — one JSON event per line, appended.
+
 ## How it works
 
 Architecture mirrors the pattern used by mature fleet tools, kept minimal:
@@ -75,6 +104,12 @@ Architecture mirrors the pattern used by mature fleet tools, kept minimal:
 - **Normalised records** (`beesky/core/report.py`): every miner becomes one
   status record (JSON-friendly) plus a problems list; the CLI table, the JSON
   export, and the repair tickets are all rendered from that record.
+- **Events + notifications** (`beesky/core/events.py`, `notify.py`): watch
+  mode diffs successive records per miner (rolling-median baselines,
+  latch + cooldown anti-flap, JSON-persistable state) and routes the
+  resulting events to webhook / Telegram / logfile channels by per-type
+  rules and minimum severity — EMCD's notification matrix, plus the
+  webhook channel they don't have.
 
 ## Mock tests
 
@@ -85,6 +120,9 @@ stock-firmware S19 behind digest auth:
 ```bash
 bash tests/run_mock_test.sh      # v0.1: cgminer only -> tests/RESULTS.md
 bash tests/run_mock_test_v2.sh   # v0.2: all three adapters, appends to RESULTS.md
+bash tests/run_mock_test_v3.sh   # v0.3: full suite + watch story (healthy ->
+                                 # hashrate -40% -> killed -> back), webhook
+                                 # and Telegram captured by a local receiver
 ```
 
 ## Roadmap
@@ -92,7 +130,10 @@ bash tests/run_mock_test_v2.sh   # v0.2: all three adapters, appends to RESULTS.
 - ~~v0.2 — VNish/HashCore dashd HTTP adapter (optional API-key/bearer auth)
   + Bitmain stock web adapter (digest auth); scan table gains a Source
   column.~~ **Done.**
-- v0.3 — WhatsMiner (MicroBT API v2) adapter; scan history + before/after
+- ~~v0.3 — watch mode: event engine (offline / hashrate drop / over-temp /
+  chips lost / chain down) + notifications (webhook, Telegram, logfile)
+  with EMCD-style severity scales.~~ **Done.**
+- v0.4 — WhatsMiner (MicroBT API v2) adapter; scan history + before/after
   compare for repair verification; `devs` command for per-chain detail.
 - Later — pool switch / reboot actions, signed self-update manifests,
   single-hashboard fixture tester integration.
@@ -101,17 +142,25 @@ bash tests/run_mock_test_v2.sh   # v0.2: all three adapters, appends to RESULTS.
 
 ```
 beesky/
-  cli.py            # `python -m beesky scan ...`
+  cli.py            # `python -m beesky scan ...` / `python -m beesky watch ...`
   core/
     cgminer.py      # cgminer RPC client (TCP 4028)
     dashd.py        # VNish/HashCore dashd HTTP API adapter (/api/v1)
     bitmain.py      # Bitmain stock web CGI adapter (digest auth)
     discover.py     # target parsing + threaded adapter-chain probing
     report.py       # status records, problem rules, repair tickets
+    events.py       # watch-mode event engine (baselines, anti-flap, state)
+    notify.py       # webhook / Telegram / logfile notification routing
+docs/
+  brand.md          # BeeSky brand palette + logo source
+  notify.example.json  # watch/notify config example (EMCD-style matrix)
 tests/
   mock_miner.py     # fake cgminer API server (S19 Pro sample data)
   mock_dashd.py     # fake VNish dashd server (api-doc-shaped S19 Pro)
   mock_bitmain.py   # fake stock-firmware server (digest auth, healthy S19)
+  mock_watch_miner.py  # control-file-driven fake miner for the watch test
+  mock_watch_test.py   # watch story driver: drop -> offline -> back online
   run_mock_test.sh  # v0.1 end-to-end mock test -> tests/RESULTS.md
   run_mock_test_v2.sh  # v0.2 three-adapter mock test (appends to RESULTS.md)
+  run_mock_test_v3.sh  # v0.3 full suite + watch test (appends to RESULTS.md)
 ```

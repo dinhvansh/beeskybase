@@ -110,3 +110,45 @@ Gợi ý kiểm tra:
 - Đo điện áp từng domain trên board (điểm đo/PIC), kiểm tra cáp dữ liệu và mối hàn quanh các vị trí chip chết; đối chiếu vị trí chip với sơ đồ domain của board để khoanh vùng trước khi thay chip.
 - Kiểm tra quạt và đường gió, vệ sinh bụi, kiểm tra keo tản nhiệt và lực ép ốc heatsink của board; chạy lại và đo nhiệt sau khi xử lý.
 ```
+
+---
+
+# v0.3 mock test — watch mode, event engine, notifications
+
+`tests/mock_watch_test.py` drives the real CLI (`beesky watch
+--once --state … --notify …`) against `tests/mock_watch_miner.py`,
+a control-file-driven fake cgminer S19 Pro on 127.0.0.1:14028.
+Healthy passes build the rolling baseline; a drop to 66 TH/s is a
+40% HASHRATE_DROP (severity major on the 15/30/50 scale); killing
+the miner fires OFFLINE (critical); restarting it fires
+BACK_ONLINE. A local receiver on 127.0.0.1:18777 captures the
+webhook POSTs (/hook) and the Telegram Bot API calls (api_base
+overridden to the same receiver); the logfile channel is checked
+on disk. Anti-flap passes assert no duplicate events.
+
+## Assertions + captured webhook payloads
+
+```
+PASS: healthy passes: no events while baseline builds
+PASS: healthy passes: no notifications sent
+PASS: hashrate drop pass: HASHRATE_DROP printed
+PASS: webhook received exactly one HASHRATE_DROP
+PASS: drop payload shape (ip/model/type/severity/detail/data)
+PASS: drop payload: drop_pct ~= 40
+PASS: drop payload: baseline 110 -> current 66 TH/s
+PASS: telegram sendMessage captured for the drop
+PASS: still dropped: anti-flap, no duplicate HASHRATE_DROP
+PASS: miner killed: OFFLINE printed + webhook received
+PASS: OFFLINE payload: severity critical, model kept
+PASS: telegram captured for OFFLINE
+PASS: still down: anti-flap, no duplicate OFFLINE
+PASS: miner back: BACK_ONLINE printed + webhook received
+PASS: logfile channel recorded all three events
+
+Captured webhook payloads:
+{"ts": 1794219346.5572197, "time": "2026-11-09 10:15:46", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
+{"ts": 1794219346.9761698, "time": "2026-11-09 10:15:46", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "OFFLINE", "severity": "critical", "detail": "miner went offline / unreachable", "data": {"last_seen": 1794219346.8004332}}
+{"ts": 1794219347.5016665, "time": "2026-11-09 10:15:47", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "BACK_ONLINE", "severity": "info", "detail": "miner is back online", "data": {}}
+
+WATCH TEST PASSED
+```
