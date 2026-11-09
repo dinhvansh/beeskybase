@@ -6,9 +6,9 @@ Fake miner: `tests/mock_miner.py` (Antminer S19 Pro sample — board 2 has
 ## Scanner output
 
 ```
-IP        | Model            | TH/s   | Chips   | MaxTemp | Fans                | Status
-----------+------------------+--------+---------+---------+---------------------+-------
-127.0.0.1 | Antminer S19 Pro | 102.90 | 339/342 | 88      | 4320/4380/4440/4500 | CHECK 
+IP        | Model            | Source  | TH/s   | Chips   | MaxTemp | Fans                | Status
+----------+------------------+---------+--------+---------+---------+---------------------+-------
+127.0.0.1 | Antminer S19 Pro | cgminer | 102.90 | 339/342 | 88      | 4320/4380/4440/4500 | CHECK 
 
 Found 1 miner(s), 1 need(s) checking.
 JSON written to tests/mock_scan.json
@@ -45,6 +45,66 @@ Chi tiết từng board:
 - Board 1: 114/114 chip, nhiệt 65°C
 - Board 2: 111/114 chip, nhiệt 71°C
 - Board 3: 114/114 chip, nhiệt 88°C
+
+Gợi ý kiểm tra:
+- Đo điện áp từng domain trên board (điểm đo/PIC), kiểm tra cáp dữ liệu và mối hàn quanh các vị trí chip chết; đối chiếu vị trí chip với sơ đồ domain của board để khoanh vùng trước khi thay chip.
+- Kiểm tra quạt và đường gió, vệ sinh bụi, kiểm tra keo tản nhiệt và lực ép ốc heatsink của board; chạy lại và đo nhiệt sau khi xử lý.
+```
+
+---
+
+# v0.2 mock test — VNish dashd + Bitmain stock adapters
+
+Three fake miners in one scan: `tests/mock_miner.py` (cgminer RPC,
+127.0.0.1:4028), `tests/mock_dashd.py` (VNish dashd API shaped after
+the firmware's own `api-doc.json`, 127.0.0.2:80 — board 1 missing 2
+chips at positions 10/55, board 2 at 87 °C), `tests/mock_bitmain.py`
+(stock CGI behind digest auth, healthy S19, 127.0.0.3:80).
+
+## Scanner output
+
+```
+IP        | Model            | Source  | TH/s   | Chips   | MaxTemp | Fans                | Status
+----------+------------------+---------+--------+---------+---------+---------------------+-------
+127.0.0.1 | Antminer S19 Pro | cgminer | 102.90 | 339/342 | 88      | 4320/4380/4440/4500 | CHECK 
+127.0.0.2 | Antminer S19 Pro | vnish   | 109.13 | 340/342 | 87      | 4320/4380/4440/4500 | CHECK 
+127.0.0.3 | Antminer S19     | stock   | 95.10  | 342/342 | 70      | 4200/4260/4320/4380 | OK    
+
+Found 3 miner(s), 2 need(s) checking.
+JSON written to tests/mock_scan_v2.json
+Ticket written to tests/tickets_v2/ticket-127_0_0_1.txt
+Ticket written to tests/tickets_v2/ticket-127_0_0_2.txt
+```
+
+## Assertions
+
+```
+PASS: 127.0.0.1 via cgminer RPC, unchanged v0.1 behaviour (CHECK, 339/342)
+PASS: 127.0.0.2 via VNish dashd (CHECK): board 1 missing exactly 2 chips at positions 10, 55 (340/342); board 2 at 87 C flagged OVER_TEMP
+PASS: 127.0.0.3 via Bitmain stock CGI + digest auth (OK, healthy S19, 342/342)
+PASS: scan table sources = cgminer + vnish + stock
+PASS: VNish repair ticket written to tests/tickets_v2/ticket-127_0_0_2.txt (missing chips + over-temp, Vietnamese)
+```
+
+## Repair ticket — VNish miner (tests/tickets_v2/ticket-127_0_0_2.txt)
+
+```
+PHIẾU KIỂM TRA / SỬA CHỮA MÁY ĐÀO — BeeSky
+==============================================
+IP: 127.0.0.2
+Model: Antminer S19 Pro
+Hashrate: 109.13 TH/s
+Thời gian đã chạy: 5400 giây
+Tổng chip sống: 340/342
+
+Vấn đề phát hiện:
+- Board 1: thiếu 2 chip (vị trí chết: 10, 55)
+- Board 2: nhiệt độ cao 87°C (ngưỡng 85°C)
+
+Chi tiết từng board:
+- Board 1: 112/114 chip, nhiệt 74°C
+- Board 2: 114/114 chip, nhiệt 87°C
+- Board 3: 114/114 chip, nhiệt 69°C
 
 Gợi ý kiểm tra:
 - Đo điện áp từng domain trên board (điểm đo/PIC), kiểm tra cáp dữ liệu và mối hàn quanh các vị trí chip chết; đối chiếu vị trí chip với sơ đồ domain của board để khoanh vùng trước khi thay chip.

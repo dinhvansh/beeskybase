@@ -1,0 +1,229 @@
+"""VNish / HashCore dashd HTTP API adapter ("xminer-api").
+
+Implemented against the firmware's own OpenAPI document
+(``usr/share/dashd/ui/docs/api-doc.json`` in the VNish rootfs), base URL
+``/api/v1`` on HTTP :80. The endpoints used here:
+
+  GET /api/v1/summary  -> {"miner": AntmMinerStats | null}
+        miner.miner_type, miner.hr_realtime / hr_average (TH/s scale),
+        miner.miner_status.miner_state_time (seconds in "mining" state),
+        miner.chains[] = AntmBoard {id, chip_temp{max}, pcb_temp{max},
+        chip_statuses{red, orange, grey}, status{state}},
+        miner.cooling.fans[] = {id, rpm}
+  GET /api/v1/boards   -> [AntmBoardChips] — per-chip detail:
+        {id, status{state}, chips[] = AntmChip {id, hr, grade, temp, ...},
+         sensors[]}
+  GET /api/v1/info     -> InfoJson {miner (pretty name), model, serial, ...}
+  GET /api/v1/model    -> MinerModelInfo {full_name,
+        chain{chips_per_chain, num_chains, ...}}
+
+Auth (per the doc): the read endpoints above carry NO security requirement
+(/summary also explicitly allows anonymous access — its security list is
+``[{}, {bearerAuth}, {apikeyAuth}]``); write endpoints require a bearer JWT
+(from POST /unlock) or an ``x-api-key`` header. This adapter is read-only and
+sends the credentials only when the caller supplies them.
+
+Per-chip data — what dashd does and does not expose:
+  * /boards DOES expose every chip (id, hashrate, grade grey/orange/red,
+    temperature), so dead-chip *positions* are recoverable: a chip counts as
+    dead here when its grade is "red" (grey = normal, orange = degraded but
+    hashing). This matches AntmBoard.chip_statuses, whose counts are exactly
+    {red, orange, grey} — red is the failure bucket.
+  * GAP: /summary chains alone give only the red/orange/grey *counts*, never
+    positions, and no explicit chips-total field. The total comes from
+    /model (chain.chips_per_chain, a nominal factory figure) or from the
+    /boards chip list length. If /boards fails, positions are unknown and
+    the record's MISSING_CHIPS problem notes "counts only".
+"""
+
+from __future__ import annotations
+
+import json
+import urllib.error
+import urllib.request
+
+from . import report
+
+API_BASE = "/api/v1"
+
+# Miners are LAN devices: always connect directly. Honouring http_proxy-style
+# environment variables would route bench traffic through some egress proxy
+# and fail (this bit us in testing with 127.0.0.2+ hosts outside no_proxy).
+_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+DEFAULT_PORT = 80
+
+
+class DashdError(Exception):
+    """Raised when a dashd host cannot be reached or does not answer sanely."""
+
+
+class DashdClient:
+    """Read-only client for one miner's dashd (xminer) HTTP API."""
+
+    def __init__(self, host: str, port: int = DEFAULT_PORT, timeout: float = 3.0,
+                 api_key: str | None = None, token: str | None = None):
+        self.host = host
+        self.port = port
+        self.timeout = timeout
+        self.api_key = api_key
+        self.token = token
+
+    # -- transport ---------------------------------------------------------
+    def get_json(self, path: str):
+        """GET one API path and return the parsed JSON body."""
+        url = f"http://{self.host}:{self.port}{API_BASE}{path}"
+        headers = {"Accept": "application/json", "User-Agent": "BeeSky"}
+        if self.api_key:
+            headers["x-api-key"] = self.api_key
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        request = urllib.request.Request(url, headers=headers, method="GET")
+        try:
+            with _OPENER.open(request, timeout=self.timeout) as resp:
+                body = resp.read()
+        except urllib.error.HTTPError as exc:
+            raise DashdError(f"GET {path} -> HTTP {exc.code}") from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise DashdError(f"cannot reach {url} ({exc})") from exc
+        try:
+            return json.loads(body.decode("utf-8", errors="replace"))
+        except json.JSONDecodeError as exc:
+            raise DashdError(f"GET {path} -> non-JSON reply") from exc
+
+    # -- endpoints -----------------------------------------------------------
+    def summary(self) -> dict:
+        data = self.get_json("/summary")
+        if not isinstance(data, dict):
+            raise DashdError("summary reply is not an object")
+        return data
+
+    def boards(self) -> list:
+        data = self.get_json("/boards")
+        if not isinstance(data, list):
+            raise DashdError("boards reply is not a list")
+        return data
+
+    def info(self) -> dict:
+        data = self.get_json("/info")
+        return data if isinstance(data, dict) else {}
+
+    def model_info(self) -> dict:
+        data = self.get_json("/model")
+        return data if isinstance(data, dict) else {}
+
+    # -- detection -----------------------------------------------------------
+    def probe(self) -> dict | None:
+        """Return the summary dict if this host speaks dashd, else None.
+
+        Signature: HTTP 200 on /api/v1/summary with a JSON object that has a
+        "miner" key (AntmMinerStats or null) — stock Bitmain CGI hosts 404
+        this path, generic web servers do not produce this shape.
+        """
+        try:
+            data = self.summary()
+        except DashdError:
+            return None
+        return data if "miner" in data else None
+
+    # -- record building -------------------------------------------------------
+    def fetch_record(self, ip: str | None = None) -> dict:
+        """Fetch summary (+ boards/info/model) and build a status record."""
+        ip = ip or self.host
+        summary = self.summary()
+        miner = summary.get("miner") or {}
+
+        try:
+            info = self.info()
+        except DashdError:
+            info = {}
+        try:
+            model_info = self.model_info()
+        except DashdError:
+            model_info = {}
+        try:
+            boards = self.boards()
+        except DashdError:
+            boards = None  # fall back to summary counts (positions unknown)
+
+        model = (info.get("miner") or miner.get("miner_type")
+                 or model_info.get("full_name") or "Unknown")
+
+        nominal_chips = None
+        chain_info = model_info.get("chain")
+        if isinstance(chain_info, dict):
+            nominal_chips = chain_info.get("chips_per_chain")
+
+        boards_by_id = {}
+        if boards:
+            for entry in boards:
+                if isinstance(entry, dict) and isinstance(entry.get("id"), int):
+                    boards_by_id[entry["id"]] = entry
+
+        chains: list[dict] = []
+        for board in miner.get("chains") or []:
+            if not isinstance(board, dict):
+                continue
+            board_id = board.get("id", len(chains))
+            temp = _temp_max(board.get("chip_temp")) or _temp_max(board.get("pcb_temp"))
+
+            entry = boards_by_id.get(board_id)
+            if entry is not None and isinstance(entry.get("chips"), list):
+                chips = entry["chips"]
+                dead = [int(c["id"]) + 1 for c in chips
+                        if isinstance(c, dict) and c.get("grade") == "red"
+                        and isinstance(c.get("id"), int)]
+                total = len(chips)
+                alive = total - len(dead)
+                if temp is None:
+                    chip_temps = [c.get("temp") for c in chips
+                                  if isinstance(c, dict)
+                                  and isinstance(c.get("temp"), (int, float))]
+                    temp = max(chip_temps) if chip_temps else None
+            else:
+                # Summary-only fallback: counts, no positions (see module doc).
+                statuses = board.get("chip_statuses") or {}
+                red = int(statuses.get("red") or 0)
+                orange = int(statuses.get("orange") or 0)
+                grey = int(statuses.get("grey") or 0)
+                total = grey + orange + red
+                if total == 0 and nominal_chips:
+                    total = int(nominal_chips)
+                alive = total - red
+                dead = []
+            chains.append({
+                "index": int(board_id) + 1,  # dashd board ids are 0-based
+                "chips_total": total,
+                "chips_alive": alive,
+                "dead_positions": dead,
+                "temp_c": temp,
+            })
+
+        cooling = miner.get("cooling") or {}
+        fans = [int(f["rpm"]) for f in cooling.get("fans") or []
+                if isinstance(f, dict) and isinstance(f.get("rpm"), (int, float))]
+
+        state = miner.get("miner_status") or {}
+        elapsed = state.get("miner_state_time") or 0
+
+        return report.build_record_from_boards(
+            ip,
+            model=model,
+            elapsed_s=int(elapsed),
+            ths_realtime=_as_float(miner.get("hr_realtime")),
+            ths_average=_as_float(miner.get("hr_average")),
+            chains=chains,
+            fans_rpm=fans,
+            source="vnish",
+        )
+
+
+def _temp_max(temp_range) -> float | None:
+    if isinstance(temp_range, dict):
+        val = temp_range.get("max")
+        if isinstance(val, (int, float)):
+            return float(val)
+    return None
+
+
+def _as_float(value):
+    return float(value) if isinstance(value, (int, float)) else None

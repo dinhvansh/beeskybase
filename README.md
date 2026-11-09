@@ -1,10 +1,12 @@
 # BeeSky — ASIC miner LAN scanner & repair diagnostics
 
 BeeSky is a small, dependency-free tool for ASIC repair shops. It scans a local
-network for miners, reads their health over the classic **cgminer RPC API
-(TCP 4028)**, and turns the raw numbers into something a repair tech can act
-on: a status table and, for every sick miner, a plain-text **repair ticket**
-(Vietnamese) with per-board details and suggested checks.
+network for miners, reads their health over whichever API the firmware
+exposes — the classic **cgminer RPC API (TCP 4028)**, the **VNish/HashCore
+dashd HTTP API**, or **Bitmain stock web CGI** (digest auth) — and turns the
+raw numbers into something a repair tech can act on: a status table and, for
+every sick miner, a plain-text **repair ticket** (Vietnamese) with per-board
+details and suggested checks.
 
 Fleet tools (e.g. HashCore Toolkit) stop at generic dashboards and exports.
 BeeSky's focus is the repair bench: *which board, how many chips down, how hot,
@@ -25,17 +27,22 @@ python -m beesky scan 192.168.1.10-192.168.1.60
 
 # Save machine-readable results and repair tickets
 python -m beesky scan 192.168.1.0/24 --json out.json --tickets tickets/
+
+# Non-default credentials (stock web UI / dashd), non-standard ports
+python -m beesky scan 192.168.1.0/24 --user root --password <pw> \
+    --api-key <dashd-key> --http-port 80 --cgminer-port 4028
 ```
 
-Example output:
+Example output (note the **Source** column — which adapter read the miner):
 
 ```
-IP            | Model           | TH/s   | Chips   | MaxTemp | Fans                | Status
---------------+-----------------+--------+---------+---------+---------------------+-------
-192.168.1.50  | Antminer S19 Pro| 110.02 | 342/342 | 71      | 4320/4380/4440/4500 | OK
-192.168.1.51  | Antminer S19 Pro| 102.90 | 339/342 | 88      | 4320/4380/4440/4500 | CHECK
+IP            | Model            | Source  | TH/s   | Chips   | MaxTemp | Fans                | Status
+--------------+------------------+---------+--------+---------+---------+---------------------+-------
+192.168.1.50  | Antminer S19 Pro | cgminer | 110.02 | 342/342 | 71      | 4320/4380/4440/4500 | OK
+192.168.1.51  | Antminer S19 Pro | vnish   | 102.90 | 339/342 | 88      | 4320/4380/4440/4500 | CHECK
+192.168.1.52  | Antminer S19     | stock   | 95.10  | 342/342 | 70      | 4200/4260/4320/4380 | OK
 
-Found 2 miner(s), 1 need(s) checking.
+Found 3 miner(s), 1 need(s) checking.
 ```
 
 ### What gets flagged (`Status = CHECK`)
@@ -54,32 +61,39 @@ Architecture mirrors the pattern used by mature fleet tools, kept minimal:
 
 - **CLI core first** (`beesky/`): all logic lives in a scriptable core package;
   a GUI can be bolted on later without touching it.
-- **Per-vendor adapters** (`beesky/core/`): v0.1 ships one adapter — the generic
-  cgminer RPC client (`summary` / `stats` / `pools`). Vendor-specific adapters
-  (Bitmain stock web, VNish/HashCore dashd API, WhatsMiner) slot in beside it.
-- **Discovery**: for each host in the target range, probe HTTP **:80** first,
-  then the cgminer RPC port **:4028**; hosts answering the cgminer API are
-  treated as live miners. Probing is threaded with bounded workers and short
-  timeouts.
+- **Per-vendor adapters** (`beesky/core/`): the generic cgminer RPC client
+  (`summary` / `stats` / `pools`); the VNish/HashCore **dashd** adapter,
+  implemented against the firmware's own OpenAPI doc (`/api/v1/summary` +
+  `/api/v1/boards` — per-chip grades included, so dead-chip *positions*
+  survive); and the Bitmain **stock** adapter (web CGI + hand-rolled HTTP
+  digest auth, stdlib only). WhatsMiner slots in beside them next.
+- **Discovery**: for each host, walk the adapter chain in order — cgminer RPC
+  **:4028** → dashd HTTP **:80** → stock CGI **:80** — and keep the first
+  adapter that answers like a miner. Probing is threaded with bounded workers
+  and short timeouts. HTTP adapters always connect directly (system proxy
+  env vars are ignored — miners are LAN devices).
 - **Normalised records** (`beesky/core/report.py`): every miner becomes one
   status record (JSON-friendly) plus a problems list; the CLI table, the JSON
   export, and the repair tickets are all rendered from that record.
 
-## Mock test
+## Mock tests
 
-A fake S19 Pro (3 dead chips on board 2, board 3 at 88 °C) is included so the
-whole pipeline can be verified with no hardware:
+Fake miners are included so the whole pipeline can be verified with no
+hardware — a sick cgminer S19 Pro, a sick VNish S19 Pro, and a healthy
+stock-firmware S19 behind digest auth:
 
 ```bash
-bash tests/run_mock_test.sh   # writes tests/RESULTS.md
+bash tests/run_mock_test.sh      # v0.1: cgminer only -> tests/RESULTS.md
+bash tests/run_mock_test_v2.sh   # v0.2: all three adapters, appends to RESULTS.md
 ```
 
 ## Roadmap
 
-- v0.2 — VNish/HashCore dashd HTTP adapter (token/API-key auth) + Bitmain
-  stock web adapter (digest auth); `devs` command for per-chain detail.
+- ~~v0.2 — VNish/HashCore dashd HTTP adapter (optional API-key/bearer auth)
+  + Bitmain stock web adapter (digest auth); scan table gains a Source
+  column.~~ **Done.**
 - v0.3 — WhatsMiner (MicroBT API v2) adapter; scan history + before/after
-  compare for repair verification.
+  compare for repair verification; `devs` command for per-chain detail.
 - Later — pool switch / reboot actions, signed self-update manifests,
   single-hashboard fixture tester integration.
 
@@ -90,9 +104,14 @@ beesky/
   cli.py            # `python -m beesky scan ...`
   core/
     cgminer.py      # cgminer RPC client (TCP 4028)
-    discover.py     # target parsing + threaded :80/:4028 probing
+    dashd.py        # VNish/HashCore dashd HTTP API adapter (/api/v1)
+    bitmain.py      # Bitmain stock web CGI adapter (digest auth)
+    discover.py     # target parsing + threaded adapter-chain probing
     report.py       # status records, problem rules, repair tickets
 tests/
   mock_miner.py     # fake cgminer API server (S19 Pro sample data)
-  run_mock_test.sh  # end-to-end mock test -> tests/RESULTS.md
+  mock_dashd.py     # fake VNish dashd server (api-doc-shaped S19 Pro)
+  mock_bitmain.py   # fake stock-firmware server (digest auth, healthy S19)
+  run_mock_test.sh  # v0.1 end-to-end mock test -> tests/RESULTS.md
+  run_mock_test_v2.sh  # v0.2 three-adapter mock test (appends to RESULTS.md)
 ```

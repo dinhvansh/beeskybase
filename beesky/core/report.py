@@ -76,8 +76,70 @@ def _fan_speeds(stats: dict) -> list[int]:
 # record building
 # --------------------------------------------------------------------------
 
-def build_record(ip: str, summary: dict, stats: dict) -> dict:
-    """Normalise one miner's summary+stats into a status record."""
+def _finalise_record(ip: str, model: str, elapsed_s: int, gh_5s, gh_av,
+                     chains: list[dict], fans: list[int], source: str) -> dict:
+    """Apply the problem rules and assemble a status record.
+
+    Shared by every vendor adapter. *chains* entries must carry ``index``,
+    ``chips_total``, ``chips_alive``, ``dead_positions`` (possibly empty when
+    the vendor API only reports counts) and ``temp_c``.
+    """
+    gh_main = gh_5s if gh_5s is not None else gh_av
+    for chain in chains:
+        chain["chips_missing"] = chain["chips_total"] - chain["chips_alive"]
+    temps = [c["temp_c"] for c in chains if c["temp_c"] is not None]
+
+    problems: list[dict] = []
+    for chain in chains:
+        if chain["chips_total"] > 0 and chain["chips_alive"] == 0:
+            problems.append({
+                "code": "CHAIN_DOWN", "chain": chain["index"],
+                "detail": f"chain {chain['index']}: 0/{chain['chips_total']} chips responding",
+            })
+        elif chain["chips_missing"] > 0:
+            detail = (f"chain {chain['index']}: missing {chain['chips_missing']} chip(s)")
+            if chain["dead_positions"]:
+                detail += f", dead at position(s) {chain['dead_positions']}"
+            else:
+                detail += " (API reports counts only, no dead positions)"
+            problems.append({
+                "code": "MISSING_CHIPS", "chain": chain["index"],
+                "missing": chain["chips_missing"],
+                "dead_positions": chain["dead_positions"],
+                "detail": detail,
+            })
+        if chain["temp_c"] is not None and chain["temp_c"] >= TEMP_LIMIT_C:
+            problems.append({
+                "code": "OVER_TEMP", "chain": chain["index"],
+                "temp_c": chain["temp_c"],
+                "detail": f"chain {chain['index']}: {chain['temp_c']:.0f} C >= {TEMP_LIMIT_C} C limit",
+            })
+    if gh_main is not None and gh_main == 0 and elapsed_s > NO_HASH_ELAPSED_S:
+        problems.append({
+            "code": "NO_HASHRATE",
+            "detail": f"hashrate 0 after {elapsed_s} s uptime",
+        })
+
+    return {
+        "ip": ip,
+        "model": model,
+        "source": source,
+        "elapsed_s": elapsed_s,
+        "ghs_5s": gh_5s,
+        "ghs_av": gh_av,
+        "ths": (gh_main / 1000.0) if gh_main is not None else None,
+        "chains": chains,
+        "fans_rpm": fans,
+        "chips_alive": sum(c["chips_alive"] for c in chains),
+        "chips_total": sum(c["chips_total"] for c in chains),
+        "max_temp_c": max(temps) if temps else None,
+        "problems": problems,
+        "status": "CHECK" if problems else "OK",
+    }
+
+
+def build_record(ip: str, summary: dict, stats: dict, source: str = "cgminer") -> dict:
+    """Normalise one miner's cgminer-shaped summary+stats into a record."""
     summary = summary if isinstance(summary, dict) else {}
     stats = _merged_stats(stats if isinstance(stats, dict) else {})
 
@@ -88,7 +150,6 @@ def build_record(ip: str, summary: dict, stats: dict) -> dict:
     gh_av = _num(summary.get("GHS av"))
     if gh_av is None and _num(summary.get("MHS av")) is not None:
         gh_av = _num(summary.get("MHS av")) / 1000.0
-    gh_main = gh_5s if gh_5s is not None else gh_av
 
     # --- per-chain data from chain_acs strings ('o' = alive chip) ---------
     chains: list[dict] = []
@@ -105,63 +166,40 @@ def build_record(ip: str, summary: dict, stats: dict) -> dict:
             "index": idx,
             "chips_total": len(acs),
             "chips_alive": alive,
-            "chips_missing": len(acs) - alive,
             "dead_positions": dead_positions,
             "temp_c": _chain_temp(stats, idx),
         })
 
-    fans = _fan_speeds(stats)
-    temps = [c["temp_c"] for c in chains if c["temp_c"] is not None]
-
-    # --- problem rules -----------------------------------------------------
-    problems: list[dict] = []
-    for chain in chains:
-        if chain["chips_total"] > 0 and chain["chips_alive"] == 0:
-            problems.append({
-                "code": "CHAIN_DOWN", "chain": chain["index"],
-                "detail": f"chain {chain['index']}: 0/{chain['chips_total']} chips responding",
-            })
-        elif chain["chips_missing"] > 0:
-            problems.append({
-                "code": "MISSING_CHIPS", "chain": chain["index"],
-                "missing": chain["chips_missing"],
-                "dead_positions": chain["dead_positions"],
-                "detail": (f"chain {chain['index']}: missing {chain['chips_missing']} "
-                           f"chip(s), dead at position(s) {chain['dead_positions']}"),
-            })
-        if chain["temp_c"] is not None and chain["temp_c"] >= TEMP_LIMIT_C:
-            problems.append({
-                "code": "OVER_TEMP", "chain": chain["index"],
-                "temp_c": chain["temp_c"],
-                "detail": f"chain {chain['index']}: {chain['temp_c']:.0f} C >= {TEMP_LIMIT_C} C limit",
-            })
-    if gh_main is not None and gh_main == 0 and elapsed > NO_HASH_ELAPSED_S:
-        problems.append({
-            "code": "NO_HASHRATE",
-            "detail": f"hashrate 0 after {elapsed} s uptime",
-        })
-
-    return {
-        "ip": ip,
-        "model": model,
-        "elapsed_s": elapsed,
-        "ghs_5s": gh_5s,
-        "ghs_av": gh_av,
-        "ths": (gh_main / 1000.0) if gh_main is not None else None,
-        "chains": chains,
-        "fans_rpm": fans,
-        "chips_alive": sum(c["chips_alive"] for c in chains),
-        "chips_total": sum(c["chips_total"] for c in chains),
-        "max_temp_c": max(temps) if temps else None,
-        "problems": problems,
-        "status": "CHECK" if problems else "OK",
-    }
+    return _finalise_record(ip, model, elapsed, gh_5s, gh_av,
+                            chains, _fan_speeds(stats), source)
 
 
-def error_record(ip: str, message: str) -> dict:
+def build_record_from_boards(ip: str, *, model: str = "Unknown", elapsed_s: int = 0,
+                             ths_realtime=None, ths_average=None,
+                             chains=(), fans_rpm=(), source: str) -> dict:
+    """Build a record from already-parsed per-board data (HTTP adapters).
+
+    Hashrates are given in TH/s (the unit HTTP dashboards use); chain entries
+    are dicts with ``index``, ``chips_total``, ``chips_alive``, optional
+    ``dead_positions`` and ``temp_c``.
+    """
+    norm_chains = [{
+        "index": int(c["index"]),
+        "chips_total": int(c["chips_total"]),
+        "chips_alive": int(c["chips_alive"]),
+        "dead_positions": list(c.get("dead_positions") or []),
+        "temp_c": c.get("temp_c"),
+    } for c in chains]
+    gh_5s = ths_realtime * 1000.0 if ths_realtime is not None else None
+    gh_av = ths_average * 1000.0 if ths_average is not None else None
+    return _finalise_record(ip, model, int(elapsed_s or 0), gh_5s, gh_av,
+                            norm_chains, [int(f) for f in fans_rpm], source)
+
+
+def error_record(ip: str, message: str, source: str = "cgminer") -> dict:
     """Status record for a candidate that stopped answering its API."""
     return {
-        "ip": ip, "model": "Unknown", "elapsed_s": 0,
+        "ip": ip, "model": "Unknown", "source": source, "elapsed_s": 0,
         "ghs_5s": None, "ghs_av": None, "ths": None,
         "chains": [], "fans_rpm": [], "chips_alive": 0, "chips_total": 0,
         "max_temp_c": None,
@@ -202,8 +240,11 @@ def _problem_line_vi(problem: dict) -> str:
     code = problem["code"]
     chain = problem.get("chain")
     if code == "MISSING_CHIPS":
+        if problem.get("dead_positions"):
+            return (f"Board {chain}: thiếu {problem['missing']} chip "
+                    f"(vị trí chết: {', '.join(map(str, problem['dead_positions']))})")
         return (f"Board {chain}: thiếu {problem['missing']} chip "
-                f"(vị trí chết: {', '.join(map(str, problem['dead_positions']))})")
+                f"(API không cho vị trí chip chết)")
     if code == "CHAIN_DOWN":
         return f"Board {chain}: không lên chip nào (0 chip phản hồi)"
     if code == "OVER_TEMP":
