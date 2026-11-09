@@ -146,9 +146,81 @@ PASS: miner back: BACK_ONLINE printed + webhook received
 PASS: logfile channel recorded all three events
 
 Captured webhook payloads:
-{"ts": 1794220198.6325831, "time": "2026-11-09 10:29:58", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
-{"ts": 1794220199.1460683, "time": "2026-11-09 10:29:59", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "OFFLINE", "severity": "critical", "detail": "miner went offline / unreachable", "data": {"last_seen": 1794220198.9229498}}
-{"ts": 1794220199.7964227, "time": "2026-11-09 10:29:59", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "BACK_ONLINE", "severity": "info", "detail": "miner is back online", "data": {}}
+{"ts": 1794220468.3522942, "time": "2026-11-09 10:34:28", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
+{"ts": 1794220468.9117506, "time": "2026-11-09 10:34:28", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "OFFLINE", "severity": "critical", "detail": "miner went offline / unreachable", "data": {"last_seen": 1794220468.6523325}}
+{"ts": 1794220469.5609396, "time": "2026-11-09 10:34:29", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "BACK_ONLINE", "severity": "info", "detail": "miner is back online", "data": {}}
 
 WATCH TEST PASSED
+```
+
+---
+
+# v0.4 mock test — web dashboard (serve + JSON API)
+
+`tests/mock_web_test.py` runs the real server (`beesky serve
+127.0.0.1 --port 18788 --interval 1`) against the control-file
+fake S19 Pro on 127.0.0.1:14029 and asserts over plain HTTP:
+the dashboard page carries the BeeSky brand, /api/miners shows
+the miner at 110 TH/s, /api/status counts are sane, POST
+/api/scan answers 202, and flipping the miner to 66 TH/s makes
+a HASHRATE_DROP (major, ~40%) appear in /api/events.
+
+## Assertions + captured event
+
+```
+PASS: GET / returns the dashboard
+PASS: dashboard carries the BeeSky brand (name + #F5D800)
+PASS: GET /api/miners lists the mock miner
+PASS: miner record: S19 Pro, ~110 TH/s, 342/342 chips, OK
+PASS: GET /api/status counts sane (1 miner, target, interval)
+PASS: POST /api/scan -> 202 {ok: true}
+PASS: hashrate drop phase: /api/events gains HASHRATE_DROP
+PASS: drop event: severity major, drop_pct ~= 40
+
+Captured drop event:
+{"ts": 1794220474.673141, "time": "2026-11-09 10:34:34", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
+
+WEB TEST PASSED
+```
+
+---
+
+# v0.5 mock test — farm agent + cloud backend + multi-site web
+
+`tests/mock_cloud_test.py` builds the full cloud shape on
+127.0.0.1: `beesky cloud-add-agent` mints a key for site
+"Xưởng 1", `beesky cloud` runs on :18790 with
+BEESKY_CLOUD_PASSWORD set, the control-file fake S19 Pro sits
+on :14031, and `beesky agent --interval 1` pushes to the
+cloud. Assertions: wrong/no agent key -> 401 on ingest;
+viewer /api/sites locked (401) until POST /login with the
+right password sets a session cookie (wrong password -> 401);
+GET / serves the branded cloud dashboard; /api/sites shows
+the site at ~110 TH/s; flipping the miner to 66 TH/s makes a
+HASHRATE_DROP (major, ~40%) arrive at the cloud /api/events
+tagged with the site; /api/miners?site= shows ~66 TH/s.
+
+## Assertions + captured cloud event
+
+```
+PASS: cloud-add-agent prints a key once
+PASS: cloud starts and serves /login
+PASS: ingest with a wrong agent key -> 401
+PASS: ingest with no agent key -> 401
+PASS: viewer /api/sites without login -> 401
+PASS: login with wrong password -> 401
+PASS: still locked out after wrong password
+PASS: login with right password -> session (200 after redirect)
+PASS: /api/sites works with the session cookie; site registered
+PASS: GET / serves the cloud dashboard (brand #F5D800)
+PASS: /api/sites shows the site after agent push
+PASS: site summary: ~110 TH/s, 1 OK / 0 problems, online
+PASS: hashrate drop: HASHRATE_DROP arrives at the cloud
+PASS: drop event: severity major, drop_pct ~= 40, site tag
+
+Captured cloud event:
+{"ts": 1794220482.144803, "time": "2026-11-09 10:34:42", "site": "Xưởng 1", "agent_id": 1, "ip": "127.0.0.1", "model": "Antminer S19 Pro", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
+PASS: /api/miners?site= shows ~66 TH/s, record annotated with site
+
+CLOUD TEST PASSED
 ```

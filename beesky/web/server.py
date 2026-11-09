@@ -52,12 +52,29 @@ _FALLBACK_HTML = """<!DOCTYPE html>
 </body></html>"""
 
 
+def _dashboard_candidates() -> list[Path]:
+    """Where dashboard.html may live: frozen bundle first, then source.
+
+    In the PyInstaller one-file exe the HTML ships as data under
+    ``sys._MEIPASS/beesky/web/`` (see packaging/beesky.spec); in a
+    source checkout it sits beside this module.
+    """
+    candidates = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / "beesky" / "web"
+                          / "dashboard.html")
+    candidates.append(Path(__file__).with_name("dashboard.html"))
+    return candidates
+
+
 def _load_dashboard_html() -> bytes:
-    path = Path(__file__).with_name("dashboard.html")
-    try:
-        return path.read_bytes()
-    except OSError:
-        return _FALLBACK_HTML.encode("utf-8")
+    for path in _dashboard_candidates():
+        try:
+            return path.read_bytes()
+        except OSError:
+            continue
+    return _FALLBACK_HTML.encode("utf-8")
 
 
 def _is_error_record(record: dict) -> bool:

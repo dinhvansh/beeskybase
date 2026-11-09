@@ -13,11 +13,11 @@
 ;
 ;     iscc packaging\installer.iss
 ;
-; Output: dist\BeeSkySetup-0.3.0.exe  (built by
+; Output: dist\BeeSkySetup-0.5.0.exe  (built by
 ; .github/workflows/build-windows.yml — never by hand)
 
 #define MyAppName "BeeSky"
-#define MyAppVersion "0.3.0"
+#define MyAppVersion "0.5.0"
 #define MyAppPublisher "BeeSkyBase"
 #define MyAppExeName "beesky.exe"
 

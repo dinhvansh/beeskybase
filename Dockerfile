@@ -9,7 +9,7 @@ COPY beesky/ ./beesky/
 ENV BEESKY_TARGET=192.168.1.0/24 \
     BEESKY_INTERVAL=30
 
-EXPOSE 8787
+EXPOSE 8787 8788
 
 # sh -c is used on purpose so ${BEESKY_TARGET} / ${BEESKY_INTERVAL} expand
 # at container start (they are runtime config, not build-time values).

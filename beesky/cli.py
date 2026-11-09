@@ -13,16 +13,29 @@
     python -m beesky serve <target> [--port 8787] [--interval 30]
                                     [--host 127.0.0.1] [--notify config.json]
                                     (plus the scan options above)
+
+    python -m beesky agent <target> --cloud URL --key KEY --site NAME
+                                    [--interval 30] [--notify config.json]
+                                    [--once] (plus the scan options above)
+
+    python -m beesky cloud [--port 8788] [--db beesky-cloud.db]
+                                    [--host 127.0.0.1]
+    python -m beesky cloud-add-agent --site NAME [--db beesky-cloud.db]
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
+import secrets
 import sys
 import time
 from pathlib import Path
 
+from .agent import AgentService
+from .cloud.server import run_cloud_server
+from .cloud.store import CloudStore
 from .core import notify as notify_mod
 from .core import report
 from .core.bitmain import BitmainClient, BitmainError
@@ -214,6 +227,54 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# agent / cloud — farm agent dialling out + multi-site cloud (v0.5)
+# ---------------------------------------------------------------------------
+
+def cmd_agent(args: argparse.Namespace) -> int:
+    if not args.key:
+        print("agent: missing --key (or BEESKY_AGENT_KEY) — mint one on "
+              "the cloud with `beesky cloud-add-agent`", file=sys.stderr)
+        return 2
+    config = _load_notify_config(args.notify)
+    if config is None:
+        return 2
+    service = AgentService(lambda: _scan_records(args), cloud_url=args.cloud,
+                           key=args.key, site=args.site,
+                           interval=args.interval, notify_config=config)
+    service.run(once=args.once)
+    return 0
+
+
+def cmd_cloud(args: argparse.Namespace) -> int:
+    password = os.environ.get("BEESKY_CLOUD_PASSWORD") or None
+    store = CloudStore(args.db)
+    try:
+        run_cloud_server(store, host=args.host, port=args.port,
+                         password=password)
+    except OSError as exc:
+        print(f"cannot bind {args.host}:{args.port}: {exc}", file=sys.stderr)
+        store.close()
+        return 2
+    return 0
+
+
+def cmd_cloud_add_agent(args: argparse.Namespace) -> int:
+    store = CloudStore(args.db)
+    try:
+        key = secrets.token_urlsafe(32)
+        agent_id = store.create_agent(args.site, key)
+    finally:
+        store.close()
+    print(f"Đã tạo agent #{agent_id} cho site \"{args.site}\" (db: {args.db}).")
+    print("Agent key — LƯU LẠI NGAY, key chỉ hiện MỘT LẦN này (cloud chỉ "
+          "lưu bản băm SHA-256, không xem lại được):")
+    print(f"BEESKY_AGENT_KEY={key}")
+    print("Chạy agent tại trại:  beesky agent <target> --cloud <URL-cloud> "
+          f"--key {key} --site \"{args.site}\"")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # argument parsing
 # ---------------------------------------------------------------------------
 
@@ -277,6 +338,46 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--notify", metavar="CONFIG",
                        help="notify config JSON (see docs/notify.example.json)")
     serve.set_defaults(func=cmd_serve)
+
+    agent = sub.add_parser(
+        "agent", help="run at the farm: scan locally, push to the cloud")
+    _add_common_args(agent)
+    agent.add_argument("--cloud", required=True, metavar="URL",
+                       help="cloud base URL, e.g. https://cloud.example.com")
+    agent.add_argument("--key", default=os.environ.get("BEESKY_AGENT_KEY"),
+                       metavar="KEY",
+                       help="agent key from `beesky cloud-add-agent` "
+                            "(or env BEESKY_AGENT_KEY)")
+    agent.add_argument("--site", required=True, metavar="NAME",
+                       help="site name this agent reports as, e.g. 'Xưởng 1'")
+    agent.add_argument("--interval", type=float, default=30,
+                       help="seconds between scan passes (default 30)")
+    agent.add_argument("--notify", metavar="CONFIG",
+                       help="notify config JSON — local channels still "
+                            "fire when the cloud is unreachable")
+    agent.add_argument("--once", action="store_true",
+                       help="run a single pass and exit")
+    agent.set_defaults(func=cmd_agent)
+
+    cloud = sub.add_parser(
+        "cloud", help="run the cloud server (agents push, browsers view)")
+    cloud.add_argument("--port", type=int, default=8788,
+                       help="HTTP port (default 8788)")
+    cloud.add_argument("--host", default="127.0.0.1",
+                       help="bind address (default 127.0.0.1; use 0.0.0.0 "
+                            "behind a reverse proxy / on a trusted host)")
+    cloud.add_argument("--db", default="beesky-cloud.db", metavar="FILE",
+                       help="SQLite database file (default beesky-cloud.db)")
+    cloud.set_defaults(func=cmd_cloud)
+
+    add_agent = sub.add_parser(
+        "cloud-add-agent", help="register a farm agent and print its key once")
+    add_agent.add_argument("--site", required=True, metavar="NAME",
+                           help="site name, e.g. 'Xưởng 1'")
+    add_agent.add_argument("--db", default="beesky-cloud.db", metavar="FILE",
+                           help="SQLite database file (default "
+                                "beesky-cloud.db)")
+    add_agent.set_defaults(func=cmd_cloud_add_agent)
 
     args = parser.parse_args(argv)
     return args.func(args)

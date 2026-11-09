@@ -8,8 +8,12 @@
 #
 # BeeSky is pure Python 3 stdlib (verified: argparse / concurrent /
 # dataclasses / hashlib / ipaddress / json / socket / statistics /
-# urllib ...), so there are no hidden imports, hooks or data files to
-# collect — the whole `beesky` package is found through the entry shim.
+# urllib ...), so there are no hidden imports or hooks to collect —
+# the whole `beesky` package is found through the entry shim. The one
+# kind of data file is the two dashboard pages (serve + cloud): they
+# are bundled under beesky/<pkg>/ in the _MEIPASS layout, which is
+# exactly where beesky/web/server.py and beesky/cloud/server.py look
+# first when running frozen.
 
 import os
 
@@ -20,7 +24,12 @@ a = Analysis(
     [os.path.join(PROJECT_ROOT, "packaging", "entry.py")],
     pathex=[PROJECT_ROOT],
     binaries=[],
-    datas=[],
+    datas=[
+        (os.path.join(PROJECT_ROOT, "beesky", "web", "dashboard.html"),
+         os.path.join("beesky", "web")),
+        (os.path.join(PROJECT_ROOT, "beesky", "cloud", "dashboard.html"),
+         os.path.join("beesky", "cloud")),
+    ],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

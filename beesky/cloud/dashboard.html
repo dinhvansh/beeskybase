@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BeeSky Cloud — Quản lý nhiều trại</title>
+<style>
+  :root {
+    --yellow: #F5D800;
+    --bg: #000000;
+    --panel: #141414;
+    --panel2: #1d1d1d;
+    --line: #2c2c2c;
+    --text: #ffffff;
+    --muted: #a8a8a8;
+    --ok: #4caf7d;
+    --warn: #d8a723;
+    --bad: #d9534f;
+    --orange: #d97b29;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+    font-size: 14px;
+  }
+  header {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 14px 20px; border-bottom: 3px solid var(--yellow);
+    background: #0a0a0a;
+  }
+  .logo {
+    font-size: 26px; font-weight: 800; letter-spacing: 1px; color: var(--text);
+  }
+  .logo .bee { color: var(--yellow); }
+  .logo .mark {
+    display: inline-block; background: var(--yellow); color: #000;
+    border-radius: 6px; padding: 0 8px; margin-right: 8px; font-weight: 900;
+  }
+  header .sub { color: var(--muted); font-size: 13px; }
+  header .spacer { flex: 1; }
+  header .meta { color: var(--muted); font-size: 12px; text-align: right; }
+  header a.logout { color: var(--yellow); font-size: 12px; }
+  select {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 8px 10px; font-size: 13px;
+  }
+  main { padding: 18px 20px 30px; max-width: 1280px; margin: 0 auto; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-top: 3px solid var(--yellow); border-radius: 8px; padding: 14px 16px;
+  }
+  .card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+  .card .value { font-size: 30px; font-weight: 800; margin-top: 4px; }
+  .card .value small { font-size: 14px; color: var(--muted); font-weight: 400; }
+  .card.alert .value { color: var(--bad); }
+  .sites { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .site-card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px 16px; cursor: pointer;
+  }
+  .site-card:hover { border-color: var(--yellow); }
+  .site-card.selected { border-color: var(--yellow); box-shadow: 0 0 0 1px var(--yellow); }
+  .site-card .name { font-size: 17px; font-weight: 800; display: flex; align-items: center; gap: 8px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ok); display: inline-block; }
+  .dot.stale { background: var(--bad); }
+  .site-card .stats { color: var(--muted); font-size: 13px; margin-top: 8px; line-height: 1.7; }
+  .site-card .stats b { color: var(--text); }
+  .site-card .stats .prob { color: var(--bad); font-weight: 700; }
+  h2 { margin: 26px 0 10px; font-size: 17px; }
+  h2 .accent { color: var(--yellow); }
+  .tablewrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  table { width: 100%; border-collapse: collapse; min-width: 960px; }
+  th, td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: var(--panel2); color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .4px; }
+  tr:last-child td { border-bottom: 0; }
+  .pill {
+    display: inline-block; padding: 2px 9px; border-radius: 20px;
+    font-size: 12px; font-weight: 700;
+  }
+  .pill.ok { background: #123526; color: var(--ok); }
+  .pill.check { background: #3d1512; color: var(--bad); }
+  .problems { color: #f0b3ae; font-size: 12px; margin-top: 4px; line-height: 1.5; }
+  .events { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  .event {
+    display: flex; gap: 10px; align-items: baseline; padding: 9px 14px;
+    border-bottom: 1px solid var(--line); flex-wrap: wrap;
+  }
+  .event:last-child { border-bottom: 0; }
+  .event .time { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .event .who { font-weight: 700; white-space: nowrap; }
+  .event .site { color: var(--yellow); font-size: 12px; white-space: nowrap; }
+  .event .detail { color: #ddd; }
+  .sev { font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 4px; text-transform: uppercase; white-space: nowrap; }
+  .sev.info { background: #26313d; color: #9db8cc; }
+  .sev.warning { background: #3a2f10; color: var(--warn); }
+  .sev.major { background: #3d2410; color: var(--orange); }
+  .sev.critical { background: #3d1512; color: var(--bad); }
+  .empty { color: var(--muted); padding: 16px; text-align: center; }
+  footer { color: var(--muted); font-size: 12px; text-align: center; padding: 0 20px 22px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"><span class="mark">B</span><span class="bee">Bee</span>Sky <span style="color:var(--yellow)">Cloud</span></div>
+  <div class="sub">Quản lý nhiều trại / xưởng từ xa</div>
+  <div class="spacer"></div>
+  <div class="meta">
+    <div>Agent tại trại tự đẩy số liệu lên — trang này chỉ xem.</div>
+    <div><a class="logout" href="/logout">Đăng xuất</a></div>
+  </div>
+  <label>Trại: <select id="site-filter"><option value="">Tất cả các trại</option></select></label>
+</header>
+
+<main>
+  <section class="cards">
+    <div class="card"><div class="label">Tổng số trại</div><div class="value" id="card-sites">–</div></div>
+    <div class="card"><div class="label">Tổng số máy</div><div class="value" id="card-total">–</div></div>
+    <div class="card"><div class="label">Tổng hashrate</div><div class="value" id="card-hashrate">–</div></div>
+    <div class="card" id="card-problems-wrap"><div class="label">Máy có vấn đề</div><div class="value" id="card-problems">–</div></div>
+  </section>
+
+  <h2>Tổng quan các trại <span class="accent">· Sites</span></h2>
+  <div class="sites" id="sites-grid">
+    <div class="empty">Đang tải…</div>
+  </div>
+
+  <h2>Danh sách máy <span class="accent">· Miners</span></h2>
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Trại</th><th>IP</th><th>Model</th><th>Nguồn</th><th>Hashrate</th>
+          <th>Chip sống/tổng</th><th>Nhiệt độ max</th><th>Quạt (RPM)</th><th>Trạng thái</th>
+        </tr>
+      </thead>
+      <tbody id="miners-body">
+        <tr><td colspan="9" class="empty">Đang tải…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Sự kiện gần đây <span class="accent">· Events</span></h2>
+  <div class="events" id="events-list">
+    <div class="empty">Đang tải…</div>
+  </div>
+</main>
+
+<footer>BeeSky Cloud v0.5 — dữ liệu tự làm mới mỗi 10 giây · Agent tại trại quét &amp; đẩy lên, cloud chỉ tổng hợp</footer>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+let selectedSite = "";
+
+function fmtThs(v) {
+  if (v === null || v === undefined) return "–";
+  return v.toFixed(2) + " TH/s";
+}
+function esc(s) {
+  return String(s === null || s === undefined ? "" : s)
+    .replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function siteParam() {
+  return selectedSite ? "?site=" + encodeURIComponent(selectedSite) : "";
+}
+
+async function refreshSites() {
+  try {
+    const r = await fetch("/api/sites");
+    if (r.status === 401) { location.href = "/login"; return; }
+    const data = await r.json();
+    const sites = data.sites || [];
+    let totalMiners = 0, totalThs = 0, totalProblems = 0;
+    sites.forEach((s) => {
+      totalMiners += s.miner_count; totalThs += s.total_ths || 0;
+      totalProblems += s.problem_count;
+    });
+    $("card-sites").textContent = sites.length;
+    $("card-total").textContent = totalMiners;
+    $("card-hashrate").innerHTML = totalThs.toFixed(2) + " <small>TH/s</small>";
+    $("card-problems").textContent = totalProblems;
+    $("card-problems-wrap").classList.toggle("alert", totalProblems > 0);
+
+    const sel = $("site-filter");
+    const known = Array.from(sel.options).map((o) => o.value);
+    sites.forEach((s) => {
+      if (!known.includes(s.site)) {
+        const opt = document.createElement("option");
+        opt.value = s.site; opt.textContent = s.site;
+        sel.appendChild(opt);
+      }
+    });
+    if (selectedSite && !sites.some((s) => s.site === selectedSite)) {
+      selectedSite = ""; sel.value = "";
+    }
+
+    $("sites-grid").innerHTML = sites.length
+      ? sites.map((s) =>
+          '<div class="site-card' + (selectedSite === s.site ? " selected" : "") +
+          '" data-site="' + esc(s.site) + '">' +
+          '<div class="name"><span class="dot' + (s.online ? "" : " stale") + '"></span>' +
+          esc(s.site) + "</div>" +
+          '<div class="stats">' +
+          (s.online ? "Đang trực tuyến" : "Mất tín hiệu") +
+          " · Báo cáo cuối: " + esc(s.last_seen || "chưa có") + "<br>" +
+          "Số máy: <b>" + s.miner_count + "</b> · Hashrate: <b>" + (s.total_ths || 0).toFixed(2) + " TH/s</b><br>" +
+          'Máy có vấn đề: ' + (s.problem_count
+            ? '<span class="prob">' + s.problem_count + "</span>" : "<b>0</b>") +
+          " · Nhiệt độ cao nhất: <b>" + (s.max_temp === null || s.max_temp === undefined ? "–" : s.max_temp.toFixed(0) + " °C") + "</b>" +
+          "</div></div>").join("")
+      : '<div class="empty">Chưa có trại nào — tạo agent bằng lệnh <b>beesky cloud-add-agent</b> rồi chạy agent tại trại.</div>';
+    document.querySelectorAll(".site-card").forEach((card) => {
+      card.addEventListener("click", () => {
+        selectedSite = card.getAttribute("data-site");
+        $("site-filter").value = selectedSite;
+        refreshAll();
+      });
+    });
+  } catch (e) { /* giữ nguyên dữ liệu cũ khi poll lỗi */ }
+}
+
+async function refreshMiners() {
+  try {
+    const r = await fetch("/api/miners" + siteParam());
+    const data = await r.json();
+    const miners = data.miners || [];
+    const rows = miners.map((m) => {
+      const fans = (m.fans_rpm || []).join(" / ") || "–";
+      const chips = m.chips_total ? (m.chips_alive + "/" + m.chips_total) : "–";
+      const temp = (m.max_temp_c === null || m.max_temp_c === undefined) ? "–" : m.max_temp_c.toFixed(0) + " °C";
+      const statusHtml = m.status === "OK"
+        ? '<span class="pill ok">OK</span>'
+        : '<span class="pill check">CẦN KIỂM TRA</span>';
+      const probHtml = (m.problems && m.problems.length)
+        ? '<div class="problems">' + m.problems.map((p) => "• " + esc(p.detail)).join("<br>") + "</div>"
+        : "";
+      return "<tr>" +
+        "<td>" + esc(m.site || "–") + "</td>" +
+        "<td>" + esc(m.ip) + "</td>" +
+        "<td>" + esc(m.model) + "</td>" +
+        "<td>" + esc(m.source || "–") + "</td>" +
+        "<td>" + fmtThs(m.ths) + "</td>" +
+        "<td>" + chips + "</td>" +
+        "<td>" + temp + "</td>" +
+        "<td>" + esc(fans) + "</td>" +
+        "<td>" + statusHtml + probHtml + "</td></tr>";
+    });
+    $("miners-body").innerHTML = rows.length
+      ? rows.join("")
+      : '<tr><td colspan="9" class="empty">Chưa có số liệu — agent tại trại chưa đẩy lên hoặc trại được chọn chưa có máy.</td></tr>';
+  } catch (e) { /* giữ nguyên dữ liệu cũ khi poll lỗi */ }
+}
+
+const SEV_LABEL = { info: "Thông tin", warning: "Cảnh báo", major: "Nghiêm trọng", critical: "Khẩn cấp" };
+const TYPE_LABEL = {
+  OFFLINE: "Mất kết nối", BACK_ONLINE: "Đã kết nối lại",
+  HASHRATE_DROP: "Sụt hashrate", OVER_TEMP: "Quá nhiệt",
+  CHIPS_LOST: "Mất chip", CHAIN_DOWN: "Board ngắt"
+};
+
+async function refreshEvents() {
+  try {
+    const sep = selectedSite ? "&" : "?";
+    const r = await fetch("/api/events?n=50" + (selectedSite ? "&site=" + encodeURIComponent(selectedSite) : ""));
+    const data = await r.json();
+    const events = data.events || [];
+    $("events-list").innerHTML = events.length
+      ? events.map((ev) =>
+          '<div class="event">' +
+          '<span class="time">' + esc(ev.time || "") + "</span>" +
+          '<span class="sev ' + esc(ev.severity) + '">' + esc(SEV_LABEL[ev.severity] || ev.severity) + "</span>" +
+          '<span class="site">' + esc(ev.site || "") + "</span>" +
+          '<span class="who">' + esc(ev.ip) + " · " + esc(TYPE_LABEL[ev.type] || ev.type) + "</span>" +
+          '<span class="detail">' + esc(ev.detail) + "</span>" +
+          "</div>").join("")
+      : '<div class="empty">Chưa có sự kiện nào.</div>';
+  } catch (e) { /* giữ nguyên dữ liệu cũ khi poll lỗi */ }
+}
+
+async function refreshAll() {
+  await Promise.all([refreshSites(), refreshMiners(), refreshEvents()]);
+}
+
+$("site-filter").addEventListener("change", () => {
+  selectedSite = $("site-filter").value;
+  refreshAll();
+});
+
+refreshAll();
+setInterval(refreshAll, 10000);
+</script>
+</body>
+</html>
