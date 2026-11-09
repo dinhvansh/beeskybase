@@ -21,6 +21,9 @@
     python -m beesky cloud [--port 8788] [--db beesky-cloud.db]
                                     [--host 127.0.0.1]
     python -m beesky cloud-add-agent --site NAME [--db beesky-cloud.db]
+
+    python -m beesky gui [--target 192.168.1.0/24]
+    python -m beesky gui --smoke <target>   (headless self-check)
 """
 
 from __future__ import annotations
@@ -265,6 +268,13 @@ def cmd_cloud(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_gui(args: argparse.Namespace) -> int:
+    from .gui import run_gui, smoke
+    if args.smoke:
+        return smoke(args.smoke)
+    return run_gui(default_target=args.target)
+
+
 def cmd_cloud_add_agent(args: argparse.Namespace) -> int:
     store = CloudStore(args.db)
     try:
@@ -385,6 +395,16 @@ def main(argv: list[str] | None = None) -> int:
                            help="SQLite database file (default "
                                 "beesky-cloud.db)")
     add_agent.set_defaults(func=cmd_cloud_add_agent)
+
+    gui = sub.add_parser(
+        "gui", help="open the desktop GUI (windowed scanner)")
+    gui.add_argument("--target", default="192.168.1.0/24",
+                     help="target pre-filled in the window "
+                          "(default 192.168.1.0/24)")
+    gui.add_argument("--smoke", metavar="TARGET",
+                     help="headless self-check: scan TARGET once, print "
+                          "the GUI rows, exit (used by tests)")
+    gui.set_defaults(func=cmd_gui)
 
     args = parser.parse_args(argv)
     return args.func(args)

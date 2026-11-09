@@ -21,7 +21,7 @@ Signing is wired into `.github/workflows/build-windows.yml`. It is
 **optional and automatic**: the workflow probes for the secrets and
 signs only when they exist — and only on tag builds, because eSigner
 pricing tiers meter the *number of signings* (cheapest tier is
-roughly 20 signings/month; one release = 2 signings).
+roughly 20 signings/month; one release = 3 signings).
 
 ## Checklist
 
@@ -33,8 +33,8 @@ roughly 20 signings/month; one release = 2 signings).
   part; it can take a few days and may ask for business documents).
 - Subscribe to **eSigner** (cloud signing) for that certificate.
   No USB token is needed — signing happens from GitHub Actions.
-- Pick the cheapest eSigner tier: a release uses exactly **2
-  signings** (the exe + the installer), so ~20/month is plenty.
+- Pick the cheapest eSigner tier: a release uses exactly **3
+  signings** (the CLI exe + the GUI exe + the installer), so ~20/month is plenty.
 
 ### 2. Collect the four eSigner values
 

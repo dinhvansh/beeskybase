@@ -20,11 +20,12 @@
 #
 # Code signing (optional, tag builds only): if the repo carries the
 # ESIGNER_* secrets (SSL.com eSigner cloud signing), a tag build signs
-# dist\beesky.exe BEFORE Inno Setup embeds it, then signs the
-# installer — 2 signings per release, nothing more (eSigner tiers
-# meter the number of signings, so manual/workflow_dispatch builds
-# never sign). Without the secrets every step below behaves exactly
-# as an unsigned build. Owner setup checklist: docs/signing.md.
+# dist\beesky.exe AND dist\beesky-gui.exe BEFORE Inno Setup embeds
+# them, then signs the installer — 3 signings per release, nothing
+# more (eSigner tiers meter the number of signings, so
+# manual/workflow_dispatch builds never sign). Without the secrets
+# every step below behaves exactly as an unsigned build. Owner setup
+# checklist: docs/signing.md.
 
 name: Build Windows installer
 
@@ -86,11 +87,16 @@ jobs:
       - name: Install PyInstaller
         run: pip install pyinstaller
 
-      - name: Build beesky.exe (single file)
+      - name: Build exes (console CLI + windowed GUI, single file each)
         run: pyinstaller packaging/beesky.spec --noconfirm
 
       - name: Smoke check (frozen exe)
         run: .\dist\beesky.exe --help
+
+      # `gui --help` is parsed by argparse and exits before any
+      # window opens — a safe headless smoke for the windowed build.
+      - name: Smoke check (frozen GUI exe)
+        run: .\dist\beesky-gui.exe --help
 
       # Sign the exe BEFORE Inno Setup runs: the installer embeds
       # dist\beesky.exe, so it must already carry its signature.
@@ -120,6 +126,29 @@ jobs:
             Copy-Item signed\beesky.exe dist\beesky.exe -Force
           }
           if (-not (Test-Path dist\beesky.exe)) { exit 1 }
+
+      - name: Sign beesky-gui.exe (SSL.com eSigner)
+        if: steps.signcheck.outputs.has_signing == 'true' && startsWith(github.ref, 'refs/tags/')
+        uses: SSLcom/esigner-codesign@v1.3.2
+        with:
+          command: sign
+          username: ${{ secrets.ESIGNER_USERNAME }}
+          password: ${{ secrets.ESIGNER_PASSWORD }}
+          totp_secret: ${{ secrets.ESIGNER_TOTP_SECRET }}
+          credential_id: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          input_file_path: ${{ github.workspace }}\dist\beesky-gui.exe
+          output_file_path: ${{ github.workspace }}\signed
+          override: true
+
+      - name: Use signed beesky-gui.exe
+        if: steps.signcheck.outputs.has_signing == 'true' && startsWith(github.ref, 'refs/tags/')
+        shell: powershell
+        run: |
+          # Same convergence as the CLI exe step above.
+          if (Test-Path signed\beesky-gui.exe) {
+            Copy-Item signed\beesky-gui.exe dist\beesky-gui.exe -Force
+          }
+          if (-not (Test-Path dist\beesky-gui.exe)) { exit 1 }
 
       - name: Build installer (Inno Setup)
         shell: powershell
@@ -175,7 +204,8 @@ jobs:
         continue-on-error: true
         shell: powershell
         run: |
-          $files = @((Resolve-Path dist\beesky.exe).Path)
+          $files = @((Resolve-Path dist\beesky.exe).Path,
+                     (Resolve-Path dist\beesky-gui.exe).Path)
           $files += Get-ChildItem dist\BeeSkySetup-*.exe | ForEach-Object { $_.FullName }
           foreach ($f in $files) {
             $sig = Get-AuthenticodeSignature $f
@@ -188,13 +218,14 @@ jobs:
             }
           }
 
-      - name: Upload artifact (installer + bare exe)
+      - name: Upload artifact (installer + bare exes)
         uses: actions/upload-artifact@v4
         with:
           name: BeeSky-Windows
           path: |
             dist/BeeSkySetup-*.exe
             dist/beesky.exe
+            dist/beesky-gui.exe
           if-no-files-found: error
 
       - name: Attach to GitHub Release (tags only)
@@ -204,4 +235,5 @@ jobs:
           files: |
             dist/BeeSkySetup-*.exe
             dist/beesky.exe
+            dist/beesky-gui.exe
           fail_on_unmatched_files: true
