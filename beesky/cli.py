@@ -24,6 +24,10 @@
 
     python -m beesky gui [--target 192.168.1.0/24]
     python -m beesky gui --smoke <target>   (headless self-check)
+
+    python -m beesky update [--check] [--url-base URL]
+                                   [--force-file PATH] [--relaunch]
+                                   (signed self-update, docs/updating.md)
 """
 
 from __future__ import annotations
@@ -36,11 +40,13 @@ import sys
 import time
 from pathlib import Path
 
+from . import __version__
 from .agent import AgentService
 from .cloud.server import run_cloud_server
 from .cloud.store import CloudStore
 from .core import notify as notify_mod
 from .core import report
+from .core import updater
 from .core.bitmain import BitmainClient, BitmainError
 from .core.cgminer import CgminerClient, CgminerError
 from .core.dashd import DashdClient, DashdError
@@ -250,8 +256,48 @@ def cmd_agent(args: argparse.Namespace) -> int:
     service = AgentService(lambda: _scan_records(args), cloud_url=args.cloud,
                            key=args.key, site=args.site,
                            interval=args.interval, notify_config=config,
-                           creds=creds)
+                           creds=creds, auto_update=args.auto_update,
+                           update_url_base=args.update_url)
     service.run(once=args.once)
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# update — signed self-update channel (v0.10, docs/updating.md)
+# ---------------------------------------------------------------------------
+
+def cmd_update(args: argparse.Namespace) -> int:
+    print(f"BeeSky {__version__} — signed self-update channel")
+    if args.check:
+        res = updater.check(args.url_base)
+        if not res["enabled"]:
+            print(res["error"])
+            return 0
+        if not res["ok"]:
+            print(res["error"], file=sys.stderr)
+            return 2
+        print(f"signature: OK (release manifest verified)")
+        print(f"current: {res['current']}   latest: {res['latest']}")
+        if res["update_available"]:
+            names = ", ".join(f["name"] for f in res["manifest"]["files"])
+            print(f"UPDATE AVAILABLE: {res['latest']} — run "
+                  f"`beesky update` to install (files: {names})")
+        else:
+            print("already up to date")
+        return 0
+    # --force-file PATH updates that file (entry = its basename);
+    # without it the running frozen exe is the target (updater
+    # refuses source runs itself).
+    target = args.force_file
+    verdict = updater.apply(args.url_base, target_path=target,
+                            relaunch=args.relaunch)
+    print(verdict["message"])
+    if not verdict["ok"]:
+        return 2
+    if verdict["restart_scheduled"]:
+        print("exiting now so the update can finish — BeeSky restarts "
+              "into the new version" if args.relaunch else
+              "exiting now so the swap helper can finish the update")
     return 0
 
 
@@ -372,6 +418,15 @@ def main(argv: list[str] | None = None) -> int:
     agent.add_argument("--notify", metavar="CONFIG",
                        help="notify config JSON — local channels still "
                             "fire when the cloud is unreachable")
+    agent.add_argument("--auto-update", action="store_true",
+                       help="apply signed updates automatically when "
+                            "the daily check finds one (default OFF — "
+                            "without it the agent only reports "
+                            "UPDATE_AVAILABLE to the cloud)")
+    agent.add_argument("--update-url", metavar="URL",
+                       help="update channel base URL (default env "
+                            "BEESKY_UPDATE_URL or the GitHub releases "
+                            "URL; see docs/updating.md)")
     agent.add_argument("--once", action="store_true",
                        help="run a single pass and exit")
     agent.set_defaults(func=cmd_agent)
@@ -405,6 +460,26 @@ def main(argv: list[str] | None = None) -> int:
                      help="headless self-check: scan TARGET once, print "
                           "the GUI rows, exit (used by tests)")
     gui.set_defaults(func=cmd_gui)
+
+    update = sub.add_parser(
+        "update", help="signed self-update: check the release channel "
+                       "and install a newer BeeSky (docs/updating.md)")
+    update.add_argument("--check", action="store_true",
+                        help="only report: current vs latest version "
+                             "and signature status; change nothing")
+    update.add_argument("--url-base", metavar="URL",
+                        help="update channel base URL (default env "
+                             "BEESKY_UPDATE_URL or the GitHub "
+                             "releases/latest/download URL)")
+    update.add_argument("--force-file", metavar="PATH",
+                        help="update this specific file (the manifest "
+                             "entry matching its name) instead of the "
+                             "running executable — for testing")
+    update.add_argument("--relaunch", action="store_true",
+                        help="after a successful swap, relaunch the "
+                             "same command line (the agent's "
+                             "--auto-update path)")
+    update.set_defaults(func=cmd_update)
 
     args = parser.parse_args(argv)
     return args.func(args)

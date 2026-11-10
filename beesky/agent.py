@@ -34,6 +34,14 @@ Local notification channels (``--notify``) dispatch immediately
 on-site — the OVER_TEMP → webhook → fans/water automation path must
 work even while the cloud is unreachable.
 
+Since v0.10 the agent also minds its own version: a daily check of
+the signed update channel (first check 60 s after start, then every
+24 h — :mod:`beesky.core.updater`) reports an ``UPDATE_AVAILABLE``
+event to the cloud when a newer signed release exists. Applying it
+is opt-in per agent (``--auto-update``, default OFF — farm safety):
+an auto-updating agent swaps in the verified binary and exits so
+the swap/relaunch of its exact argv can proceed.
+
 Like the notify channels, cloud POSTs connect *directly* (proxy env
 vars ignored): the uplink target is explicit operator config, not
 something a stray ``http_proxy`` should reroute.
@@ -51,6 +59,8 @@ POST_TIMEOUT_S = 5
 PENDING_CAP = 500
 PENDING_RESULTS_CAP = 50
 COMMANDS_PER_PASS = 5
+UPDATE_FIRST_CHECK_S = 60.0
+UPDATE_INTERVAL_S = 24 * 3600.0
 
 
 def _post_json(url: str, payload: dict, key: str, timeout: float =
@@ -103,7 +113,8 @@ class AgentService:
 
     def __init__(self, scan_fn, cloud_url: str, key: str, site: str,
                  interval: float = 30.0, notify_config: dict | None = None,
-                 creds: dict | None = None):
+                 creds: dict | None = None, auto_update: bool = False,
+                 update_url_base: str | None = None):
         from .core.events import EventEngine
         from .core.notify import Notifier
 
@@ -120,6 +131,13 @@ class AgentService:
         self.notifier = Notifier(notify_config)
         self._pending_events: list[dict] = []
         self._pending_results: list[dict] = []
+        # Signed self-update (v0.10): report-only unless --auto-update.
+        self.auto_update = auto_update
+        self.update_url_base = update_url_base
+        self._started_mono = time.monotonic()
+        self._last_update_check: float | None = None
+        self._update_reported: str | None = None
+        self._exit_for_update = False
 
     # ------------------------------------------------------------------
     # cloud delivery
@@ -246,6 +264,75 @@ class AgentService:
                         : len(self._pending_results) - PENDING_RESULTS_CAP]
 
     # ------------------------------------------------------------------
+    # signed self-update (v0.10)
+    # ------------------------------------------------------------------
+
+    def _maybe_update_check(self) -> None:
+        """Daily signed-update check; report (and maybe apply).
+
+        Cadence: first check UPDATE_FIRST_CHECK_S after start, then
+        every UPDATE_INTERVAL_S. Never raises — a broken update
+        channel must not disturb the monitoring loop. Each newly seen
+        version is reported to the cloud exactly once per run.
+        """
+        now = time.monotonic()
+        if self._last_update_check is None:
+            if now - self._started_mono < UPDATE_FIRST_CHECK_S:
+                return
+        elif now - self._last_update_check < UPDATE_INTERVAL_S:
+            return
+        self._last_update_check = now
+        from .core import updater
+
+        try:
+            res = updater.check(self.update_url_base)
+        except Exception as exc:  # noqa: BLE001 — advisory only
+            print(f"agent: update check failed: {exc}", file=sys.stderr)
+            return
+        if not res["ok"] or not res["update_available"]:
+            return
+        latest = res["latest"]
+        if latest != self._update_reported:
+            self._update_reported = latest
+            stamp = time.time()
+            event = {
+                "ts": stamp,
+                "time": time.strftime("%Y-%m-%d %H:%M:%S",
+                                      time.localtime(stamp)),
+                "ip": None, "model": "BeeSky agent",
+                "source": "beesky-agent",
+                "type": "UPDATE_AVAILABLE", "severity": "info",
+                "detail": (f"BeeSky {latest} is available (this agent "
+                           f"runs {res['current']})"
+                           + ("; --auto-update is on, applying it"
+                              if self.auto_update else
+                              "; run `beesky update` to install")),
+                "data": {"current": res["current"], "latest": latest,
+                         "auto_update": self.auto_update},
+            }
+            print(f"EVENT UPDATE_AVAILABLE [info] BeeSky {latest} "
+                  f"(running {res['current']})", flush=True)
+            self._pending_events.append(event)
+            self._deliver_events()
+        if not self.auto_update:
+            return
+        argv = ([sys.executable] + sys.argv[1:]
+                if getattr(sys, "frozen", False) else
+                [sys.executable, "-m", "beesky"] + sys.argv[1:])
+        try:
+            verdict = updater.apply(self.update_url_base,
+                                    relaunch=True, argv=argv)
+        except Exception as exc:  # noqa: BLE001 — retry tomorrow
+            print(f"agent: auto-update failed: {exc}", file=sys.stderr)
+            return
+        print(f"agent: auto-update: {verdict['message']}", flush=True)
+        if verdict["ok"] and not verdict["up_to_date"]:
+            # The new binary is swapped in (Windows: the swap helper
+            # relaunches us once we exit; POSIX: apply scheduled the
+            # relaunch). Either way this process must now step aside.
+            self._exit_for_update = True
+
+    # ------------------------------------------------------------------
     # passes
     # ------------------------------------------------------------------
 
@@ -282,6 +369,7 @@ class AgentService:
         # With --once the pass still polls once.
         self._deliver_results()
         self._run_commands(records)
+        self._maybe_update_check()
         return events
 
     def run(self, once: bool = False) -> None:
@@ -295,6 +383,10 @@ class AgentService:
                 self.run_pass()
                 stamp = time.strftime("%H:%M:%S")
                 print(f"[{stamp}] pass done", flush=True)
+                if self._exit_for_update:
+                    print("agent: exiting so the self-update swap / "
+                          "relaunch can proceed", flush=True)
+                    break
                 if once:
                     break
                 delay = self.interval - (time.monotonic() - started)

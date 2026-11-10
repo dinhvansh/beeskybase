@@ -26,6 +26,16 @@
 # manual/workflow_dispatch builds never sign). Without the secrets
 # every step below behaves exactly as an unsigned build. Owner setup
 # checklist: docs/signing.md.
+#
+# Update manifest (optional, tag builds only): if the repo carries
+# the UPDATE_SIGNING_KEY secret (the owner's update-channel RSA
+# private key), a tag build additionally writes
+# dist\update-manifest.json over the FINAL dist files (i.e. after
+# any eSigner signing, so the pinned hashes match what ships),
+# signs it with openssl, and attaches manifest + signature to the
+# Release — that pair is what `beesky update` verifies before
+# self-updating (docs/updating.md). No secret -> releases are
+# byte-identical to before.
 
 name: Build Windows installer
 
@@ -59,6 +69,23 @@ jobs:
           else
             echo "has_signing=false" >> "$GITHUB_OUTPUT"
             echo "No eSigner secrets - builds stay unsigned (docs/signing.md)."
+          fi
+
+      # Same probe pattern for the self-update manifest: the key's
+      # presence is the only fact later steps may know (the key
+      # itself is materialised only inside the signing step).
+      - name: Check update signing configuration
+        id: updatecheck
+        shell: bash
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          if [ -n "$UPDATE_SIGNING_KEY" ]; then
+            echo "has_update_key=true" >> "$GITHUB_OUTPUT"
+            echo "UPDATE_SIGNING_KEY found - tag builds will sign update-manifest.json."
+          else
+            echo "has_update_key=false" >> "$GITHUB_OUTPUT"
+            echo "No UPDATE_SIGNING_KEY - releases ship without an update manifest (docs/updating.md)."
           fi
 
       - name: Set up Python 3.12
@@ -218,6 +245,51 @@ jobs:
             }
           }
 
+      # Runs AFTER all (optional) eSigner signing above, so the
+      # manifest's SHA-256 pins cover the exact files that ship.
+      # Tag builds only, and only when the owner configured the
+      # UPDATE_SIGNING_KEY secret — otherwise this whole update
+      # channel stays off and the release is unchanged.
+      - name: Build + sign update manifest (tags, key configured)
+        if: steps.updatecheck.outputs.has_update_key == 'true' && startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          openssl version
+          VER="${GITHUB_REF_NAME#v}"
+          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          PUBLISHED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          INSTALLER="$(basename "$(ls dist/BeeSkySetup-*.exe | head -n 1)")"
+          python - "$VER" "$BASE" "$PUBLISHED" "$INSTALLER" <<'PYEOF'
+          import hashlib, json, sys
+          from pathlib import Path
+          version, base, published, installer = sys.argv[1:5]
+          files = []
+          for name in ["beesky.exe", "beesky-gui.exe", installer]:
+              data = (Path("dist") / name).read_bytes()
+              files.append({"name": name, "url": f"{base}/{name}",
+                            "sha256": hashlib.sha256(data).hexdigest(),
+                            "size": len(data)})
+          manifest = {"version": version, "published_at": published,
+                      "files": files}
+          Path("dist/update-manifest.json").write_text(
+              json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+          print(json.dumps(manifest, indent=2))
+          PYEOF
+          KEY_FILE="$RUNNER_TEMP/update-signing-key.pem"
+          printf '%s\n' "$UPDATE_SIGNING_KEY" > "$KEY_FILE"
+          openssl dgst -sha256 -sign "$KEY_FILE" \
+            -out dist/update-manifest.sig dist/update-manifest.json
+          # Self-check with the matching public key before shipping,
+          # then the private key material leaves the runner.
+          openssl pkey -in "$KEY_FILE" -pubout -out "$RUNNER_TEMP/update-pub.pem"
+          openssl dgst -sha256 -verify "$RUNNER_TEMP/update-pub.pem" \
+            -signature dist/update-manifest.sig dist/update-manifest.json
+          rm -f "$KEY_FILE" "$RUNNER_TEMP/update-pub.pem"
+          ls -l dist/update-manifest.json dist/update-manifest.sig
+
       - name: Upload artifact (installer + bare exes)
         uses: actions/upload-artifact@v4
         with:
@@ -228,6 +300,16 @@ jobs:
             dist/beesky-gui.exe
           if-no-files-found: error
 
+      - name: Upload artifact (update manifest)
+        if: steps.updatecheck.outputs.has_update_key == 'true' && startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: BeeSky-UpdateManifest
+          path: |
+            dist/update-manifest.json
+            dist/update-manifest.sig
+          if-no-files-found: error
+
       - name: Attach to GitHub Release (tags only)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
@@ -236,4 +318,13 @@ jobs:
             dist/BeeSkySetup-*.exe
             dist/beesky.exe
             dist/beesky-gui.exe
+          fail_on_unmatched_files: true
+
+      - name: Attach update manifest to GitHub Release (tags, key configured)
+        if: steps.updatecheck.outputs.has_update_key == 'true' && startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/update-manifest.json
+            dist/update-manifest.sig
           fail_on_unmatched_files: true
