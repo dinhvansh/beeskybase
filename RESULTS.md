@@ -168,3 +168,9 @@ dashboards are untouched in this release.
   FAIL/FAIL and — control-verified with the diff stashed — FAIL/FAIL/PASS on the pristine
   v0.18.1 tree (ca3156d); non-deterministic on identical code, and this diff touches no
   firmware-path code. tests/RESULTS.md: 491 PASS lines.
+
+## v0.19.1 — auto-hide table scrollbar
+The v0.19 screenshot still showed a pale scrollbar strip (clam renders it light under some
+Tk builds) even with a single row. The main window's table scrollbar now auto-hides whenever
+the content fits (yscrollcommand handler feeds the bar + toggles its packing) and appears
+only while the rows actually overflow. GUI/theme/agent-bg suites green.

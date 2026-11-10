@@ -309,10 +309,10 @@ class BeeSkyApp:
         self.tree.tag_configure("odd",
                                 background=ui_theme.TABLE_ZEBRA)
         self.tree.pack(side="left", fill="both", expand=True)
-        scrollbar = ttk.Scrollbar(table_frame, orient="vertical",
-                                  command=self.tree.yview)
-        scrollbar.pack(side="right", fill="y")
-        self.tree.configure(yscrollcommand=scrollbar.set)
+        self.table_scrollbar = ttk.Scrollbar(
+            table_frame, orient="vertical", command=self.tree.yview)
+        self._scrollbar_shown = True
+        self.tree.configure(yscrollcommand=self._on_tree_yscroll)
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
 
         # -- detail pane ------------------------------------------------------
@@ -424,6 +424,25 @@ class BeeSkyApp:
             f"{max(temps):.0f} °C" if temps else "-")
 
     # -- detail pane ---------------------------------------------------------
+
+    def _on_tree_yscroll(self, first: str, last: str) -> None:
+        """Feed the scrollbar and auto-hide it when nothing scrolls.
+
+        A permanently visible scrollbar is the loudest rectangle in
+        the window (and renders pale under some Tk builds); modern
+        tables only show it while the content actually overflows.
+        """
+        self.table_scrollbar.set(first, last)
+        try:
+            fits = float(first) <= 0.0 and float(last) >= 1.0
+        except (TypeError, ValueError):
+            fits = False
+        if fits and self._scrollbar_shown:
+            self.table_scrollbar.pack_forget()
+            self._scrollbar_shown = False
+        elif not fits and not self._scrollbar_shown:
+            self.table_scrollbar.pack(side="right", fill="y")
+            self._scrollbar_shown = True
 
     def _on_select(self, _event=None) -> None:
         selection = self.tree.selection()

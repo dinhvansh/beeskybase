@@ -30,7 +30,7 @@ Covers:
   * packaging: the spec builds beesky-agentw (console=False) from
     the agent Analysis; agent.iss ships it; the CI workflow ships
     it in artifact + Release + the signed update-manifest list;
-    versions in sync at 0.19.0.
+    versions in sync at 0.19.1.
   * end-to-end (subprocesses on 127.0.0.1; real cloud + mock
     dashd): `run --once` from a config file writes
     agent-status.json (ok, 1 miner) and an agent.log that contains
@@ -314,10 +314,10 @@ def test_packaging() -> None:
           workflow.count("dist/beesky-agentw.exe") >= 2)
     check("workflow: signed update manifest lists beesky-agentw.exe",
           '"beesky-agentw.exe"' in workflow)
-    check("versions in sync at 0.19.0",
-          beesky.__version__ == "0.19.0"
-          and '#define MyAppVersion "0.19.0"' in agent_iss
-          and '#define MyAppVersion "0.19.0"' in (ROOT / "packaging"
+    check("versions in sync at 0.19.1",
+          beesky.__version__ == "0.19.1"
+          and '#define MyAppVersion "0.19.1"' in agent_iss
+          and '#define MyAppVersion "0.19.1"' in (ROOT / "packaging"
               / "installer.iss").read_text(encoding="utf-8"))
 
 
