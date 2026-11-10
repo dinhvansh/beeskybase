@@ -33,7 +33,7 @@ from tkinter import filedialog, ttk
 from . import __version__
 from . import ui_theme
 from .core import report
-from .rounded import RoundedButton, RoundedEntry
+from .rounded import RoundedButton, RoundedCard, RoundedEntry
 
 BG = ui_theme.BG
 PANEL = ui_theme.PANEL
@@ -278,7 +278,16 @@ class BeeSkyApp:
         # -- results table --------------------------------------------------
         table_card = ui_theme.card(main, pad=12)
         table_card.grid(row=3, column=0, sticky="nsew", pady=(12, 0))
-        table_frame = ttk.Frame(table_card, style="Card.TFrame")
+        # v0.19: the tree sits in a dark inset WELL (radius 12,
+        # TABLE_WELL fill, hairline BORDER outline) inside the
+        # glass card — its square corners never touch the card's
+        # rounded corners, and the well + the pinned Treeview
+        # border colours leave no light clam frame around it.
+        table_frame = RoundedCard(table_card, pad=10,
+                                  radius=ui_theme.RADIUS_WIDGET,
+                                  backdrop=ui_theme.PANEL_GLASS,
+                                  fill=ui_theme.TABLE_WELL,
+                                  outline=ui_theme.BORDER)
         table_frame.pack(fill="both", expand=True)
         columns = ("ip", "model", "source", "ths", "chips", "temp", "fans",
                    "status")
@@ -297,6 +306,8 @@ class BeeSkyApp:
                                 foreground=FG)
         self.tree.tag_configure("error", background=ERROR_BG,
                                 foreground=FG)
+        self.tree.tag_configure("odd",
+                                background=ui_theme.TABLE_ZEBRA)
         self.tree.pack(side="left", fill="both", expand=True)
         scrollbar = ttk.Scrollbar(table_frame, orient="vertical",
                                   command=self.tree.yview)
@@ -308,9 +319,12 @@ class BeeSkyApp:
         detail_card = ui_theme.card(main, title="Chi tiết máy đã chọn",
                                     pad=12)
         detail_card.grid(row=4, column=0, sticky="ew", pady=(12, 0))
+        # v0.19: no box of its own — the text sits flat on the
+        # glass card (PANEL_GLASS, zero border/highlight).
         self.detail = tk.Text(detail_card, height=5,
-                              bg=ui_theme.PANEL2, fg=FG,
+                              bg=ui_theme.PANEL_GLASS, fg=FG,
                               insertbackground=FG, relief="flat",
+                              borderwidth=0, highlightthickness=0,
                               font=(self._family, ui_theme.BODY_SIZE),
                               wrap="word", padx=10, pady=8)
         self.detail.pack(fill="x")
@@ -378,9 +392,16 @@ class BeeSkyApp:
                 tag = "error"
             elif record.get("status") != "OK":
                 tag = "check"
+            if tag:
+                tags = (tag,)
+            elif idx % 2 == 1:
+                # Zebra parity is for plain OK rows only — a
+                # problem row always keeps its status wash.
+                tags = ("odd",)
+            else:
+                tags = ()
             self.tree.insert("", "end", iid=str(idx),
-                             values=row_values(record),
-                             tags=(tag,) if tag else ())
+                             values=row_values(record), tags=tags)
         bad = sum(1 for r in records if r.get("status") != "OK")
         self._update_stats(records, bad)
         self.status_var.set(

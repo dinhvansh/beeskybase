@@ -16,6 +16,12 @@ Runs under xvfb-run (see run_mock_test_v15.sh). Asserts:
     stat cards (totals, hashrate sum, problem count + colour,
     max temperature).
 
+v0.19 adds: the Treeview/scrollbar pins for the dark inset table
+well (TABLE_WELL background + border colours pinned so no light
+clam frame can render, TABLE_HEADING heading strip, dark
+scrollbar) and the row-tag rules — odd OK rows carry the zebra
+"odd" tag, CHECK rows keep their status wash tag untouched.
+
 Prints PASS lines; exit 1 on failure.
 """
 
@@ -80,11 +86,38 @@ def test_theme_applies() -> None:
         check("theme: Ghost.TButton background is panel2",
               style.lookup("Ghost.TButton", "background")
               == ui_theme.PANEL2)
-        check("theme: Treeview background is the card panel",
-              style.lookup("Treeview", "background") == ui_theme.PANEL)
+        check("theme: Treeview background is the table well (v0.19)",
+              style.lookup("Treeview", "background")
+              == ui_theme.TABLE_WELL)
         check("theme: Treeview rowheight is 30",
               str(style.lookup("Treeview", "rowheight")) == "30",
               style.lookup("Treeview", "rowheight"))
+        check("theme: Treeview border is pinned to the well colour "
+              "(no white clam frame)",
+              style.lookup("Treeview", "bordercolor")
+              == ui_theme.TABLE_WELL
+              and style.lookup("Treeview", "lightcolor")
+              == ui_theme.TABLE_WELL
+              and style.lookup("Treeview", "darkcolor")
+              == ui_theme.TABLE_WELL)
+        check("theme: Treeview.Heading background is the heading strip",
+              style.lookup("Treeview.Heading", "background")
+              == ui_theme.TABLE_HEADING)
+        check("theme: Treeview.Heading border is its own background "
+              "(no separator line)",
+              style.lookup("Treeview.Heading", "bordercolor")
+              == ui_theme.TABLE_HEADING)
+        check("theme: scrollbar is dark (border thumb, well trough)",
+              style.lookup("Vertical.TScrollbar", "background")
+              == ui_theme.BORDER
+              and style.lookup("Vertical.TScrollbar", "troughcolor")
+              == ui_theme.TABLE_WELL
+              and style.lookup("Vertical.TScrollbar", "bordercolor")
+              == ui_theme.TABLE_WELL)
+        check("theme: table tokens match the v0.19 spec hex values",
+              (ui_theme.TABLE_WELL, ui_theme.TABLE_HEADING,
+               ui_theme.TABLE_ZEBRA)
+              == ("#121216", "#1D1D24", "#17171D"))
         check("theme: Card.TFrame background is the glass panel (v0.18)",
               style.lookup("Card.TFrame", "background")
               == ui_theme.PANEL_GLASS)
@@ -168,6 +201,26 @@ def test_main_window() -> None:
         check("main gui: max-temp stat shows the hottest miner",
               app.stat_temp_var.get() == "87 °C",
               app.stat_temp_var.get())
+
+        # v0.19 row tags: zebra parity on plain OK rows only; a
+        # CHECK row keeps its status wash (tag + configured wash
+        # colour) and never picks up the parity tag.
+        ok_a = dict(record, ip="10.0.0.10", status="OK",
+                    problems=[])
+        ok_b = dict(record, ip="10.0.0.11", status="OK",
+                    problems=[])
+        app.show_records([ok_a, ok_b, record])
+        check("main gui: even OK row has no parity tag",
+              tuple(app.tree.item("0", "tags") or ()) == (),
+              str(app.tree.item("0", "tags")))
+        check("main gui: odd OK row carries the zebra tag",
+              app.tree.item("1", "tags") == ("odd",),
+              str(app.tree.item("1", "tags")))
+        check("main gui: CHECK row keeps its wash tag (no zebra)",
+              app.tree.item("2", "tags") == ("check",)
+              and str(app.tree.tag_configure("check")["background"])
+              == gui.PROBLEM_BG,
+              str(app.tree.item("2", "tags")))
         root.update_idletasks()
     finally:
         root.destroy()

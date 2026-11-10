@@ -123,3 +123,48 @@ Live-screenshot review caught the web footers stuck at "BeeSky Cloud v0.13" / "B
 placeholder that the servers stamp with beesky.__version__ when serving — single source of
 truth, can never go stale again. Pinned by 4 new assertions in mock_glass_test (30 total);
 cloud/web/agent-bg suites re-run green.
+
+## v0.19 — miners table beautified (inset well, zebra, dark scrollbar, flat detail)
+Owner, on the main-window screenshot: "cái khung bảng xem máy nhìn thấy gớm" — the results
+Treeview was the last square surface: a SQUARE box with a bright WHITE frame and a glowing
+light scrollbar inside the rounded glass card. Desktop only (gui.py + ui_theme.py); the web
+dashboards are untouched in this release.
+- WHITE FRAME ROOT CAUSE: the ttk "Treeview" style set borderwidth=0/relief="flat" but never
+  pinned bordercolor/lightcolor/darkcolor — under clam those fall back to a LIGHT default,
+  which rendered as the white frame on every platform. All three are now pinned to the new
+  token TABLE_WELL #121216; background/fieldbackground move PANEL -> TABLE_WELL (rowheight
+  stays 30). Treeview.Heading: background TABLE_HEADING #1D1D24 with its border colours
+  pinned to the same value, so the heading separator line vanishes too.
+- INSET WELL: the plain Card.TFrame behind the table is replaced by a RoundedCard well
+  inside the glass card (radius 12, fill TABLE_WELL, hairline outline #26262E/BORDER,
+  backdrop PANEL_GLASS, 10px inset via its padding) — tree + scrollbar pack inside it and
+  fill it, so the tree's square corners never touch the card's rounded corners.
+- ZEBRA: new "odd" row tag (TABLE_ZEBRA #17171D) applied at insertion time in show_records
+  to odd-indexed rows ONLY when the row has no status tag — problem rows keep exactly their
+  "check" (PROBLEM_BG #463A10) / "error" (#472020) wash tags, so tag precedence is by
+  construction, not by tag-order luck. row_values() and all other insertion behaviour
+  unchanged.
+- SCROLLBAR: Vertical.TScrollbar + TScrollbar restyled dark — background BORDER (#26262E),
+  troughcolor TABLE_WELL, bordercolor TABLE_WELL, arrowcolor MUTED. No more light strip.
+- DETAIL PANE FLAT: the detail tk.Text gets borderwidth=0 + highlightthickness=0 and its
+  background moves PANEL2 -> PANEL_GLASS, so the text sits directly on its glass card.
+  Stat cards / toolbar / geometry unchanged (grid row 3 weighted, detail keeps full height).
+- Changed test expectations (every one still an EXACT pin):
+  * tests/mock_theme_test.py — "Treeview background" expected ui_theme.PANEL (#15151A)
+    -> ui_theme.TABLE_WELL (#121216) [intentional v0.19 token move]; ADDED exact pins:
+    Treeview bordercolor/lightcolor/darkcolor == TABLE_WELL, Treeview.Heading background
+    + bordercolor == TABLE_HEADING, Vertical.TScrollbar background == BORDER /
+    troughcolor == TABLE_WELL / bordercolor == TABLE_WELL, token triple
+    (#121216/#1D1D24/#17171D); ADDED row-tag assertions (even OK row tagless, odd OK row
+    == ("odd",), CHECK row == ("check",) with tag_configure wash == PROBLEM_BG).
+  * tests/mock_agent_bg_test.py — release version pin 0.18.1 -> 0.19.0 (routine per-release).
+- Tests: chain (tests/run_mock_test_v19.sh) regenerated v0.1–v0.10 green in-chain (156
+  PASS), then was HALTED EXTERNALLY at the v0.10->v0.11 transition (no FAIL line in the log;
+  same external halt as v0.17). tests/RESULTS.md restored to the committed ship-time blocks;
+  v0.11–v0.19 suites re-verified STANDALONE, all green (firmware: see below; actions,
+  agents-ui, cloud, energy/pool, history, logo, repairs, watch, web plain; theme 34,
+  gui, rounded, glass, agent-app, agent-bg under xvfb). The v0.11 firmware unlock-order
+  assertion remains the known load-sensitive flake: v0.19 tree ran FAIL/PASS/FAIL/FAIL/
+  FAIL/FAIL and — control-verified with the diff stashed — FAIL/FAIL/PASS on the pristine
+  v0.18.1 tree (ca3156d); non-deterministic on identical code, and this diff touches no
+  firmware-path code. tests/RESULTS.md: 491 PASS lines.

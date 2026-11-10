@@ -1163,3 +1163,93 @@ PASS: desktop: ghost colours are the glass triple
 PASS: desktop: disabled ghost drops the rim, mutes to glass
 PASS: desktop: entry shape is ENTRY_FILL / ENTRY_BORDER
 PASS: desktop: hosted entry bg matches the glass fill
+
+---
+
+# v0.19 mock test — miners table beautified (standalone verification; chain halted externally)
+
+Chain run_mock_test_v19.sh regenerated v0.1-v0.10 in-chain green (156 PASS),
+then the run was halted externally at the v0.10 -> v0.11 transition (no FAIL
+line in the log — the same external halt seen at v0.17). The committed
+ship-time v0.11-v0.18 blocks above were restored verbatim and every later
+suite was re-verified standalone against the v0.19 tree:
+
+  * mock_firmware_test (v0.11): its unlock-order assertion
+    (identify -> first.bmu -> kill -> second.bmu -> patch marker) is the
+    KNOWN load-sensitive flake — on the v0.19 tree it ran
+    FAIL/PASS/FAIL/FAIL/FAIL/FAIL and, control-verified with the v0.19 diff
+    stashed, FAIL/FAIL/PASS on the pristine v0.18.1 tree (ca3156d):
+    non-deterministic on identical code, and this diff touches no
+    firmware-path code (ui_theme styles + gui table/detail only).
+  * actions, agents-ui, cloud, energy/pool, history, logo, repairs,
+    watch, web: PASSED standalone. Rounded, glass, agent-app, agent-bg
+    (incl. the 0.19.0 release pin): PASSED standalone under xvfb.
+
+v0.19 itself (beesky/ui_theme.py + beesky/gui.py; web dashboards untouched):
+the ttk Treeview style never pinned bordercolor/lightcolor/darkcolor, so
+clam's LIGHT default border rendered as a white frame around the table —
+now all three are pinned to the new TABLE_WELL token (#121216) with
+borderwidth=0/relief=flat, and background/fieldbackground move PANEL ->
+TABLE_WELL (rowheight stays 30). Treeview.Heading: TABLE_HEADING (#1D1D24)
+strip, border pinned to itself so the separator line vanishes.
+Vertical.TScrollbar/TScrollbar: BORDER (#26262E) thumb, TABLE_WELL trough +
+border, muted arrows. The table sits in an inset RoundedCard WELL inside
+its glass card (radius 12, fill TABLE_WELL, #26262E outline, 10px inset).
+Zebra: an "odd" tag (TABLE_ZEBRA #17171D) is applied at insertion to
+odd-indexed plain OK rows only — problem rows keep exactly their
+check/error wash tags. Detail tk.Text: borderwidth=0, highlightthickness=0,
+background PANEL2 -> PANEL_GLASS (flat on its card).
+Changed test expectations (all still exact pins): mock_theme_test Treeview
+background PANEL -> TABLE_WELL + new pins (Treeview border colours,
+heading strip + border, dark scrollbar, three table tokens) + row-tag
+assertions; mock_agent_bg_test release pin 0.18.1 -> 0.19.0.
+
+```
+PASS: theme: a font family is chosen
+PASS: theme: root background is the dashboard bg
+PASS: theme: TEntry fieldbackground is panel2
+PASS: theme: TEntry padding is (10, 7)
+PASS: theme: Accent.TButton background is the BeeSky yellow
+PASS: theme: Ghost.TButton background is panel2
+PASS: theme: Treeview background is the table well (v0.19)
+PASS: theme: Treeview rowheight is 30
+PASS: theme: Treeview border is pinned to the well colour (no white clam frame)
+PASS: theme: Treeview.Heading background is the heading strip
+PASS: theme: Treeview.Heading border is its own background (no separator line)
+PASS: theme: scrollbar is dark (border thumb, well trough)
+PASS: theme: table tokens match the v0.19 spec hex values
+PASS: theme: Card.TFrame background is the glass panel (v0.18)
+PASS: theme: palette constants match the spec hex values
+PASS: theme: glass tokens match the v0.18 spec hex values
+PASS: agent gui: 'Kết nối cloud' card is present
+PASS: agent gui: 'Quét tại trại' card is present
+PASS: agent gui: the three action buttons keep their labels
+PASS: agent gui: status pill starts at 'Chưa chạy thử'
+PASS: agent gui: pill recolours to the ok colour
+PASS: main gui: 'Mục tiêu quét' is present
+PASS: main gui: 'Tổng số máy' is present
+PASS: main gui: 'Tổng hashrate' is present
+PASS: main gui: 'Máy có vấn đề' is present
+PASS: main gui: 'Nhiệt độ cao nhất' is present
+PASS: main gui: 'Chi tiết máy đã chọn' is present
+PASS: main gui: toolbar buttons keep their labels
+PASS: main gui: stat cards follow a scan (1 máy, 100.50 TH/s)
+PASS: main gui: problem stat counts and turns red
+PASS: main gui: max-temp stat shows the hottest miner
+PASS: main gui: even OK row has no parity tag
+PASS: main gui: odd OK row carries the zebra tag
+PASS: main gui: CHECK row keeps its wash tag (no zebra)
+
+THEME TEST PASSED
+```
+
+```
+PASS: mock miner up on 127.0.0.1:4028
+GUI SMOKE: 1 row(s) for target 127.0.0.1
+GUI SMOKE first row: 127.0.0.1 | Antminer S19 Pro | cgminer RPC | 102.90 | 339/342 | 88 | 4320/4380/4440/4500 | CHECK
+PASS: beesky gui --smoke exits 0 under the virtual display
+PASS: GUI table holds exactly 1 row after one scan
+PASS: first row = 127.0.0.1 | Antminer S19 Pro | ... | 339/342 chips | CHECK (same values as the CLI)
+
+GUI TEST PASSED
+```

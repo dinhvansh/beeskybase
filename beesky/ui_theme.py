@@ -41,8 +41,9 @@ SELECT_BG = "#3A3410"  # treeview selection (dark accent wash)
 # material: a lighter glass tint for card surfaces, brighter
 # outlines, and a 1px rim light along the top edge drawn by
 # beesky/rounded.py. PANEL/PANEL2/BORDER above remain the solid
-# fallback tokens (data surfaces such as the Treeview, ttk styles).
-# See docs/design-tokens.md ("Liquid Glass").
+# fallback tokens for ttk styles (the Treeview moved to its own
+# darker well tokens in v0.19). See docs/design-tokens.md
+# ("Liquid Glass").
 
 PANEL_GLASS = "#191920"   # card fill — simulated glass tint
 GLASS_BORDER = "#34343E"  # outline for cards + ghost buttons
@@ -50,6 +51,17 @@ RIM_LIGHT = "#3D3D4A"     # 1px top rim light (cards, ghost buttons)
 GHOST_FILL = "#22222B"    # ghost button glass fill
 ENTRY_FILL = "#1E1E26"    # entry glass fill
 ENTRY_BORDER = "#30303C"  # entry outline (focus still turns ACCENT)
+
+# -- miners table well (v0.19) ----------------------------------------------
+# The main window's results table sits in a dark inset well inside
+# its glass card: a fill darker than the glass, its own heading
+# strip, and a zebra parity wash for odd rows. The Treeview and
+# scrollbar styles below are built on these tokens so no light
+# clam default can leak back in around the table.
+
+TABLE_WELL = "#121216"     # table well fill (darker than PANEL_GLASS)
+TABLE_HEADING = "#1D1D24"  # treeview heading strip
+TABLE_ZEBRA = "#17171D"    # odd-row parity wash (plain OK rows only)
 
 # -- type scale (points) ----------------------------------------------------
 
@@ -204,21 +216,38 @@ def setup_theme(root: tk.Tk) -> str:
                     foreground=TEXT, font=body, focuscolor=PANEL_GLASS)
 
     # -- treeview ------------------------------------------------------------
-    style.configure("Treeview", background=PANEL, fieldbackground=PANEL,
+    # v0.19: the tree lives in the dark inset well (TABLE_WELL).
+    # bordercolor / lightcolor / darkcolor are pinned to the well
+    # colour — clam falls back to a LIGHT default border when they
+    # are left unset, which is exactly where the pre-v0.19 white
+    # frame around the table came from. The heading pins its
+    # border colours to its own background so the separator line
+    # under the headings vanishes too.
+    style.configure("Treeview", background=TABLE_WELL,
+                    fieldbackground=TABLE_WELL,
                     foreground=TEXT, rowheight=30, borderwidth=0,
-                    relief="flat", font=body)
-    style.configure("Treeview.Heading", background=PANEL2,
+                    relief="flat", bordercolor=TABLE_WELL,
+                    lightcolor=TABLE_WELL, darkcolor=TABLE_WELL,
+                    font=body)
+    style.configure("Treeview.Heading", background=TABLE_HEADING,
                     foreground=MUTED, borderwidth=0,
+                    bordercolor=TABLE_HEADING,
+                    lightcolor=TABLE_HEADING,
+                    darkcolor=TABLE_HEADING,
                     font=(family, SMALL_SIZE, "bold"), padding=(8, 6))
-    style.map("Treeview.Heading", background=[("active", PANEL2)])
+    style.map("Treeview.Heading",
+              background=[("active", TABLE_HEADING)])
     style.map("Treeview", background=[("selected", SELECT_BG)],
               foreground=[("selected", ACCENT)])
 
     # -- scrollbar -----------------------------------------------------------
-    style.configure("TScrollbar", background=PANEL2, troughcolor=BG,
-                    bordercolor=BORDER, arrowcolor=MUTED, relief="flat")
-    style.configure("Vertical.TScrollbar", background=PANEL2,
-                    troughcolor=BG, bordercolor=BORDER,
+    # v0.19: dark to match the table well — BORDER thumb riding in
+    # a TABLE_WELL trough, no light strip beside the rows.
+    style.configure("TScrollbar", background=BORDER,
+                    troughcolor=TABLE_WELL, bordercolor=TABLE_WELL,
+                    arrowcolor=MUTED, relief="flat")
+    style.configure("Vertical.TScrollbar", background=BORDER,
+                    troughcolor=TABLE_WELL, bordercolor=TABLE_WELL,
                     arrowcolor=MUTED, relief="flat")
 
     return family
