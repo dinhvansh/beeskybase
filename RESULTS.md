@@ -174,3 +174,11 @@ The v0.19 screenshot still showed a pale scrollbar strip (clam renders it light 
 Tk builds) even with a single row. The main window's table scrollbar now auto-hides whenever
 the content fits (yscrollcommand handler feeds the bar + toggles its packing) and appears
 only while the rows actually overflow. GUI/theme/agent-bg suites green.
+
+## v0.19.2 — margins back (table well gets a real glass rim)
+Owner: "lề đồ đâu hết rồi, tràn ra luôn viền" — the near-black table well (#121216) sat on the
+near-black window backdrop (#0B0B0D) with no visible boundary, so the table read as one slab
+spilling edge to edge. Root padding 16→22, section gaps 12→14, table card pad 12→14, and the
+well now keeps 6px external padding with the brighter GLASS_BORDER hairline — a clear glass
+rim frames the well on all four sides. Fans column widened 130→150 (was clipping RPM values
+with the scrollbar hidden), Model 170→160 to compensate. GUI/theme/glass/agent-bg green.

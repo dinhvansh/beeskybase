@@ -190,7 +190,7 @@ class BeeSkyApp:
         return var
 
     def _build_widgets(self, default_target: str) -> None:
-        main = ttk.Frame(self.root, padding=(16, 12, 16, 12))
+        main = ttk.Frame(self.root, padding=(22, 16, 22, 16))
         main.pack(fill="both", expand=True)
         # Grid (not pack) so that when the window is shorter than the full
         # content request, the RESULTS TABLE row absorbs the shrink and the
@@ -217,7 +217,7 @@ class BeeSkyApp:
 
         # -- toolbar card -------------------------------------------------
         toolbar = ui_theme.card(main, title="Mục tiêu quét", pad=12)
-        toolbar.grid(row=1, column=0, sticky="ew", pady=(12, 0))
+        toolbar.grid(row=1, column=0, sticky="ew", pady=(14, 0))
         target_row = ttk.Frame(toolbar, style="Card.TFrame")
         target_row.pack(fill="x")
         self.target_var = tk.StringVar(value=default_target)
@@ -263,7 +263,7 @@ class BeeSkyApp:
 
         # -- stats row ------------------------------------------------------
         stats = ttk.Frame(main)
-        stats.grid(row=2, column=0, sticky="ew", pady=(12, 0))
+        stats.grid(row=2, column=0, sticky="ew", pady=(14, 0))
         for col in range(4):
             stats.columnconfigure(col, weight=1)
         self.stat_total_var = self._stat_card(stats, 0, "Tổng số máy",
@@ -276,26 +276,30 @@ class BeeSkyApp:
                                              "Nhiệt độ cao nhất", "-")
 
         # -- results table --------------------------------------------------
-        table_card = ui_theme.card(main, pad=12)
-        table_card.grid(row=3, column=0, sticky="nsew", pady=(12, 0))
+        table_card = ui_theme.card(main, pad=14)
+        table_card.grid(row=3, column=0, sticky="nsew", pady=(14, 0))
         # v0.19: the tree sits in a dark inset WELL (radius 12,
-        # TABLE_WELL fill, hairline BORDER outline) inside the
-        # glass card — its square corners never touch the card's
-        # rounded corners, and the well + the pinned Treeview
-        # border colours leave no light clam frame around it.
+        # TABLE_WELL fill, hairline outline) inside the glass card —
+        # its square corners never touch the card's rounded corners,
+        # and the well + the pinned Treeview border colours leave no
+        # light clam frame around it. v0.19.2: the well keeps a clear
+        # glass rim on every side (external padding + the brighter
+        # GLASS_BORDER hairline) — without it the near-black well
+        # visually bled into the near-black window backdrop and the
+        # table looked like it spilled edge to edge.
         table_frame = RoundedCard(table_card, pad=10,
                                   radius=ui_theme.RADIUS_WIDGET,
                                   backdrop=ui_theme.PANEL_GLASS,
                                   fill=ui_theme.TABLE_WELL,
-                                  outline=ui_theme.BORDER)
-        table_frame.pack(fill="both", expand=True)
+                                  outline=ui_theme.GLASS_BORDER)
+        table_frame.pack(fill="both", expand=True, padx=6, pady=6)
         columns = ("ip", "model", "source", "ths", "chips", "temp", "fans",
                    "status")
         headings = {"ip": "IP", "model": "Model", "source": "Nguồn",
                     "ths": "Hashrate (TH/s)", "chips": "Chip",
                     "temp": "Nhiệt độ", "fans": "Quạt", "status": "Trạng thái"}
-        widths = {"ip": 110, "model": 170, "source": 100, "ths": 110,
-                  "chips": 70, "temp": 70, "fans": 130, "status": 90}
+        widths = {"ip": 110, "model": 160, "source": 100, "ths": 110,
+                  "chips": 70, "temp": 70, "fans": 150, "status": 90}
         self.tree = ttk.Treeview(table_frame, columns=columns, height=7,
                                  show="headings", selectmode="browse")
         for col in columns:
@@ -318,7 +322,7 @@ class BeeSkyApp:
         # -- detail pane ------------------------------------------------------
         detail_card = ui_theme.card(main, title="Chi tiết máy đã chọn",
                                     pad=12)
-        detail_card.grid(row=4, column=0, sticky="ew", pady=(12, 0))
+        detail_card.grid(row=4, column=0, sticky="ew", pady=(14, 0))
         # v0.19: no box of its own — the text sits flat on the
         # glass card (PANEL_GLASS, zero border/highlight).
         self.detail = tk.Text(detail_card, height=5,
