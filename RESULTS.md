@@ -195,3 +195,13 @@ every row inside a card drew its own rectangle; the toolbar buttons sat inside t
 frame and its border peeked through the gaps between buttons. Card.TFrame is now borderless
 — the RoundedCard is the only frame. Pixel-verified: the gap dashes are gone. Theme/GUI/
 glass/agent suites green.
+
+## v0.19.5 — card surfaces span the full frame (square-corner overhang fixed)
+Owner: "còn lòi kìa" — the detail card's bottom corners were square. Root cause, measured:
+a RoundedCard's canvas was placed inside the frame's CONTENT box, so the drawn panel sat
+inset by the card padding on every side; full-width children (the detail Text, same fill)
+covered the panel's outline and their square corners poked past its rounded arcs. The
+canvas now spans the full frame (negative place offset + 2*pad size), so the surface and
+its outline sit at the frame's true edges and children rest inside them. Verified by
+geometry (canvas == frame on all 8 cards) and by corner zooms before/after. All desktop
+suites green.

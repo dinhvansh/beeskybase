@@ -144,7 +144,13 @@ class RoundedCard(ttk.Frame):
         self._canvas = tk.Canvas(
             self, bg=backdrop or ui_theme.BG, highlightthickness=0,
             bd=0)
-        self._canvas.place(x=0, y=0, relwidth=1, relheight=1)
+        # The surface must span the FULL frame, padding ring included:
+        # place() anchors inside the frame's content box, so without
+        # the negative offset the drawn panel sat inset by `pad` and
+        # full-width children (the detail text) covered its outline
+        # and poked square corners past the rounded arcs (v0.19.5).
+        self._canvas.place(x=-pad, y=-pad, relwidth=1, relheight=1,
+                           width=2 * pad, height=2 * pad)
         # Stacking follows creation order: the canvas is created
         # first, so the title and all caller children land above it.
         self._canvas.bind("<Configure>", self._redraw)
