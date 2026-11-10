@@ -25,12 +25,23 @@
 import os
 
 PROJECT_ROOT = os.path.dirname(SPECPATH)  # SPECPATH == <repo>/packaging
-ICON = os.path.join(PROJECT_ROOT, "packaging", "beesky.ico")
+ICON = os.path.join(PROJECT_ROOT, "packaging", "assets", "beesky-logo.ico")
 DATAS = [
     (os.path.join(PROJECT_ROOT, "beesky", "web", "dashboard.html"),
      os.path.join("beesky", "web")),
     (os.path.join(PROJECT_ROOT, "beesky", "cloud", "dashboard.html"),
      os.path.join("beesky", "cloud")),
+]
+# The GUI also loads the official logo at runtime (window icon +
+# header image): the 512px PNG and the .ico ship under
+# beesky/assets/ in the bundle, where beesky/gui.py's _asset_path()
+# looks first (sys._MEIPASS/beesky/assets/).
+GUI_DATAS = DATAS + [
+    (os.path.join(PROJECT_ROOT, "packaging", "assets",
+                  "beesky-logo-512.png"),
+     os.path.join("beesky", "assets")),
+    (os.path.join(PROJECT_ROOT, "packaging", "assets", "beesky-logo.ico"),
+     os.path.join("beesky", "assets")),
 ]
 TK_HIDDENIMPORTS = ["tkinter", "tkinter.ttk", "tkinter.filedialog"]
 
@@ -75,7 +86,7 @@ a_gui = Analysis(
     [os.path.join(PROJECT_ROOT, "packaging", "entry_gui.py")],
     pathex=[PROJECT_ROOT],
     binaries=[],
-    datas=DATAS,
+    datas=GUI_DATAS,
     hiddenimports=TK_HIDDENIMPORTS,
     hookspath=[],
     hooksconfig={},

@@ -533,3 +533,54 @@ PASS: unlock race: kill landed inside the first-upload window
 
 FIRMWARE TEST PASSED
 ```
+
+---
+
+# v0.11.2 mock test — official logo wiring
+
+`tests/mock_logo_test.py` is a static wiring test (no servers):
+the official BeeSky logo master (owner's Illustrator vector,
+yellow #F4D600) ships in `packaging/assets/` as SVG + multi-size
+ICO + 512px PNG. Assertions: both dashboards inline the real SVG
+in the header (viewBox + chevron path fragment + #F4D600) with
+an SVG data-URI favicon, and the old CSS letter "B" mark is
+gone; the PyInstaller spec points both exes' icon at
+beesky-logo.ico and bundles the PNG/ICO in the GUI datas; the
+Inno installer uses it as SetupIconFile and ships it; the
+tkinter GUI resolves it via _asset_path (frozen _MEIPASS first,
+then packaging/assets/) for iconbitmap/iconphoto and the
+~40px header image. The inlined SVG and the favicon payload
+were also render-compared against the master during
+development: 0.00% colour-class difference.
+
+Full-chain note: the v0.1–v0.10 suites (incl. the GUI smoke and
+both dashboard suites) passed in-chain with these logo changes
+in-tree; the v0.11 firmware suite's strict event-order
+assertion (the race documented as load-sensitive at v0.11 ship
+time) flaked repeatedly under this VM's current shared-host
+contention, so the v0.11 evidence block above is the ship-time
+one, not a fresh regeneration.
+
+## Assertions
+
+```
+PASS: asset bundled: packaging/assets/beesky-logo.svg
+PASS: asset bundled: packaging/assets/beesky-logo.ico
+PASS: asset bundled: packaging/assets/beesky-logo-512.png
+PASS: beesky/web/dashboard.html: header inlines the official SVG
+PASS: beesky/web/dashboard.html: SVG favicon link present
+PASS: beesky/web/dashboard.html: old CSS letter mark removed
+PASS: beesky/cloud/dashboard.html: header inlines the official SVG
+PASS: beesky/cloud/dashboard.html: SVG favicon link present
+PASS: beesky/cloud/dashboard.html: old CSS letter mark removed
+PASS: spec: exe icon is the official logo ico
+PASS: spec: GUI datas bundle the logo PNG + ICO
+PASS: installer: SetupIconFile is the official logo ico
+PASS: installer: ships the official logo ico
+PASS: gui: resolves bundled assets (_asset_path, _MEIPASS pattern)
+PASS: gui: window icon via iconbitmap + iconphoto fallback
+PASS: gui: header shows the logo PNG
+PASS: version bumped to 0.11.2 — package reports 0.11.2
+
+LOGO TEST PASSED
+```

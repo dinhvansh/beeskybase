@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>BeeSky Cloud — Quản lý nhiều trại</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%22-373.37%20-15.87%20198.58%20198.58%22%3E%3Cg%3E%0A%09%3Ccircle%20cx%3D%22-274.08%22%20cy%3D%2283.421%22%20r%3D%2299.29%22%2F%3E%0A%09%3Ccircle%20fill%3D%22%23F4D600%22%20cx%3D%22-274.08%22%20cy%3D%2283.421%22%20r%3D%2287.763%22%2F%3E%0A%09%3Cpath%20d%3D%22M-207.439%2C26.24l-86.987%2C82.395l-1.26%2C1.194l-64.403-44.017c-1.149%2C5.665-1.753%2C11.528-1.753%2C17.532%0A%09%09c0%2C4.924%2C0.412%2C9.751%2C1.192%2C14.455l66.224%2C45.262l1.463%2C1l99.866-94.593C-196.66%2C40.961-201.524%2C33.137-207.439%2C26.24z%22%2F%3E%0A%09%3Cpath%20d%3D%22M-293.376%2C83.199l73.07-69.213c-5.066-3.934-10.576-7.323-16.44-10.084l-57.681%2C54.636l-0.848%2C0.803l-46.539-31.808%0A%09%09c-3.945%2C4.783-7.391%2C9.992-10.264%2C15.546l57.651%2C39.402L-293.376%2C83.199z%22%2F%3E%0A%09%3Cpath%20d%3D%22M-293.5%2C39.735l43.177-40.898c-6.461-1.813-13.225-2.9-20.197-3.179l-23.907%2C22.645l-0.724%2C0.686l-19.627-13.415%0A%09%09c-5.2%2C2.727-10.092%2C5.958-14.612%2C9.632l34.963%2C23.896L-293.5%2C39.735z%22%2F%3E%0A%3C%2Fg%3E%3C%2Fsvg%3E">
 <style>
   :root {
     --yellow: #F5D800;
@@ -33,9 +34,8 @@
     font-size: 26px; font-weight: 800; letter-spacing: 1px; color: var(--text);
   }
   .logo .bee { color: var(--yellow); }
-  .logo .mark {
-    display: inline-block; background: var(--yellow); color: #000;
-    border-radius: 6px; padding: 0 8px; margin-right: 8px; font-weight: 900;
+  .logo .logo-mark {
+    width: 34px; height: 34px; vertical-align: middle; margin-right: 10px;
   }
   header .sub { color: var(--muted); font-size: 13px; }
   header .spacer { flex: 1; }
@@ -187,7 +187,16 @@
 </head>
 <body>
 <header>
-  <div class="logo"><span class="mark">B</span><span class="bee">Bee</span>Sky <span style="color:var(--yellow)">Cloud</span></div>
+  <div class="logo"><svg class="logo-mark" viewBox="-373.37 -15.87 198.58 198.58" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><g>
+	<circle cx="-274.08" cy="83.421" r="99.29"/>
+	<circle fill="#F4D600" cx="-274.08" cy="83.421" r="87.763"/>
+	<path d="M-207.439,26.24l-86.987,82.395l-1.26,1.194l-64.403-44.017c-1.149,5.665-1.753,11.528-1.753,17.532
+		c0,4.924,0.412,9.751,1.192,14.455l66.224,45.262l1.463,1l99.866-94.593C-196.66,40.961-201.524,33.137-207.439,26.24z"/>
+	<path d="M-293.376,83.199l73.07-69.213c-5.066-3.934-10.576-7.323-16.44-10.084l-57.681,54.636l-0.848,0.803l-46.539-31.808
+		c-3.945,4.783-7.391,9.992-10.264,15.546l57.651,39.402L-293.376,83.199z"/>
+	<path d="M-293.5,39.735l43.177-40.898c-6.461-1.813-13.225-2.9-20.197-3.179l-23.907,22.645l-0.724,0.686l-19.627-13.415
+		c-5.2,2.727-10.092,5.958-14.612,9.632l34.963,23.896L-293.5,39.735z"/>
+</g></svg><span class="bee">Bee</span>Sky <span style="color:var(--yellow)">Cloud</span></div>
   <div class="sub">Quản lý nhiều trại / xưởng từ xa</div>
   <div class="spacer"></div>
   <div class="meta">

@@ -23,7 +23,7 @@
 ; .github/workflows/build-windows.yml — never by hand)
 
 #define MyAppName "BeeSky"
-#define MyAppVersion "0.11.1"
+#define MyAppVersion "0.11.2"
 #define MyAppPublisher "BeeSkyBase"
 #define MyAppExeName "beesky-gui.exe"
 
@@ -40,7 +40,7 @@ ArchitecturesAllowed=x64compatible
 MinVersion=10.0
 OutputDir=..\dist
 OutputBaseFilename=BeeSkySetup-{#MyAppVersion}
-SetupIconFile=beesky.ico
+SetupIconFile=assets\beesky-logo.ico
 UninstallDisplayIcon={app}\beesky.ico
 Compression=lzma2
 SolidCompression=yes
@@ -54,7 +54,7 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; \
 [Files]
 Source: "..\dist\beesky.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\beesky-gui.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "beesky.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "assets\beesky-logo.ico"; DestDir: "{app}"; DestName: "beesky.ico"; Flags: ignoreversion
 Source: "..\docs\notify.example.json"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 

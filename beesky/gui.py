@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import queue
+import sys
 import threading
 import tkinter as tk
 import webbrowser
@@ -43,6 +44,26 @@ SOURCE_LABEL = {
 }
 
 WEB_PORT = 8787
+
+
+def _asset_path(name: str) -> Path | None:
+    """Where a bundled brand asset may live: frozen bundle first, source.
+
+    In the PyInstaller one-file exe the logo files ship as data under
+    ``sys._MEIPASS/beesky/assets/`` (see packaging/beesky.spec); in a
+    source checkout they sit in ``packaging/assets/``. Same lookup
+    pattern as the dashboard HTML in beesky/web/server.py.
+    """
+    candidates = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / "beesky" / "assets" / name)
+    candidates.append(Path(__file__).resolve().parent.parent
+                      / "packaging" / "assets" / name)
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def make_scan_args(target: str, user: str = "root",
@@ -92,10 +113,14 @@ class BeeSkyApp:
         self._scanning = False
         self.scan_done = threading.Event()   # used by --smoke
         self._serve_started = False
+        self._logo_image: tk.PhotoImage | None = None
+        self._logo_image_small: tk.PhotoImage | None = None
 
         root.title(f"BeeSky {__version__} — Quét & chẩn đoán máy đào")
         root.configure(bg=BG)
         root.minsize(880, 540)
+        self._load_logo_image()
+        self._set_window_icon()
         self._build_style()
         self._build_widgets(default_target)
         self.root.after(100, self._poll_queue)
@@ -125,9 +150,52 @@ class BeeSkyApp:
                         foreground=FG, insertcolor=FG)
         style.configure("Dark.TLabel", background=BG, foreground=FG)
 
+    # -- brand icon ------------------------------------------------------
+
+    def _load_logo_image(self) -> None:
+        """Load the official logo PNG once (window icon + header).
+
+        The PhotoImage must stay referenced on self — tkinter images
+        are garbage-collected with their last Python reference.
+        Best effort: a missing/unreadable asset leaves the GUI plain.
+        """
+        png = _asset_path("beesky-logo-512.png")
+        if png is None:
+            return
+        try:
+            self._logo_image = tk.PhotoImage(file=str(png))
+        except tk.TclError:
+            self._logo_image = None
+
+    def _set_window_icon(self) -> None:
+        """Window icon: the .ico where supported, else the PNG.
+
+        iconbitmap with a .ico is the Windows path; on X11 it raises
+        TclError, so fall back to iconphoto with the PNG. Guarded —
+        an icon must never stop the app from opening (headless and
+        source runs included).
+        """
+        ico = _asset_path("beesky-logo.ico")
+        if ico is not None:
+            try:
+                self.root.iconbitmap(str(ico))
+                return
+            except tk.TclError:
+                pass
+        if self._logo_image is not None:
+            try:
+                self.root.iconphoto(True, self._logo_image)
+            except tk.TclError:
+                pass
+
     def _build_widgets(self, default_target: str) -> None:
         header = tk.Frame(self.root, bg=BG)
         header.pack(fill="x", padx=14, pady=(12, 2))
+        if self._logo_image is not None:
+            # 512px master subsampled to ~40px for the header.
+            self._logo_image_small = self._logo_image.subsample(13)
+            tk.Label(header, image=self._logo_image_small, bg=BG).pack(
+                side="left", padx=(0, 10))
         tk.Label(header, text="BeeSky", bg=BG, fg=ACCENT,
                  font=("TkDefaultFont", 22, "bold")).pack(side="left")
         tk.Label(header, text="Quét & chẩn đoán máy đào", bg=BG, fg=FG,
