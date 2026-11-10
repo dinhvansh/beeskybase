@@ -88,6 +88,20 @@
   .sev.critical { background: #3d1512; color: var(--bad); }
   .empty { color: var(--muted); padding: 16px; text-align: center; }
   footer { color: var(--muted); font-size: 12px; text-align: center; padding: 0 20px 22px; }
+  .heatwrap {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 12px 14px;
+  }
+  .heatmap { display: flex; flex-wrap: wrap; gap: 8px; }
+  .tile {
+    width: 94px; border-radius: 8px; padding: 7px 9px;
+    border: 2px solid transparent; background: var(--panel2); color: var(--text);
+  }
+  .tile .octet { font-size: 19px; font-weight: 800; line-height: 1.15; }
+  .tile .tt { font-size: 15px; font-weight: 700; }
+  .tile .hh { font-size: 11px; opacity: .85; white-space: nowrap; }
+  .tile.problem { border-color: var(--bad); }
+  .tile.offline { background: #232323; border: 2px dashed #4a4a4a; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -125,13 +139,18 @@
     </table>
   </div>
 
+  <h2>Bản đồ nhiệt <span class="accent">· Heat map</span></h2>
+  <div class="heatwrap" id="heatmap">
+    <div class="empty">Đang tải…</div>
+  </div>
+
   <h2>Sự kiện gần đây <span class="accent">· Events</span></h2>
   <div class="events" id="events-list">
     <div class="empty">Đang tải…</div>
   </div>
 </main>
 
-<footer>BeeSky v0.4 — dữ liệu tự làm mới mỗi 10 giây · Chỉ dùng trong mạng nội bộ của trại/xưởng</footer>
+<footer>BeeSky v0.8 — dữ liệu tự làm mới mỗi 10 giây · Chỉ dùng trong mạng nội bộ của trại/xưởng</footer>
 
 <script>
 "use strict";
@@ -144,6 +163,60 @@ function fmtThs(v) {
 function esc(s) {
   return String(s === null || s === undefined ? "" : s)
     .replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+// -- heat map (v0.8) ------------------------------------------------------
+// Records already carry max_temp_c, so tiles render purely client-side
+// from the /api/miners payload. Colour scale by max temp (°C):
+//   < 60 green-dark · 60-70 yellow-green · 70-80 amber · 80-90 orange
+//   >= 90 red · offline grey · problem miners get a red border.
+function heatColor(t) {
+  if (t === null || t === undefined) return "#2c2c2c";
+  if (t < 60) return "#14532d";
+  if (t < 70) return "#4a5d23";
+  if (t < 80) return "#7a5a12";
+  if (t < 90) return "#8a4512";
+  return "#8a1f1a";
+}
+function ipSortKey(ip) {
+  return String(ip || "").split(".").map((p) => parseInt(p, 10) || 0);
+}
+function cmpIp(a, b) {
+  const ka = ipSortKey(a), kb = ipSortKey(b);
+  for (let i = 0; i < 4; i++) { if (ka[i] !== kb[i]) return ka[i] - kb[i]; }
+  return 0;
+}
+function minerOffline(m) {
+  if (m.online === false) return true;
+  return (m.problems || []).some((p) => p.code === "FETCH_ERROR");
+}
+function heatTile(m) {
+  const offline = minerOffline(m);
+  const problems = (m.problems || []).length;
+  const lastOctet = String(m.ip || "?").split(".").pop();
+  const temp = (m.max_temp_c === null || m.max_temp_c === undefined)
+    ? "–" : m.max_temp_c.toFixed(0) + " °C";
+  const ths = (m.ths === null || m.ths === undefined) ? "–" : m.ths.toFixed(0) + " TH/s";
+  const tip = (m.ip || "") + " · " + (m.model || "") + " · " +
+    (offline ? "Mất kết nối" : (m.status === "OK" ? "OK" : "Cần kiểm tra")) +
+    (problems ? " · " + problems + " vấn đề" : "");
+  const cls = "tile" + (offline ? " offline" : "")
+    + (!offline && m.status !== "OK" ? " problem" : "");
+  const bg = offline ? "" : ' style="background:' + heatColor(m.max_temp_c) + '"';
+  return '<div class="' + cls + '"' + bg + ' title="' + esc(tip) + '">' +
+    '<div class="octet">' + esc(lastOctet) + "</div>" +
+    '<div class="tt">' + (offline ? "Offline" : temp) + "</div>" +
+    '<div class="hh">' + esc(m.ip || "") + " · " + ths + "</div></div>";
+}
+function renderHeatmap(miners) {
+  const wrap = $("heatmap");
+  if (!miners.length) {
+    wrap.innerHTML = '<div class="empty">Chưa phát hiện máy nào — kiểm tra lại mục tiêu quét.</div>';
+    return;
+  }
+  wrap.innerHTML = '<div class="heatmap">' +
+    miners.slice().sort((a, b) => cmpIp(a.ip, b.ip)).map(heatTile).join("") +
+    "</div>";
 }
 
 async function refreshStatus() {
@@ -191,6 +264,7 @@ async function refreshMiners() {
     $("miners-body").innerHTML = rows.length
       ? rows.join("")
       : '<tr><td colspan="8" class="empty">Chưa phát hiện máy nào — kiểm tra lại mục tiêu quét.</td></tr>';
+    renderHeatmap(miners);
     $("card-total").textContent = miners.length;
     $("card-hashrate").innerHTML = miners.length ? totalThs.toFixed(2) + " <small>TH/s</small>" : "–";
     $("card-problems").textContent = miners.length ? problems : "–";

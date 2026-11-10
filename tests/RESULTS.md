@@ -146,9 +146,9 @@ PASS: miner back: BACK_ONLINE printed + webhook received
 PASS: logfile channel recorded all three events
 
 Captured webhook payloads:
-{"ts": 1794246061.272916, "time": "2026-11-09 17:41:01", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
-{"ts": 1794246061.7281845, "time": "2026-11-09 17:41:01", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "OFFLINE", "severity": "critical", "detail": "miner went offline / unreachable", "data": {"last_seen": 1794246061.5252445}}
-{"ts": 1794246062.284104, "time": "2026-11-09 17:41:02", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "BACK_ONLINE", "severity": "info", "detail": "miner is back online", "data": {}}
+{"ts": 1794270963.9782426, "time": "2026-11-10 00:36:03", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
+{"ts": 1794270964.534958, "time": "2026-11-10 00:36:04", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "OFFLINE", "severity": "critical", "detail": "miner went offline / unreachable", "data": {"last_seen": 1794270964.2907462}}
+{"ts": 1794270965.199767, "time": "2026-11-10 00:36:05", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "BACK_ONLINE", "severity": "info", "detail": "miner is back online", "data": {}}
 
 WATCH TEST PASSED
 ```
@@ -178,7 +178,7 @@ PASS: hashrate drop phase: /api/events gains HASHRATE_DROP
 PASS: drop event: severity major, drop_pct ~= 40
 
 Captured drop event:
-{"ts": 1794246067.3661458, "time": "2026-11-09 17:41:07", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
+{"ts": 1794270970.4025803, "time": "2026-11-10 00:36:10", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
 
 WEB TEST PASSED
 ```
@@ -219,7 +219,7 @@ PASS: hashrate drop: HASHRATE_DROP arrives at the cloud
 PASS: drop event: severity major, drop_pct ~= 40, site tag
 
 Captured cloud event:
-{"ts": 1794246074.7014544, "time": "2026-11-09 17:41:14", "site": "Xưởng 1", "agent_id": 1, "ip": "127.0.0.1", "model": "Antminer S19 Pro", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
+{"ts": 1794270977.8722496, "time": "2026-11-10 00:36:17", "site": "Xưởng 1", "agent_id": 1, "ip": "127.0.0.1", "model": "Antminer S19 Pro", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
 PASS: /api/miners?site= shows ~66 TH/s, record annotated with site
 
 CLOUD TEST PASSED
@@ -265,7 +265,7 @@ PASS: site 2 command finishes
 PASS: dashd reboot: status done, result from /system/reboot
 
 Captured dashd reboot command:
-{"id": 1, "agent_id": 2, "site": "Xưởng 2", "ip": "127.0.0.1", "type": "reboot", "payload": {}, "status": "done", "result": "dashd accepted reboot (system reboots in 3s)", "created_at": "2026-11-09 17:41:16", "created_ts": 1794246076.2856126, "claimed_at": "2026-11-09 17:41:16", "finished_at": "2026-11-09 17:41:16"}
+{"id": 1, "agent_id": 2, "site": "Xưởng 2", "ip": "127.0.0.1", "type": "reboot", "payload": {}, "status": "done", "result": "dashd accepted reboot (system reboots in 3s)", "created_at": "2026-11-10 00:36:19", "created_ts": 1794270979.6454341, "claimed_at": "2026-11-10 00:36:19", "finished_at": "2026-11-10 00:36:19"}
 PASS: dashd mock recorded exactly one POST /system/reboot
 PASS: dashd switch_pool {pool_id: 1} finishes done
 PASS: dashd mock activated pool slot 1
@@ -275,7 +275,7 @@ PASS: site 1 agent reports its cgminer miner
 PASS: cgminer reboot finishes done
 
 Captured cgminer reboot command:
-{"id": 4, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "type": "reboot", "payload": {}, "status": "done", "result": "cgminer accepted the privileged 'restart' command", "created_at": "2026-11-09 17:41:19", "created_ts": 1794246079.1219215, "claimed_at": "2026-11-09 17:41:19", "finished_at": "2026-11-09 17:41:19"}
+{"id": 4, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "type": "reboot", "payload": {}, "status": "done", "result": "cgminer accepted the privileged 'restart' command", "created_at": "2026-11-10 00:36:22", "created_ts": 1794270982.4835896, "claimed_at": "2026-11-10 00:36:23", "finished_at": "2026-11-10 00:36:23"}
 PASS: cgminer mock recorded the restart RPC
 PASS: cgminer reboot on a read-only API -> failed
 PASS: failure result carries the miner's 'Access denied'
@@ -307,19 +307,52 @@ PASS: first row = 127.0.0.1 | Antminer S19 Pro | ... | 339/342 chips | CHECK (sa
 GUI TEST PASSED
 ```
 
-Frozen-build verification (PyInstaller 6.22.3, throwaway venv, Linux
-binaries from the same packaging/beesky.spec the Windows workflow
-runs): both one-file executables were produced — `beesky` (console)
-and `beesky-gui` (windowed, console=False). The frozen GUI binary,
-run under xvfb-run against the same scripted S19 Pro, printed:
+---
+
+# v0.8 mock test — heat map + repair history
+
+`tests/mock_repairs_test.py` checks the repair-history rule
+in-process against `CloudStore` (problem events CHIPS_LOST /
+CHAIN_DOWN / OVER_TEMP / OFFLINE become `auto_event` rows,
+deduplicated to one identical (site, ip, title) row per hour;
+HASHRATE_DROP / BACK_ONLINE do not), then builds the v0.5 cloud
+shape on 127.0.0.1: `beesky cloud` (:18792, password set),
+the control-file fake S19 Pro (:14033) and `beesky agent
+--interval 1`. Assertions: GET/POST /api/repairs -> 401
+logged out; both dashboards carry the Bản đồ nhiệt section
+with the heatColor thresholds (<60 green-dark ... >=90 red);
+flipping the miner to dead chips makes CHIPS_LOST arrive at
+/api/events AND as an auto row in /api/repairs; a manual
+POST /api/repairs is listed back with cost_vnd + technician.
+
+## Assertions + captured repair rows
 
 ```
-GUI SMOKE: 1 row(s) for target 127.0.0.1
-GUI SMOKE first row: 127.0.0.1 | Antminer S19 Pro | cgminer RPC | 102.90 | 339/342 | 88 | 4320/4380/4440/4500 | CHECK
-frozen gui smoke exit: 0
-```
+PASS: store: CHIPS_LOST event becomes an auto repair row
+PASS: store: identical auto row within 1h is deduplicated
+PASS: store: same event after 1h logs a fresh auto row
+PASS: store: OVER_TEMP/CHAIN_DOWN/OFFLINE auto-log; HASHRATE_DROP/BACK_ONLINE do not
+PASS: cloud-add-agent prints a key once
+PASS: cloud starts and serves /login
+PASS: GET /api/repairs without login -> 401
+PASS: POST /api/repairs without login -> 401
+PASS: login with right password -> session
+PASS: GET /api/repairs with session -> 200, empty at first
+PASS: cloud dashboard: heat-map section + colour thresholds
+PASS: local web dashboard: heat-map section + colour thresholds
+PASS: /api/sites shows the site after agent push
+PASS: dead chips: CHIPS_LOST event arrives at the cloud
+PASS: CHIPS_LOST also lands in repair history as auto_event
+PASS: auto row: site/ip keyed, no cost/technician
 
-— i.e. tkinter/Tcl-Tk bundled by PyInstaller's _tkinter hook works
-frozen, and `./dist/beesky --help` + `./dist/beesky-gui --help` both
-exit cleanly. The Windows installer/ISCC compile itself still only
-runs in the GitHub Actions workflow (no Windows here).
+Captured auto repair row:
+{"id": 1, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "mac_or_serial": null, "created_at": "2026-11-10 00:36:37", "created_ts": 1794270997.0189164, "kind": "auto_event", "title": "CHIPS_LOST", "detail": "lost 3 chip(s) (342 -> 339 alive)", "cost_vnd": null, "technician": null}
+PASS: POST /api/repairs (logged in) -> 201 manual row
+PASS: manual row listed with cost_vnd + technician
+
+Captured manual repair row:
+{"id": 2, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "mac_or_serial": null, "created_at": "2026-11-10 00:36:37", "created_ts": 1794270997.3705814, "kind": "manual", "title": "Thay board 2", "detail": "Board 2 chết 3 chip — đã thay board, test lại đạt", "cost_vnd": 1500000, "technician": "Tuấn"}
+PASS: POST /api/repairs with blank title -> 400
+
+REPAIRS TEST PASSED
+```

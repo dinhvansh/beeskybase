@@ -16,6 +16,12 @@ Tables:
              of one site to execute on its LAN: pending -> sent
              (claimed by the agent) -> done | failed, with the
              executor's result text.
+  repairs    repair history (v0.8) per miner: ``auto_event`` rows are
+             derived from problem events as they are ingested (see
+             :meth:`CloudStore.add_events`), ``manual`` rows are
+             entered by a technician through the viewer API. Records
+             carry no MAC/serial, so history is keyed by site + IP;
+             ``mac_or_serial`` is kept for the day a source provides it.
 
 All access is serialised through one lock, so the store is safe to
 share between the threads of a ``ThreadingHTTPServer``.
@@ -32,6 +38,15 @@ import time
 SNAPSHOT_HISTORY = 100
 EVENT_HISTORY = 5000
 COMMAND_HISTORY = 5000
+REPAIR_HISTORY = 10000
+
+# Event types that also become auto repair-history rows (v0.8): the
+# problem events a technician would want on a miner's timeline. The
+# title of an auto row is the event type, and identical (site, ip,
+# title) auto rows are written at most once per AUTO_REPAIR_DEDUPE_S —
+# the event engine already latches, this is a second spam guard.
+AUTO_REPAIR_TYPES = ("CHIPS_LOST", "CHAIN_DOWN", "OVER_TEMP", "OFFLINE")
+AUTO_REPAIR_DEDUPE_S = 3600.0
 
 
 def hash_key(key: str) -> str:
@@ -100,6 +115,21 @@ class CloudStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_commands_agent
                     ON commands(agent_id, status, id);
+                CREATE TABLE IF NOT EXISTS repairs (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    agent_id      INTEGER REFERENCES agents(id),
+                    site          TEXT NOT NULL,
+                    ip            TEXT NOT NULL,
+                    mac_or_serial TEXT,
+                    created_at    REAL NOT NULL,
+                    kind          TEXT NOT NULL DEFAULT 'manual',
+                    title         TEXT NOT NULL,
+                    detail        TEXT,
+                    cost_vnd      INTEGER,
+                    technician    TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_repairs_miner
+                    ON repairs(site, ip, id);
                 """
             )
 
@@ -195,19 +225,30 @@ class CloudStore:
 
     def add_events(self, agent_id: int, site: str,
                    events: list[dict]) -> int:
-        """Store event dicts (EventEngine shape); returns how many."""
+        """Store event dicts (EventEngine shape); returns how many.
+
+        Problem events (see AUTO_REPAIR_TYPES) also append an
+        ``auto_event`` row to the miner's repair history, deduplicated
+        to at most one identical (site, ip, title) row per hour.
+        """
         rows = []
+        auto_rows = []
         for ev in events:
             try:
                 ts = float(ev.get("ts") or time.time())
             except (TypeError, ValueError):
                 ts = time.time()
+            etype = str(ev.get("type") or "UNKNOWN")
             rows.append((
-                agent_id, site, ts,
-                str(ev.get("type") or "UNKNOWN"),
+                agent_id, site, ts, etype,
                 str(ev.get("severity") or "info"),
                 ev.get("ip"), ev.get("model"), ev.get("detail"),
                 json.dumps(ev.get("data") or {}, ensure_ascii=False)))
+            if etype in AUTO_REPAIR_TYPES and ev.get("ip"):
+                auto_rows.append((
+                    agent_id, site, str(ev["ip"]),
+                    ev.get("mac") or ev.get("serial"), ts,
+                    etype, ev.get("detail")))
         if not rows:
             return 0
         with self._lock, self._db:
@@ -219,6 +260,20 @@ class CloudStore:
                 "DELETE FROM events WHERE id NOT IN "
                 "(SELECT id FROM events ORDER BY id DESC LIMIT ?)",
                 (EVENT_HISTORY,))
+            for agent_id_, site_, ip_, mac_serial, ts_, title, detail \
+                    in auto_rows:
+                recent = self._db.execute(
+                    "SELECT MAX(created_at) FROM repairs "
+                    "WHERE site = ? AND ip = ? AND title = ? "
+                    "AND kind = 'auto_event'",
+                    (site_, ip_, title)).fetchone()[0]
+                if recent is not None \
+                        and ts_ - float(recent) < AUTO_REPAIR_DEDUPE_S:
+                    continue
+                self._insert_repair(agent_id_, site_, ip_, mac_serial,
+                                    ts_, "auto_event", title, detail,
+                                    None, None)
+            self._prune_repairs()
         return len(rows)
 
     def list_events(self, n: int = 50, site: str | None = None) -> list[dict]:
@@ -253,6 +308,88 @@ class CloudStore:
                 "data": data,
             })
         return events
+
+    # ------------------------------------------------------------------
+    # repairs — per-miner repair history (v0.8)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _repair_view(row: sqlite3.Row) -> dict:
+        return {
+            "id": row["id"],
+            "agent_id": row["agent_id"],
+            "site": row["site"],
+            "ip": row["ip"],
+            "mac_or_serial": row["mac_or_serial"],
+            "created_at": _stamp(row["created_at"]),
+            "created_ts": row["created_at"],
+            "kind": row["kind"],
+            "title": row["title"],
+            "detail": row["detail"],
+            "cost_vnd": row["cost_vnd"],
+            "technician": row["technician"],
+        }
+
+    def _insert_repair(self, agent_id, site, ip, mac_or_serial, ts,
+                       kind, title, detail, cost_vnd, technician) -> int:
+        """Raw repairs INSERT — caller holds the lock + transaction."""
+        cur = self._db.execute(
+            "INSERT INTO repairs (agent_id, site, ip, mac_or_serial, "
+            "created_at, kind, title, detail, cost_vnd, technician) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (agent_id, site, ip, mac_or_serial, float(ts), kind, title,
+             detail, cost_vnd, technician))
+        return int(cur.lastrowid)
+
+    def _prune_repairs(self) -> None:
+        """Keep the newest REPAIR_HISTORY rows — caller holds the lock."""
+        self._db.execute(
+            "DELETE FROM repairs WHERE id NOT IN "
+            "(SELECT id FROM repairs ORDER BY id DESC LIMIT ?)",
+            (REPAIR_HISTORY,))
+
+    def add_repair(self, site: str, ip: str, title: str,
+                   detail: str | None = None,
+                   cost_vnd: int | None = None,
+                   technician: str | None = None,
+                   kind: str = "manual",
+                   mac_or_serial: str | None = None,
+                   agent_id: int | None = None,
+                   ts: float | None = None) -> dict:
+        """Append one repair-history row; returns its public view."""
+        if agent_id is None:
+            agent = self.agent_by_site(site)
+            agent_id = agent["id"] if agent else None
+        with self._lock, self._db:
+            repair_id = self._insert_repair(
+                agent_id, site, ip, mac_or_serial,
+                time.time() if ts is None else ts, kind, title, detail,
+                cost_vnd, technician)
+            self._prune_repairs()
+            row = self._db.execute(
+                "SELECT * FROM repairs WHERE id = ?",
+                (repair_id,)).fetchone()
+        return self._repair_view(row)
+
+    def list_repairs(self, site: str | None = None, ip: str | None = None,
+                     n: int = 50) -> list[dict]:
+        """Newest-first repair history, filterable by site and/or miner."""
+        n = max(1, min(int(n), REPAIR_HISTORY))
+        query = "SELECT * FROM repairs"
+        clauses, params = [], []
+        if site:
+            clauses.append("site = ?")
+            params.append(site)
+        if ip:
+            clauses.append("ip = ?")
+            params.append(ip)
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY id DESC LIMIT ?"
+        params.append(n)
+        with self._lock:
+            rows = self._db.execute(query, params).fetchall()
+        return [self._repair_view(r) for r in rows]
 
     # ------------------------------------------------------------------
     # commands — remote actions (v0.6)

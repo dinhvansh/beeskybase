@@ -35,6 +35,11 @@ Viewer (browser), behind a single admin password taken from the
   POST /api/commands  {"site", "ip", "type", "payload"} -> queue a
                       remote action for that site's agent
   GET  /api/commands  command history, newest first (``?n=``, ``?site=``)
+  GET  /api/repairs   repair history (v0.8), newest first
+                      (``?n=``, ``?site=``, ``?ip=``) — auto rows from
+                      problem events + manual technician entries
+  POST /api/repairs   {"site", "ip", "title", "detail", "cost_vnd",
+                      "technician"} -> add a manual repair entry
   GET|POST /login     password form -> session cookie (in-memory)
   GET  /logout
 
@@ -160,7 +165,7 @@ def make_handler(store: CloudStore, dashboard_html: bytes,
     sessions = SessionStore()
 
     class Handler(BaseHTTPRequestHandler):
-        server_version = "BeeSkyCloud/0.6"
+        server_version = "BeeSkyCloud/0.8"
         protocol_version = "HTTP/1.1"
 
         def log_message(self, *_args):  # noqa: D102 — silence access log
@@ -297,6 +302,18 @@ def make_handler(store: CloudStore, dashboard_html: bytes,
                 self._send_json(200, {
                     "generated_at": _stamp(now), "generated_ts": now,
                     "commands": store.list_commands(site, n)})
+            elif path == "/api/repairs":
+                raw_n = (query.get("n") or ["50"])[0]
+                try:
+                    n = int(raw_n)
+                except ValueError:
+                    n = 50
+                site = (query.get("site") or [None])[0]
+                ip = (query.get("ip") or [None])[0]
+                now = time.time()
+                self._send_json(200, {
+                    "generated_at": _stamp(now), "generated_ts": now,
+                    "repairs": store.list_repairs(site, ip, n)})
             else:
                 self._send_json(404, {"error": "not found", "path": path})
 
@@ -316,6 +333,9 @@ def make_handler(store: CloudStore, dashboard_html: bytes,
             elif path == "/api/commands":
                 if self._viewer_gate(path):
                     self._handle_create_command()
+            elif path == "/api/repairs":
+                if self._viewer_gate(path):
+                    self._handle_create_repair()
             else:
                 length = int(self.headers.get("Content-Length") or 0)
                 if length:
@@ -352,6 +372,42 @@ def make_handler(store: CloudStore, dashboard_html: bytes,
             command = store.create_command(agent["id"], site, ip,
                                            command_type, payload)
             self._send_json(201, {"ok": True, "command": command})
+
+        # -- repairs (v0.8 repair history) -------------------------------
+
+        def _handle_create_repair(self) -> None:
+            body = self._read_json_body()
+            if body is None:
+                self._send_json(400, {"error": "invalid JSON body"})
+                return
+            site = body.get("site")
+            ip = body.get("ip")
+            title = body.get("title")
+            if not isinstance(site, str) or not site \
+                    or not isinstance(ip, str) or not ip \
+                    or not isinstance(title, str) or not title.strip():
+                self._send_json(400, {
+                    "error": "site, ip and title are required"})
+                return
+            cost = body.get("cost_vnd")
+            if cost is not None:
+                if isinstance(cost, bool) \
+                        or not isinstance(cost, (int, float)):
+                    self._send_json(400, {
+                        "error": "cost_vnd must be a number or null"})
+                    return
+                cost = int(cost)
+            detail = body.get("detail")
+            technician = body.get("technician")
+            mac_serial = body.get("mac_or_serial")
+            repair = store.add_repair(
+                site, ip, title.strip(),
+                None if detail is None else str(detail),
+                cost,
+                None if technician is None else str(technician),
+                mac_or_serial=(None if mac_serial is None
+                               else str(mac_serial)))
+            self._send_json(201, {"ok": True, "repair": repair})
 
         def _handle_agent_claim(self, query: dict) -> None:
             agent = self._agent()
