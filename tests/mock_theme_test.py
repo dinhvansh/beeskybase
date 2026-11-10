@@ -85,15 +85,21 @@ def test_theme_applies() -> None:
         check("theme: Treeview rowheight is 30",
               str(style.lookup("Treeview", "rowheight")) == "30",
               style.lookup("Treeview", "rowheight"))
-        check("theme: Card.TFrame background is the card panel",
+        check("theme: Card.TFrame background is the glass panel (v0.18)",
               style.lookup("Card.TFrame", "background")
-              == ui_theme.PANEL)
+              == ui_theme.PANEL_GLASS)
         check("theme: palette constants match the spec hex values",
               (ui_theme.BG, ui_theme.PANEL, ui_theme.PANEL2,
                ui_theme.BORDER, ui_theme.TEXT, ui_theme.MUTED,
                ui_theme.ACCENT)
               == ("#0B0B0D", "#15151A", "#1C1C22", "#26262E",
                   "#F2F2F3", "#9CA3AF", "#F5D800"))
+        check("theme: glass tokens match the v0.18 spec hex values",
+              (ui_theme.PANEL_GLASS, ui_theme.GLASS_BORDER,
+               ui_theme.RIM_LIGHT, ui_theme.GHOST_FILL,
+               ui_theme.ENTRY_FILL, ui_theme.ENTRY_BORDER)
+              == ("#191920", "#34343E", "#3D3D4A",
+                  "#22222B", "#1E1E26", "#30303C"))
     finally:
         root.destroy()
 

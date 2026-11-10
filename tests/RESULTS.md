@@ -1050,3 +1050,84 @@ PASS: windows: agent key_entry is a RoundedEntry
 PASS: windows: agent buttons are RoundedButtons
 PASS: windows: agent pills are RoundedPills
 PASS: windows: main scan_button is a RoundedButton
+
+---
+
+# v0.18 mock test — Liquid Glass (real web glass, simulated desktop glass)
+
+Web (both dashboards, beesky/cloud + beesky/web): real
+Liquid Glass — an ambient layered body backdrop (two subtle
+radial glows over the #0B0B0D base, fixed attachment), glass
+tokens (--glass rgba(255,255,255,.045), --glass-line .09,
+--glass-soft .05 / --glass-line-soft .10 for inputs, ghost
+buttons and chips, --glass-chrome for sidebar/top bars,
+--glass-head for table header rows), backdrop-filter
+blur(16px) saturate(150%) (10px for the soft tier) on cards,
+panels, stat tiles, sidebar, settings panels and table
+containers, the rim+depth shadow (inset 0 1px 0
+rgba(255,255,255,.08), 0 8px 32px rgba(0,0,0,.35)); the
+accent CTA stays solid #F5D800 and table rows stay
+transparent over a rgba(255,255,255,.03) header. Fallbacks:
+@supports not (backdrop-filter) and @media
+(prefers-reduced-transparency: reduce) re-point every glass
+token at the pre-v0.18 solids (#15151A/#1C1C22/#232329/
+#101014) and set the blur tokens to none — no layout or DOM
+change. Desktop (Tk cannot blur): simulated glass in
+beesky/ui_theme.py + beesky/rounded.py — PANEL_GLASS
+#191920 card fill, GLASS_BORDER #34343E outlines, a real
+canvas rim-light line (RIM_LIGHT #3D3D4A, top arc +
+straight inset 1px, tagged "rim") on RoundedCard and
+ghost RoundedButtons, GHOST_FILL #22222B, ENTRY_FILL
+#1E1E26 / ENTRY_BORDER #30303C; card-hosted ttk styles and
+in-card widget backdrops moved PANEL -> PANEL_GLASS so
+labels blend with the drawn surface; pills and the accent
+button stay solid. Changed test expectations (all still
+exact pins, listed in the root RESULTS.md v0.18 section):
+mock_theme_test Card.TFrame PANEL -> PANEL_GLASS + a new
+exact pin of the six glass tokens; mock_agent_bg_test
+release pin 0.17.0 -> 0.18.0. The new suite adds:
+
+```
+PASS: web cloud/dashboard.html: glass token is translucent white .045
+PASS: web cloud/dashboard.html: glass line token is rgba .09
+PASS: web cloud/dashboard.html: backdrop blur 16px saturate 150% applied
+PASS: web cloud/dashboard.html: ambient radial-gradient body backdrop
+PASS: web cloud/dashboard.html: @supports no-backdrop-filter fallback
+PASS: web cloud/dashboard.html: reduced-transparency fallback
+PASS: web cloud/dashboard.html: glass shadow token (rim inset + drop)
+PASS: web cloud/dashboard.html: accent CTA stays solid yellow
+PASS: web web/dashboard.html: glass token is translucent white .045
+PASS: web web/dashboard.html: glass line token is rgba .09
+PASS: web web/dashboard.html: backdrop blur 16px saturate 150% applied
+PASS: web web/dashboard.html: ambient radial-gradient body backdrop
+PASS: web web/dashboard.html: @supports no-backdrop-filter fallback
+PASS: web web/dashboard.html: reduced-transparency fallback
+PASS: web web/dashboard.html: glass shadow token (rim inset + drop)
+PASS: web web/dashboard.html: accent CTA stays solid yellow
+PASS: desktop: card surface is drawn
+PASS: desktop: card fill is PANEL_GLASS, outline GLASS_BORDER
+PASS: desktop: card draws exactly one rim-light item
+PASS: desktop: rim light colour is RIM_LIGHT
+PASS: desktop: rim survives a resize without double-drawing
+PASS: desktop: ghost button draws one rim item, accent none
+PASS: desktop: ghost colours are the glass triple
+PASS: desktop: disabled ghost drops the rim, mutes to glass
+PASS: desktop: entry shape is ENTRY_FILL / ENTRY_BORDER
+PASS: desktop: hosted entry bg matches the glass fill
+
+GLASS TEST PASSED
+```
+
+Chain note (flake disclosure, same handling as v0.12–v0.17): the full
+chain regenerated v0.1–v0.10 green in-chain, then stopped at the KNOWN
+v0.11 firmware race-order assertion (kill idx 3 vs first.bmu idx 5).
+Control-verified PRE-EXISTING on this exact tree state: the pristine
+v0.17 tree (b5fdd90, v0.18 changes stashed) fails the same assertion
+standalone with byte-identical indices (ident=0 first=5 kill=3 second=8
+marker=11), and the v0.18 diff touches no firmware-path code (it
+alternated FAIL/PASS/FAIL during v0.17 verification; under the current
+host contention it fails consistently on both trees). tests/RESULTS.md
+was therefore restored to the committed ship-time blocks and every
+later suite was re-verified standalone against the v0.18 tree — logo,
+history, agents-ui, agent-app, theme, agent-bg, rounded, glass, GUI,
+cloud, web: all green.

@@ -180,7 +180,8 @@ class BeeSkyApp:
         ttk.Label(frame, text=title,
                   style="StatTitle.TLabel").pack(anchor="w")
         var = tk.StringVar(value=value)
-        label = tk.Label(frame, textvariable=var, bg=ui_theme.PANEL,
+        label = tk.Label(frame, textvariable=var,
+                         bg=ui_theme.PANEL_GLASS,
                          fg=fg, font=(self._family,
                                       ui_theme.STAT_SIZE, "bold"))
         label.pack(anchor="w", pady=(4, 0))
@@ -221,23 +222,23 @@ class BeeSkyApp:
         target_row.pack(fill="x")
         self.target_var = tk.StringVar(value=default_target)
         RoundedEntry(target_row, textvariable=self.target_var,
-                     backdrop=ui_theme.PANEL).pack(
+                     backdrop=ui_theme.PANEL_GLASS).pack(
                          side="left", fill="x", expand=True)
         self.scan_button = RoundedButton(
             target_row, text="Quét ngay", variant="accent",
-            command=self.start_scan, backdrop=ui_theme.PANEL)
+            command=self.start_scan, backdrop=ui_theme.PANEL_GLASS)
         self.scan_button.pack(side="left", padx=(10, 0))
         RoundedButton(target_row, text="Xuất phiếu sửa",
                       variant="ghost", command=self.export_tickets,
-                      backdrop=ui_theme.PANEL).pack(
+                      backdrop=ui_theme.PANEL_GLASS).pack(
                           side="left", padx=(10, 0))
         RoundedButton(target_row, text="Mở web tại chỗ",
                       variant="ghost", command=self.open_local_web,
-                      backdrop=ui_theme.PANEL).pack(
+                      backdrop=ui_theme.PANEL_GLASS).pack(
                           side="left", padx=(10, 0))
         RoundedButton(target_row, text="Quét lại", variant="ghost",
                       command=self.start_scan,
-                      backdrop=ui_theme.PANEL).pack(side="left",
+                      backdrop=ui_theme.PANEL_GLASS).pack(side="left",
                                                     padx=(10, 0))
 
         creds_row = ttk.Frame(toolbar, style="Card.TFrame")
@@ -246,14 +247,14 @@ class BeeSkyApp:
                   style="Card.TLabel").pack(side="left")
         self.user_var = tk.StringVar(value="root")
         RoundedEntry(creds_row, textvariable=self.user_var, width=12,
-                     backdrop=ui_theme.PANEL).pack(side="left",
+                     backdrop=ui_theme.PANEL_GLASS).pack(side="left",
                                                    padx=(6, 14))
         ttk.Label(creds_row, text="Mật khẩu:",
                   style="Card.TLabel").pack(side="left")
         self.password_var = tk.StringVar(value="root")
         RoundedEntry(creds_row, textvariable=self.password_var,
                      width=14, show="*",
-                     backdrop=ui_theme.PANEL).pack(side="left",
+                     backdrop=ui_theme.PANEL_GLASS).pack(side="left",
                                                    padx=(6, 0))
         ttk.Label(creds_row,
                   text="— tài khoản web của máy chạy firmware gốc",

@@ -35,6 +35,22 @@ WARN = "#FBBF24"
 BAD = "#F87171"
 SELECT_BG = "#3A3410"  # treeview selection (dark accent wash)
 
+# -- Liquid Glass, simulated (v0.18) ---------------------------------------
+# The web dashboards do REAL glass (translucent white + backdrop
+# blur). Tk has no backdrop blur, so the desktop simulates the
+# material: a lighter glass tint for card surfaces, brighter
+# outlines, and a 1px rim light along the top edge drawn by
+# beesky/rounded.py. PANEL/PANEL2/BORDER above remain the solid
+# fallback tokens (data surfaces such as the Treeview, ttk styles).
+# See docs/design-tokens.md ("Liquid Glass").
+
+PANEL_GLASS = "#191920"   # card fill — simulated glass tint
+GLASS_BORDER = "#34343E"  # outline for cards + ghost buttons
+RIM_LIGHT = "#3D3D4A"     # 1px top rim light (cards, ghost buttons)
+GHOST_FILL = "#22222B"    # ghost button glass fill
+ENTRY_FILL = "#1E1E26"    # entry glass fill
+ENTRY_BORDER = "#30303C"  # entry outline (focus still turns ACCENT)
+
 # -- type scale (points) ----------------------------------------------------
 
 TITLE_SIZE = 19
@@ -122,21 +138,25 @@ def setup_theme(root: tk.Tk) -> str:
     style.configure("TSeparator", background=BORDER)
 
     # -- cards -------------------------------------------------------------
-    style.configure("Card.TFrame", background=PANEL, borderwidth=1,
-                    relief="solid", bordercolor=BORDER,
-                    lightcolor=BORDER, darkcolor=BORDER)
-    style.configure("Card.TLabel", background=PANEL, foreground=TEXT,
-                    font=body)
-    style.configure("Card.Section.TLabel", background=PANEL,
+    # Card-hosted content sits on the RoundedCard's simulated-glass
+    # fill, so these backgrounds are PANEL_GLASS (v0.18), matching
+    # the canvas-drawn surface pixel-for-pixel at the label edges.
+    style.configure("Card.TFrame", background=PANEL_GLASS, borderwidth=1,
+                    relief="solid", bordercolor=GLASS_BORDER,
+                    lightcolor=GLASS_BORDER, darkcolor=GLASS_BORDER)
+    style.configure("Card.TLabel", background=PANEL_GLASS,
+                    foreground=TEXT, font=body)
+    style.configure("Card.Section.TLabel", background=PANEL_GLASS,
                     foreground=TEXT,
                     font=(family, SECTION_SIZE, "bold"))
-    style.configure("Card.Sub.TLabel", background=PANEL,
+    style.configure("Card.Sub.TLabel", background=PANEL_GLASS,
                     foreground=MUTED, font=body)
-    style.configure("Card.Hint.TLabel", background=PANEL,
+    style.configure("Card.Hint.TLabel", background=PANEL_GLASS,
                     foreground=MUTED, font=small)
-    style.configure("StatTitle.TLabel", background=PANEL,
+    style.configure("StatTitle.TLabel", background=PANEL_GLASS,
                     foreground=MUTED, font=(family, SMALL_SIZE, "bold"))
-    style.configure("Stat.TLabel", background=PANEL, foreground=TEXT,
+    style.configure("Stat.TLabel", background=PANEL_GLASS,
+                    foreground=TEXT,
                     font=(family, STAT_SIZE, "bold"))
 
     # -- entries -----------------------------------------------------------
@@ -180,8 +200,8 @@ def setup_theme(root: tk.Tk) -> str:
     # -- checkbuttons --------------------------------------------------------
     style.configure("TCheckbutton", background=BG, foreground=TEXT,
                     font=body, focuscolor=BG)
-    style.configure("Card.TCheckbutton", background=PANEL,
-                    foreground=TEXT, font=body, focuscolor=PANEL)
+    style.configure("Card.TCheckbutton", background=PANEL_GLASS,
+                    foreground=TEXT, font=body, focuscolor=PANEL_GLASS)
 
     # -- treeview ------------------------------------------------------------
     style.configure("Treeview", background=PANEL, fieldbackground=PANEL,

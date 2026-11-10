@@ -137,7 +137,7 @@ class AgentConfigApp:
         body.columnconfigure(0, weight=1)
 
         cloud_entry = RoundedEntry(body, textvariable=self.cloud_var,
-                                   backdrop=ui_theme.PANEL)
+                                   backdrop=ui_theme.PANEL_GLASS)
         ui_theme.labeled_field(body, 0, "Cloud URL:", cloud_entry)
         # Dynamic http:// hint in the cloud field's hint slot (grid
         # row 2 — see ui_theme.labeled_field's row math).
@@ -153,7 +153,7 @@ class AgentConfigApp:
         self.key_entry = RoundedEntry(key_box,
                                       textvariable=self.key_var,
                                       show="*",
-                                      backdrop=ui_theme.PANEL)
+                                      backdrop=ui_theme.PANEL_GLASS)
         self.key_entry.pack(side="left", fill="x", expand=True)
         ttk.Checkbutton(key_box, text="Hiện key",
                         variable=self.show_key_var,
@@ -163,7 +163,7 @@ class AgentConfigApp:
         ui_theme.labeled_field(body, 1, "Agent key:", key_box)
 
         site_entry = RoundedEntry(body, textvariable=self.site_var,
-                                  backdrop=ui_theme.PANEL)
+                                  backdrop=ui_theme.PANEL_GLASS)
         ui_theme.labeled_field(body, 2, "Tên trại:", site_entry,
                                hint="vd Xưởng 1")
 
@@ -183,14 +183,14 @@ class AgentConfigApp:
 
         target_entry = RoundedEntry(sbody,
                                     textvariable=self.target_var,
-                                    backdrop=ui_theme.PANEL)
+                                    backdrop=ui_theme.PANEL_GLASS)
         ui_theme.labeled_field(sbody, 0, "Dải IP quét:", target_entry,
                                hint="vd 192.168.1.10-192.168.1.60")
 
         interval_entry = RoundedEntry(sbody,
                                       textvariable=self.interval_var,
                                       width=10,
-                                      backdrop=ui_theme.PANEL)
+                                      backdrop=ui_theme.PANEL_GLASS)
         ui_theme.labeled_field(sbody, 1, "Chu kỳ quét (giây):",
                                interval_entry)
         interval_entry.grid_configure(sticky="w")
@@ -202,11 +202,11 @@ class AgentConfigApp:
         bg_row.pack(fill="x")
         self.bg_pill = ui_theme.status_pill(
             bg_row, text="Chưa có dữ liệu", state="dim",
-            backdrop=ui_theme.PANEL)
+            backdrop=ui_theme.PANEL_GLASS)
         self.bg_pill.pack(side="left")
         self.view_log_button = RoundedButton(
             bg_row, text="Xem log", variant="ghost",
-            command=self._open_log, backdrop=ui_theme.PANEL)
+            command=self._open_log, backdrop=ui_theme.PANEL_GLASS)
         self.view_log_button.pack(side="right")
         self.bg_status_var = tk.StringVar(
             value="Agent chưa chạy vòng nào — trạng thái sẽ hiện "

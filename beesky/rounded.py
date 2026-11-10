@@ -3,7 +3,11 @@
 ttk has no border-radius, so the design system's rounded surfaces
 (radius tokens in beesky/ui_theme.py: cards 16, widgets 12, pills
 fully round — see docs/design-tokens.md) are drawn on tk.Canvas
-(stdlib only):
+(stdlib only). Since v0.18 the cards / ghost buttons / entries
+also carry the SIMULATED Liquid Glass material (Tk cannot blur
+what is behind a window): the ui_theme glass tints plus a 1px
+rim light along the top edge — the web dashboards do the real
+backdrop-filter version of the same material.
 
   * RoundedCard   — a ttk.Frame whose surface is a canvas-drawn
     rounded rect; callers pack/grid it and fill it exactly like the
@@ -39,7 +43,7 @@ _ACCENT_HOVER = "#FFE14D"
 _ACCENT_PRESSED = "#D9BE00"
 _ACCENT_DISABLED_BG = "#57500F"
 _ACCENT_DISABLED_FG = "#8A8A8A"
-_GHOST_HOVER = "#26262E"
+_GHOST_HOVER = "#2B2B36"  # v0.18: perceptible step up from GHOST_FILL
 _DANGER_HOVER = "#2A1A1A"
 _DANGER_PRESSED = "#2A1515"
 
@@ -78,6 +82,31 @@ def _draw_rounded(canvas: tk.Canvas, x1: float, y1: float,
         **options)
 
 
+def top_rim_points(x1: float, y1: float, x2: float,
+                   radius: float, segments: int = 6) -> list[float]:
+    """Polyline points along the TOP edge of a rounded rect whose
+    outline spans (x1, y1)-(x2, ·) with corner *radius*: the
+    top-left arc, the top straight segment, the top-right arc.
+
+    Drawn 1px inside a surface's outline (callers pass the
+    surface rect inset by 1 with radius-1) it reads as the rim
+    light on a glass edge — Liquid Glass's signature highlight,
+    simulated (v0.18)."""
+    r = max(0.0, min(radius, (x2 - x1) / 2.0))
+    points: list[float] = []
+
+    def arc(cx: float, start: float) -> None:
+        for i in range(segments + 1):
+            angle = math.radians(start + 90.0 * i / segments)
+            points.append(cx + r * math.cos(angle))
+            points.append(y1 + r + r * math.sin(angle))
+
+    arc(x1 + r, 180.0)          # top-left arc, ends at (x1+r, y1)
+    points.extend((x2 - r, y1))  # straight run to the right arc
+    arc(x2 - r, 270.0)          # top-right arc
+    return points
+
+
 def _font(widget: tk.Misc, size: int, bold: bool = False) -> tkfont.Font:
     family = ui_theme.font_family(widget.winfo_toplevel())
     return tkfont.Font(family=family, size=size,
@@ -109,8 +138,9 @@ class RoundedCard(ttk.Frame):
                  outline: str | None = None):
         super().__init__(parent, style="TFrame", padding=pad)
         self._radius = ui_theme.RADIUS_CARD if radius is None else radius
-        self._fill = ui_theme.PANEL if fill is None else fill
-        self._outline = ui_theme.BORDER if outline is None else outline
+        self._fill = (ui_theme.PANEL_GLASS if fill is None else fill)
+        self._outline = (ui_theme.GLASS_BORDER if outline is None
+                         else outline)
         self._canvas = tk.Canvas(
             self, bg=backdrop or ui_theme.BG, highlightthickness=0,
             bd=0)
@@ -128,12 +158,25 @@ class RoundedCard(ttk.Frame):
         height = self._canvas.winfo_height()
         if width <= 2 or height <= 2:
             return
+        # One delete by the shared "surface" tag clears the fill
+        # AND the rim (tagged with both), so a resize never
+        # double-draws either.
         self._canvas.delete("surface")
         self._canvas.create_polygon(
             rounded_rect_points(1, 1, width - 1, height - 1,
                                 self._radius),
             fill=self._fill, outline=self._outline, width=1,
             tags=("surface",))
+        # Rim light (v0.18 simulated glass): a 1px brighter line
+        # along the top inner edge — the inset-by-1 top arc +
+        # straight of the surface outline.
+        self._canvas.create_line(
+            top_rim_points(2, 2, width - 2,
+                           max(2, self._radius - 1)),
+            fill=ui_theme.RIM_LIGHT, width=1,
+            tags=("surface", "rim"))
+        # Lowering by the shared tag keeps the rim (created last)
+        # above the fill while both stay under the card's children.
         self._canvas.tag_lower("surface")
 
 
@@ -216,15 +259,17 @@ class RoundedButton(tk.Canvas):
             elif self._hover:
                 fill = _DANGER_HOVER
             return (fill, ui_theme.BORDER, ui_theme.BAD)
-        # ghost
+        # ghost — simulated glass since v0.18 (GHOST_FILL +
+        # GLASS_BORDER + the rim light drawn in _redraw)
         if self._state == "disabled":
-            return (ui_theme.PANEL, ui_theme.BORDER, ui_theme.MUTED)
-        fill = ui_theme.PANEL2
+            return (ui_theme.PANEL_GLASS, ui_theme.GLASS_BORDER,
+                    ui_theme.MUTED)
+        fill = ui_theme.GHOST_FILL
         if self._pressed:
             fill = ui_theme.PANEL
         elif self._hover:
             fill = _GHOST_HOVER
-        return (fill, ui_theme.BORDER, ui_theme.TEXT)
+        return (fill, ui_theme.GLASS_BORDER, ui_theme.TEXT)
 
     def _ring_colour(self) -> str:
         return (ui_theme.ACCENT_TEXT if self._variant == "accent"
@@ -241,6 +286,13 @@ class RoundedButton(tk.Canvas):
         self.delete("all")
         _draw_rounded(self, 0, 0, width, height, self._radius,
                       fill=fill, outline=outline, width=1)
+        if self._variant == "ghost" and self._state == "normal":
+            # Rim light (v0.18 simulated glass) — _redraw rebuilds
+            # from delete("all"), so resizes never double-draw it.
+            self.create_line(
+                top_rim_points(2, 2, width - 2,
+                               max(2, self._radius - 1)),
+                fill=ui_theme.RIM_LIGHT, width=1, tags=("rim",))
         if self._focused and self._state == "normal":
             self.create_polygon(
                 rounded_rect_points(3, 3, width - 3, height - 3,
@@ -350,8 +402,8 @@ class RoundedEntry(tk.Canvas):
 
     The real editor is a borderless tk.Entry hosted via
     create_window (exposed as ``.entry``); the canvas draws the
-    PANEL2 fill + hairline, which turns ACCENT while the entry
-    has keyboard focus. Constructor options mirror the ttk.Entry
+    ENTRY_FILL glass fill + hairline, which turns ACCENT while
+    the entry has keyboard focus. Constructor options mirror the ttk.Entry
     usage in the two GUIs (textvariable / width in characters /
     show); configure()/cget() delegate the entry options, so
     existing call sites (``key_entry.configure(show=...)``,
@@ -380,11 +432,11 @@ class RoundedEntry(tk.Canvas):
         super().__init__(parent, width=px_width, height=height,
                          bg=backdrop or ui_theme.BG, **canvas_options)
         entry_options: dict = {
-            "bg": ui_theme.PANEL2, "fg": ui_theme.TEXT,
+            "bg": ui_theme.ENTRY_FILL, "fg": ui_theme.TEXT,
             "insertbackground": ui_theme.TEXT,
             "selectbackground": ui_theme.SELECT_BG,
             "selectforeground": ui_theme.TEXT,
-            "disabledbackground": ui_theme.PANEL2,
+            "disabledbackground": ui_theme.ENTRY_FILL,
             "disabledforeground": ui_theme.MUTED,
             "relief": "flat", "bd": 0, "highlightthickness": 0,
             "font": font_obj,
@@ -416,10 +468,11 @@ class RoundedEntry(tk.Canvas):
             return
         if self._shape is not None:
             self.delete(self._shape)
-        outline = ui_theme.ACCENT if self._focused else ui_theme.BORDER
+        outline = (ui_theme.ACCENT if self._focused
+                   else ui_theme.ENTRY_BORDER)
         self._shape = _draw_rounded(
             self, 0, 0, width, height, self._radius,
-            fill=ui_theme.PANEL2, outline=outline, width=1)
+            fill=ui_theme.ENTRY_FILL, outline=outline, width=1)
         self.tag_lower(self._shape)
 
     def _on_resize(self, _event=None) -> None:

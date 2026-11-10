@@ -68,3 +68,51 @@ FAIL line; tests/RESULTS.md restored to the committed ship-time blocks and the v
 suites re-verified standalone (all green; the known v0.11 unlock-order assertion reproduced
 FAIL/PASS/FAIL back-to-back on the identical tree — timing flake, disclosed as before).
 tests/RESULTS.md: 397 PASS lines.
+
+## v0.18 — Liquid Glass (real glass web, simulated glass desktop)
+Owner approved chasing the 2026 trend (Apple iOS 26 Liquid Glass). Brand palette unchanged.
+- Web (beesky/cloud/dashboard.html + beesky/web/dashboard.html) — REAL glass: ambient layered
+  body backdrop (radial glows rgba(245,216,0,.07) + rgba(70,100,180,.06) over #0B0B0D,
+  background-attachment: fixed); glass tokens --glass rgba(255,255,255,.045) /
+  --glass-line rgba(255,255,255,.09) / --glass-soft .05 / --glass-line-soft .10 /
+  --glass-chrome (sidebar, top bars) / --glass-head (table headers, rgba .03) /
+  --glass-hover; backdrop-filter blur(16px) saturate(150%) (soft tier blur(10px)) on cards,
+  panels, stat tiles, sidebar, topbar/header, settings panels, table containers;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 8px 32px rgba(0,0,0,.35). Inputs +
+  ghost buttons (.btn-action/.btn-danger) + icon chips get the soft tier; the accent CTA
+  stays solid #F5D800; table rows stay transparent so dense data remains readable.
+  Fallbacks: @supports not (backdrop-filter) AND @media (prefers-reduced-transparency:
+  reduce) re-point every glass token at the pre-v0.18 solids and set the blur tokens to
+  none — zero layout/DOM change. No class/id/JS changes anywhere.
+- Desktop — SIMULATED glass (Tk cannot blur; docs say so plainly): new ui_theme tokens
+  PANEL_GLASS #191920 (card fill), GLASS_BORDER #34343E, RIM_LIGHT #3D3D4A, GHOST_FILL
+  #22222B, ENTRY_FILL #1E1E26, ENTRY_BORDER #30303C. RoundedCard + ghost RoundedButtons
+  draw a real 1px rim-light line (top arc + straight, inset 1px, canvas tag "rim") on every
+  redraw — resizes never double it; disabled ghosts drop the rim. Card-hosted ttk styles
+  (Card.TFrame/TLabel/Section/Sub/Hint, StatTitle/Stat, Card.TCheckbutton) and every
+  in-card widget backdrop moved PANEL -> PANEL_GLASS so labels blend with the drawn
+  surface; the stat value label in gui.py likewise. Pills + accent button stay solid;
+  Treeview keeps solid PANEL inside its glass card.
+- Changed test expectations (every one still an EXACT pin):
+  * tests/mock_theme_test.py — "Card.TFrame background" expected ui_theme.PANEL (#15151A)
+    -> ui_theme.PANEL_GLASS (#191920) [the style genuinely renders on glass now];
+    ADDED an exact pin of the six glass tokens (#191920/#34343E/#3D3D4A/#22222B/#1E1E26/
+    #30303C). No other theme assertion touched (PANEL/PANEL2/BORDER constants unchanged).
+  * tests/mock_agent_bg_test.py — release version pin 0.17.0 -> 0.18.0 (the routine
+    per-release pin: docstring + __version__/installer.iss/agent.iss comparisons).
+  * Derived shade (code, not a test pin): RoundedButton ghost hover #26262E -> #2B2B36
+    so hover stays perceptible on the lighter GHOST_FILL.
+  * No dashboard-CSS assertions existed in the web/cloud/agents suites (they pin brand
+    #F5D800 + DOM markers) — none needed changing; the radius-token assertions in
+    mock_rounded_test pass unchanged.
+- Tests: new tests/mock_glass_test.py — 26/26 PASS (per-dashboard: glass tokens,
+  backdrop-filter, ambient backdrop, both fallbacks, shadow token, solid CTA; desktop:
+  card fill/outline pins, exactly-one-rim incl. after resize, ghost rim + colour triple,
+  disabled-ghost behaviour, entry fill/border pins). Chain: v0.1–v0.10 regenerated green
+  in-chain, then stopped at the KNOWN v0.11 firmware race-order assertion (kill idx 3 vs
+  first.bmu idx 5) — control-verified PRE-EXISTING: pristine v0.17 tree (b5fdd90, changes
+  stashed) fails it standalone with byte-identical indices (ident=0 first=5 kill=3
+  second=8 marker=11) and this diff touches no firmware-path code. tests/RESULTS.md
+  restored to ship-time blocks; v0.11–v0.18 suites re-verified standalone, all green
+  (logo, history, agents-ui, agent-app 41, agent-bg 52, theme, rounded, glass 26, GUI,
+  cloud, web). tests/RESULTS.md: 423 PASS lines.

@@ -22,10 +22,29 @@
     --radius-card: 16px;
     --radius-widget: 12px;
     --radius-pill: 999px;
+    /* Liquid Glass (v0.18): translucent surfaces + backdrop blur over
+       the ambient body backdrop. The @supports / reduced-transparency
+       blocks at the bottom re-point these tokens at the pre-v0.18
+       solid colours, so every glass rule below falls back cleanly. */
+    --glass: rgba(255, 255, 255, .045);
+    --glass-line: rgba(255, 255, 255, .09);
+    --glass-soft: rgba(255, 255, 255, .05);
+    --glass-line-soft: rgba(255, 255, 255, .10);
+    --glass-chrome: rgba(255, 255, 255, .03);
+    --glass-head: rgba(255, 255, 255, .03);
+    --glass-hover: rgba(255, 255, 255, .05);
+    --glass-blur: blur(16px) saturate(150%);
+    --glass-blur-soft: blur(10px) saturate(150%);
+    --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 8px 32px rgba(0, 0, 0, .35);
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0; background: var(--bg); color: var(--text);
+    margin: 0; color: var(--text);
+    background:
+      radial-gradient(600px 400px at 15% -5%, rgba(245, 216, 0, .07), transparent 60%),
+      radial-gradient(700px 500px at 95% 110%, rgba(70, 100, 180, .06), transparent 60%),
+      var(--bg);
+    background-attachment: fixed;
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
     font-size: 14px;
   }
@@ -33,8 +52,9 @@
 
   /* -- sidebar ------------------------------------------------------- */
   .sidebar {
-    width: 230px; flex: 0 0 230px; background: var(--sidebar);
-    border-right: 1px solid var(--line); padding: 20px 14px;
+    width: 230px; flex: 0 0 230px; background: var(--glass-chrome);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    border-right: 1px solid var(--glass-line); padding: 20px 14px;
     position: sticky; top: 0; height: 100vh;
     display: flex; flex-direction: column; gap: 4px;
   }
@@ -51,7 +71,7 @@
     padding: 10px 12px; font-size: 14px; font-weight: 600; cursor: pointer;
     font-family: inherit;
   }
-  .nav-item:hover { color: var(--text); background: #1A1A20; }
+  .nav-item:hover { color: var(--text); background: var(--glass-hover); }
   .nav-item.active { color: var(--yellow); background: rgba(245, 216, 0, .10); }
   /* Inline stroke icons (v0.13) — Lucide-style geometry, currentColor
      so nav icons follow the muted/active colour of their item. */
@@ -65,15 +85,18 @@
   .main-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .topbar {
     display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
-    padding: 13px 24px; border-bottom: 1px solid var(--line);
-    background: #0E0E11; position: sticky; top: 0; z-index: 20;
+    padding: 13px 24px; border-bottom: 1px solid var(--glass-line);
+    background: var(--glass-chrome);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    position: sticky; top: 0; z-index: 20;
   }
   .topbar-title { font-size: 17px; font-weight: 800; }
   .topbar .spacer { flex: 1; }
   .last-update { color: var(--muted); font-size: 12.5px; }
   .site-select { color: var(--muted); font-size: 13px; }
   select, input, textarea {
-    background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    background: var(--glass-soft); color: var(--text); border: 1px solid var(--glass-line-soft);
+    -webkit-backdrop-filter: var(--glass-blur-soft); backdrop-filter: var(--glass-blur-soft);
     border-radius: var(--radius-widget); padding: 8px 11px; font-size: 13px; font-family: inherit;
   }
   select:focus, input:focus, textarea:focus { outline: 1px solid var(--yellow); }
@@ -102,19 +125,21 @@
 
   /* -- panels & cards -------------------------------------------------- */
   .panel {
-    background: var(--panel); border: 1px solid var(--line);
-    border-radius: var(--radius-card); box-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+    background: var(--glass); border: 1px solid var(--glass-line);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    border-radius: var(--radius-card); box-shadow: var(--glass-shadow);
   }
   .listbox { overflow: hidden; }
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
   .card {
-    background: var(--panel); border: 1px solid var(--line);
-    border-radius: var(--radius-card); box-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+    background: var(--glass); border: 1px solid var(--glass-line);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    border-radius: var(--radius-card); box-shadow: var(--glass-shadow);
     padding: 16px 18px; position: relative;
   }
   .ic-chip {
     position: absolute; top: 14px; right: 14px; width: 34px; height: 34px;
-    border-radius: var(--radius-widget); background: var(--panel2); border: 1px solid var(--line);
+    border-radius: var(--radius-widget); background: var(--glass-soft); border: 1px solid var(--glass-line-soft);
     display: flex; align-items: center; justify-content: center; color: var(--muted);
   }
   .ic-chip svg { width: 18px; height: 18px; }
@@ -131,8 +156,9 @@
   #chart-wrap svg { width: 100%; height: auto; display: block; }
   .sites { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 14px; }
   .site-card {
-    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-card);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, .35); padding: 16px 18px; cursor: pointer;
+    background: var(--glass); border: 1px solid var(--glass-line); border-radius: var(--radius-card);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    box-shadow: var(--glass-shadow); padding: 16px 18px; cursor: pointer;
   }
   .site-card:hover { border-color: var(--yellow); }
   .site-card.selected { border-color: var(--yellow); box-shadow: 0 0 0 1px var(--yellow); }
@@ -148,11 +174,11 @@
   table { width: 100%; border-collapse: collapse; min-width: 960px; font-variant-numeric: tabular-nums; }
   th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; font-size: 13px; }
   th {
-    background: var(--panel2); color: var(--muted); font-size: 12px;
+    background: var(--glass-head); color: var(--muted); font-size: 12px;
     text-transform: uppercase; letter-spacing: .4px;
     position: sticky; top: 0; z-index: 1;
   }
-  tbody tr:hover td { background: #191920; }
+  tbody tr:hover td { background: var(--glass-hover); }
   tr:last-child td { border-bottom: 0; }
   .pill {
     display: inline-block; padding: 2px 10px; border-radius: var(--radius-pill);
@@ -164,7 +190,8 @@
   tr.miner-row { cursor: pointer; }
   tr.miner-row.selected td { background: #26210A; }
   .btn-action {
-    background: var(--panel2); color: var(--yellow); border: 1px solid var(--yellow);
+    background: var(--glass-soft); color: var(--yellow); border: 1px solid var(--yellow);
+    -webkit-backdrop-filter: var(--glass-blur-soft); backdrop-filter: var(--glass-blur-soft);
     border-radius: var(--radius-widget); padding: 5px 11px; font-size: 12px; font-weight: 700;
     cursor: pointer; white-space: nowrap; font-family: inherit;
   }
@@ -228,7 +255,7 @@
 
   /* -- repairs -------------------------------------------------------------- */
   .repairs-head {
-    padding: 12px 16px; font-weight: 800; background: var(--panel2);
+    padding: 12px 16px; font-weight: 800; background: var(--glass-head);
     border-bottom: 1px solid var(--line);
   }
   .repair-form {
@@ -270,7 +297,11 @@
   .form-msg.err { color: var(--bad); }
 
   /* -- agent management (v0.13) ------------------------------------------------- */
-  .agents-box { border: 1px solid var(--line); border-radius: var(--radius-card); overflow: hidden; }
+  .agents-box {
+    border: 1px solid var(--glass-line); border-radius: var(--radius-card); overflow: hidden;
+    background: var(--glass-soft);
+    -webkit-backdrop-filter: var(--glass-blur-soft); backdrop-filter: var(--glass-blur-soft);
+  }
   .agentrow {
     display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
     padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 13px;
@@ -284,7 +315,8 @@
     text-transform: uppercase; letter-spacing: .4px;
   }
   .btn-danger {
-    background: var(--panel2); color: var(--bad); border: 1px solid #4A2326;
+    background: var(--glass-soft); color: var(--bad); border: 1px solid #4A2326;
+    -webkit-backdrop-filter: var(--glass-blur-soft); backdrop-filter: var(--glass-blur-soft);
     border-radius: var(--radius-widget); padding: 5px 11px; font-size: 12px; font-weight: 700;
     cursor: pointer; white-space: nowrap; font-family: inherit;
   }
@@ -303,6 +335,34 @@
     font-size: 12.5px;
   }
   .key-panel .btn-link { margin-top: 12px; }
+
+  /* -- Liquid Glass fallbacks (v0.18) -------------------------------------------- */
+  /* No backdrop-filter support, or the user prefers reduced transparency:
+     re-point the glass tokens at the pre-v0.18 solid colours (and switch
+     the blur off) — every glass surface above degrades to the old flat
+     material with no layout change. */
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    :root {
+      --glass: #15151A; --glass-line: #232329;
+      --glass-soft: #1C1C22; --glass-line-soft: #232329;
+      --glass-chrome: #101014; --glass-head: #1C1C22;
+      --glass-hover: #191920;
+      --glass-blur: none; --glass-blur-soft: none;
+      --glass-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+    }
+    .agents-box { background: transparent; }
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    :root {
+      --glass: #15151A; --glass-line: #232329;
+      --glass-soft: #1C1C22; --glass-line-soft: #232329;
+      --glass-chrome: #101014; --glass-head: #1C1C22;
+      --glass-hover: #191920;
+      --glass-blur: none; --glass-blur-soft: none;
+      --glass-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+    }
+    .agents-box { background: transparent; }
+  }
 
   /* -- small screens: sidebar becomes a top bar --------------------------------- */
   @media (max-width: 900px) {

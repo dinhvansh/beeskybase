@@ -21,17 +21,36 @@
     --radius-card: 16px;
     --radius-widget: 12px;
     --radius-pill: 999px;
+    /* Liquid Glass (v0.18): same tokens as the cloud dashboard —
+       translucent surfaces + backdrop blur over the ambient body
+       backdrop, with solid fallbacks at the bottom of this sheet. */
+    --glass: rgba(255, 255, 255, .045);
+    --glass-line: rgba(255, 255, 255, .09);
+    --glass-soft: rgba(255, 255, 255, .05);
+    --glass-line-soft: rgba(255, 255, 255, .10);
+    --glass-chrome: rgba(255, 255, 255, .03);
+    --glass-head: rgba(255, 255, 255, .03);
+    --glass-hover: rgba(255, 255, 255, .05);
+    --glass-blur: blur(16px) saturate(150%);
+    --glass-blur-soft: blur(10px) saturate(150%);
+    --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 8px 32px rgba(0, 0, 0, .35);
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0; background: var(--bg); color: var(--text);
+    margin: 0; color: var(--text);
+    background:
+      radial-gradient(600px 400px at 15% -5%, rgba(245, 216, 0, .07), transparent 60%),
+      radial-gradient(700px 500px at 95% 110%, rgba(70, 100, 180, .06), transparent 60%),
+      var(--bg);
+    background-attachment: fixed;
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
     font-size: 14px;
   }
   header {
     display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-    padding: 14px 20px; border-bottom: 1px solid var(--line);
-    background: #101014;
+    padding: 14px 20px; border-bottom: 1px solid var(--glass-line);
+    background: var(--glass-chrome);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
   }
   .logo {
     font-size: 26px; font-weight: 800; letter-spacing: 1px; color: var(--text);
@@ -52,13 +71,14 @@
   main { padding: 22px 24px 34px; max-width: 1280px; margin: 0 auto; }
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
   .card {
-    background: var(--panel); border: 1px solid var(--line);
-    border-radius: var(--radius-card); box-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+    background: var(--glass); border: 1px solid var(--glass-line);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    border-radius: var(--radius-card); box-shadow: var(--glass-shadow);
     padding: 16px 18px; position: relative;
   }
   .ic-chip {
     position: absolute; top: 14px; right: 14px; width: 34px; height: 34px;
-    border-radius: var(--radius-widget); background: var(--panel2); border: 1px solid var(--line);
+    border-radius: var(--radius-widget); background: var(--glass-soft); border: 1px solid var(--glass-line-soft);
     display: flex; align-items: center; justify-content: center; color: var(--muted);
   }
   .ic-chip svg { width: 18px; height: 18px; }
@@ -70,17 +90,18 @@
   h2 { margin: 28px 0 12px; font-size: 17px; font-weight: 800; }
   h2 .accent { color: var(--yellow); font-weight: 600; }
   .tablewrap {
-    overflow-x: auto; background: var(--panel); border: 1px solid var(--line);
-    border-radius: var(--radius-card); box-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+    overflow-x: auto; background: var(--glass); border: 1px solid var(--glass-line);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    border-radius: var(--radius-card); box-shadow: var(--glass-shadow);
   }
   table { width: 100%; border-collapse: collapse; min-width: 860px; font-variant-numeric: tabular-nums; }
   th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; font-size: 13px; }
   th {
-    background: var(--panel2); color: var(--muted); font-size: 12px;
+    background: var(--glass-head); color: var(--muted); font-size: 12px;
     text-transform: uppercase; letter-spacing: .4px;
     position: sticky; top: 0; z-index: 1;
   }
-  tbody tr:hover td { background: #191920; }
+  tbody tr:hover td { background: var(--glass-hover); }
   tr:last-child td { border-bottom: 0; }
   tr.offline td { opacity: .45; }
   .pill {
@@ -92,8 +113,9 @@
   .pill.off { background: #232329; color: var(--muted); }
   .problems { color: #F3B8B2; font-size: 12px; margin-top: 4px; line-height: 1.5; }
   .events {
-    background: var(--panel); border: 1px solid var(--line);
-    border-radius: var(--radius-card); box-shadow: 0 1px 3px rgba(0, 0, 0, .35); overflow: hidden;
+    background: var(--glass); border: 1px solid var(--glass-line);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    border-radius: var(--radius-card); box-shadow: var(--glass-shadow); overflow: hidden;
   }
   .event {
     display: flex; gap: 10px; align-items: baseline; padding: 10px 16px;
@@ -111,8 +133,9 @@
   .empty { color: var(--muted); padding: 18px 16px; text-align: center; }
   footer { color: var(--muted); font-size: 12px; text-align: center; padding: 0 20px 22px; }
   .heatwrap {
-    background: var(--panel); border: 1px solid var(--line);
-    border-radius: var(--radius-card); box-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+    background: var(--glass); border: 1px solid var(--glass-line);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    border-radius: var(--radius-card); box-shadow: var(--glass-shadow);
     padding: 14px 16px;
   }
   .heatmap { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -125,6 +148,31 @@
   .tile .hh { font-size: 11px; opacity: .85; white-space: nowrap; }
   .tile.problem { border-color: var(--bad); }
   .tile.offline { background: #1C1C22; border: 2px dashed #3F3F46; color: var(--muted); }
+
+  /* -- Liquid Glass fallbacks (v0.18) -------------------------------------------- */
+  /* Same contract as the cloud dashboard: no backdrop-filter support, or
+     reduced transparency preferred → glass tokens revert to the pre-v0.18
+     solid colours and the blur switches off. */
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    :root {
+      --glass: #15151A; --glass-line: #232329;
+      --glass-soft: #1C1C22; --glass-line-soft: #232329;
+      --glass-chrome: #101014; --glass-head: #1C1C22;
+      --glass-hover: #191920;
+      --glass-blur: none; --glass-blur-soft: none;
+      --glass-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+    }
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    :root {
+      --glass: #15151A; --glass-line: #232329;
+      --glass-soft: #1C1C22; --glass-line-soft: #232329;
+      --glass-chrome: #101014; --glass-head: #1C1C22;
+      --glass-hover: #191920;
+      --glass-blur: none; --glass-blur-soft: none;
+      --glass-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+    }
+  }
 </style>
 </head>
 <body>
