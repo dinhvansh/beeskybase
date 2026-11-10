@@ -10,6 +10,10 @@ scan pipeline as the CLI / web dashboard (`cli._scan_records` via a
 synthetic argparse namespace), on a worker thread; results come back
 to the UI thread through a queue so the window never freezes.
 
+Styling lives in beesky/ui_theme.py (shared with the agent config
+window and matched to the cloud dashboard palette) — this module
+only lays out cards and wires behaviour.
+
 The console CLI stays for power users — this window is for people
 who just want to double-click, type an IP range and press
 "Quét ngay".
@@ -27,15 +31,16 @@ from pathlib import Path
 from tkinter import filedialog, ttk
 
 from . import __version__
+from . import ui_theme
 from .core import report
 
-BG = "#111111"
-PANEL = "#1b1b1b"
-FG = "#ffffff"
-ACCENT = "#F5D800"
-DIM = "#9a9a9a"
-PROBLEM_BG = "#4a3400"   # dark amber row highlight for CHECK miners
-ERROR_BG = "#4a1616"     # dark red row highlight for fetch errors
+BG = ui_theme.BG
+PANEL = ui_theme.PANEL
+FG = ui_theme.TEXT
+ACCENT = ui_theme.ACCENT
+DIM = ui_theme.MUTED
+PROBLEM_BG = "#463A10"   # dark amber row highlight for CHECK miners
+ERROR_BG = "#472020"     # dark red row highlight for fetch errors
 
 SOURCE_LABEL = {
     "cgminer": "cgminer RPC",
@@ -117,38 +122,13 @@ class BeeSkyApp:
         self._logo_image_small: tk.PhotoImage | None = None
 
         root.title(f"BeeSky {__version__} — Quét & chẩn đoán máy đào")
-        root.configure(bg=BG)
-        root.minsize(880, 540)
+        self._family = ui_theme.setup_theme(root)
         self._load_logo_image()
         self._set_window_icon()
-        self._build_style()
         self._build_widgets(default_target)
+        ui_theme.center_window(root, width=1080, height=680,
+                               minsize=(900, 560))
         self.root.after(100, self._poll_queue)
-
-    # -- construction ----------------------------------------------------
-
-    def _build_style(self) -> None:
-        style = ttk.Style(self.root)
-        try:
-            style.theme_use("clam")
-        except tk.TclError:
-            pass
-        style.configure("Treeview", background=PANEL, fieldbackground=PANEL,
-                        foreground=FG, rowheight=24, font=("TkDefaultFont", 10))
-        style.configure("Treeview.Heading", background="#000000",
-                        foreground=ACCENT, font=("TkDefaultFont", 10, "bold"))
-        style.map("Treeview", background=[("selected", "#333300")],
-                  foreground=[("selected", FG)])
-        style.configure("Accent.TButton", background=ACCENT, foreground="#000000",
-                        font=("TkDefaultFont", 10, "bold"), padding=(14, 6))
-        style.map("Accent.TButton", background=[("active", "#ffe94d"),
-                                                ("disabled", "#6b6200")])
-        style.configure("Dark.TButton", background="#2a2a2a", foreground=FG,
-                        padding=(10, 6))
-        style.map("Dark.TButton", background=[("active", "#3a3a3a")])
-        style.configure("Dark.TEntry", fieldbackground="#000000",
-                        foreground=FG, insertcolor=FG)
-        style.configure("Dark.TLabel", background=BG, foreground=FG)
 
     # -- brand icon ------------------------------------------------------
 
@@ -188,46 +168,107 @@ class BeeSkyApp:
             except tk.TclError:
                 pass
 
+    # -- layout ------------------------------------------------------------
+
+    def _stat_card(self, parent: ttk.Frame, column: int, title: str,
+                   value: str, fg: str = ui_theme.TEXT) -> tk.StringVar:
+        """One stat card in the stats row; returns its value var."""
+        frame = ui_theme.card(parent)
+        frame.grid(row=0, column=column, sticky="nsew",
+                   padx=(0, 10) if column < 3 else 0)
+        ttk.Label(frame, text=title,
+                  style="StatTitle.TLabel").pack(anchor="w")
+        var = tk.StringVar(value=value)
+        label = tk.Label(frame, textvariable=var, bg=ui_theme.PANEL,
+                         fg=fg, font=(self._family,
+                                      ui_theme.STAT_SIZE, "bold"))
+        label.pack(anchor="w", pady=(4, 0))
+        if title == "Máy có vấn đề":
+            self._problem_value_label = label
+        return var
+
     def _build_widgets(self, default_target: str) -> None:
-        header = tk.Frame(self.root, bg=BG)
-        header.pack(fill="x", padx=14, pady=(12, 2))
+        main = ttk.Frame(self.root, padding=(16, 12, 16, 12))
+        main.pack(fill="both", expand=True)
+
+        # -- header band ------------------------------------------------
+        header = ttk.Frame(main)
+        header.pack(fill="x")
         if self._logo_image is not None:
             # 512px master subsampled to ~40px for the header.
             self._logo_image_small = self._logo_image.subsample(13)
-            tk.Label(header, image=self._logo_image_small, bg=BG).pack(
+            ttk.Label(header, image=self._logo_image_small).pack(
                 side="left", padx=(0, 10))
-        tk.Label(header, text="BeeSky", bg=BG, fg=ACCENT,
-                 font=("TkDefaultFont", 22, "bold")).pack(side="left")
-        tk.Label(header, text="Quét & chẩn đoán máy đào", bg=BG, fg=FG,
-                 font=("TkDefaultFont", 12)).pack(side="left", padx=(10, 0),
-                                                  pady=(8, 0))
-        tk.Label(header, text=f"v{__version__}", bg=BG, fg=DIM).pack(
-            side="right", pady=(10, 0))
+        titles = ttk.Frame(header)
+        titles.pack(side="left")
+        ttk.Label(titles, text="BeeSky",
+                  style="Title.TLabel").pack(anchor="w")
+        ttk.Label(titles, text="Giám sát & chẩn đoán máy đào ASIC",
+                  style="Sub.TLabel").pack(anchor="w")
+        ttk.Label(header, text=f"v{__version__}",
+                  style="Sub.TLabel").pack(side="right")
 
-        controls = tk.Frame(self.root, bg=BG)
-        controls.pack(fill="x", padx=14, pady=(8, 4))
-        tk.Label(controls, text="Dải IP / máy:", bg=BG, fg=FG).pack(side="left")
+        # -- toolbar card -------------------------------------------------
+        toolbar = ui_theme.card(main, title="Mục tiêu quét")
+        toolbar.pack(fill="x", pady=(12, 0))
+        target_row = ttk.Frame(toolbar, style="Card.TFrame")
+        target_row.pack(fill="x")
         self.target_var = tk.StringVar(value=default_target)
-        ttk.Entry(controls, textvariable=self.target_var, width=24,
-                  style="Dark.TEntry").pack(side="left", padx=(6, 14))
-        tk.Label(controls, text="User:", bg=BG, fg=FG).pack(side="left")
-        self.user_var = tk.StringVar(value="root")
-        ttk.Entry(controls, textvariable=self.user_var, width=10,
-                  style="Dark.TEntry").pack(side="left", padx=(6, 10))
-        tk.Label(controls, text="Mật khẩu:", bg=BG, fg=FG).pack(side="left")
-        self.password_var = tk.StringVar(value="root")
-        ttk.Entry(controls, textvariable=self.password_var, width=12,
-                  show="*", style="Dark.TEntry").pack(side="left", padx=(6, 14))
-        self.scan_button = ttk.Button(controls, text="Quét ngay",
+        ttk.Entry(target_row,
+                  textvariable=self.target_var).pack(
+                      side="left", fill="x", expand=True)
+        self.scan_button = ttk.Button(target_row, text="Quét ngay",
                                       style="Accent.TButton",
                                       command=self.start_scan)
-        self.scan_button.pack(side="left")
-        self.status_var = tk.StringVar(value="Sẵn sàng — nhập dải IP rồi bấm Quét ngay.")
-        tk.Label(controls, textvariable=self.status_var, bg=BG, fg=DIM).pack(
-            side="left", padx=(14, 0))
+        self.scan_button.pack(side="left", padx=(10, 0))
+        ttk.Button(target_row, text="Xuất phiếu sửa",
+                   style="Ghost.TButton",
+                   command=self.export_tickets).pack(
+                       side="left", padx=(10, 0))
+        ttk.Button(target_row, text="Mở web tại chỗ",
+                   style="Ghost.TButton",
+                   command=self.open_local_web).pack(
+                       side="left", padx=(10, 0))
+        ttk.Button(target_row, text="Quét lại", style="Ghost.TButton",
+                   command=self.start_scan).pack(side="left",
+                                                 padx=(10, 0))
 
-        table_frame = tk.Frame(self.root, bg=BG)
-        table_frame.pack(fill="both", expand=True, padx=14, pady=(6, 4))
+        creds_row = ttk.Frame(toolbar, style="Card.TFrame")
+        creds_row.pack(fill="x", pady=(10, 0))
+        ttk.Label(creds_row, text="User:",
+                  style="Card.TLabel").pack(side="left")
+        self.user_var = tk.StringVar(value="root")
+        ttk.Entry(creds_row, textvariable=self.user_var,
+                  width=12).pack(side="left", padx=(6, 14))
+        ttk.Label(creds_row, text="Mật khẩu:",
+                  style="Card.TLabel").pack(side="left")
+        self.password_var = tk.StringVar(value="root")
+        ttk.Entry(creds_row, textvariable=self.password_var, width=14,
+                  show="*").pack(side="left", padx=(6, 0))
+        ttk.Label(creds_row,
+                  text="— tài khoản web của máy chạy firmware gốc",
+                  style="Card.Hint.TLabel").pack(side="left",
+                                                 padx=(12, 0))
+
+        # -- stats row ------------------------------------------------------
+        stats = ttk.Frame(main)
+        stats.pack(fill="x", pady=(12, 0))
+        for col in range(4):
+            stats.columnconfigure(col, weight=1)
+        self.stat_total_var = self._stat_card(stats, 0, "Tổng số máy",
+                                              "0")
+        self.stat_ths_var = self._stat_card(stats, 1, "Tổng hashrate",
+                                            "0.00", fg=ui_theme.ACCENT)
+        self.stat_problem_var = self._stat_card(stats, 2,
+                                                "Máy có vấn đề", "0")
+        self.stat_temp_var = self._stat_card(stats, 3,
+                                             "Nhiệt độ cao nhất", "-")
+
+        # -- results table --------------------------------------------------
+        table_card = ui_theme.card(main)
+        table_card.pack(fill="both", expand=True, pady=(12, 0))
+        table_frame = ttk.Frame(table_card, style="Card.TFrame")
+        table_frame.pack(fill="both", expand=True)
         columns = ("ip", "model", "source", "ths", "chips", "temp", "fans",
                    "status")
         headings = {"ip": "IP", "model": "Model", "source": "Nguồn",
@@ -241,8 +282,10 @@ class BeeSkyApp:
             self.tree.heading(col, text=headings[col])
             self.tree.column(col, width=widths[col], anchor="center")
         self.tree.column("model", anchor="w")
-        self.tree.tag_configure("check", background=PROBLEM_BG)
-        self.tree.tag_configure("error", background=ERROR_BG)
+        self.tree.tag_configure("check", background=PROBLEM_BG,
+                                foreground=FG)
+        self.tree.tag_configure("error", background=ERROR_BG,
+                                foreground=FG)
         self.tree.pack(side="left", fill="both", expand=True)
         scrollbar = ttk.Scrollbar(table_frame, orient="vertical",
                                   command=self.tree.yview)
@@ -250,25 +293,26 @@ class BeeSkyApp:
         self.tree.configure(yscrollcommand=scrollbar.set)
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
 
-        detail_frame = tk.LabelFrame(self.root, text="Chi tiết máy đã chọn",
-                                     bg=BG, fg=ACCENT, padx=8, pady=6)
-        detail_frame.pack(fill="x", padx=14, pady=(2, 6))
-        self.detail = tk.Text(detail_frame, height=6, bg=PANEL, fg=FG,
+        # -- detail pane ------------------------------------------------------
+        detail_card = ui_theme.card(main, title="Chi tiết máy đã chọn")
+        detail_card.pack(fill="x", pady=(12, 0))
+        self.detail = tk.Text(detail_card, height=6,
+                              bg=ui_theme.PANEL2, fg=FG,
                               insertbackground=FG, relief="flat",
-                              font=("TkDefaultFont", 10), wrap="word")
+                              font=(self._family, ui_theme.BODY_SIZE),
+                              wrap="word", padx=10, pady=8)
         self.detail.pack(fill="x")
         self.detail.insert("end", "Chọn một máy trong bảng để xem chi tiết "
                                   "và danh sách vấn đề.")
         self.detail.configure(state="disabled")
 
-        buttons = tk.Frame(self.root, bg=BG)
-        buttons.pack(fill="x", padx=14, pady=(0, 12))
-        ttk.Button(buttons, text="Xuất phiếu sửa", style="Dark.TButton",
-                   command=self.export_tickets).pack(side="left")
-        ttk.Button(buttons, text="Mở web tại chỗ", style="Dark.TButton",
-                   command=self.open_local_web).pack(side="left", padx=(10, 0))
-        ttk.Button(buttons, text="Quét lại", style="Dark.TButton",
-                   command=self.start_scan).pack(side="left", padx=(10, 0))
+        # -- footer status bar --------------------------------------------------
+        footer = ttk.Frame(main)
+        footer.pack(fill="x", pady=(10, 0))
+        self.status_var = tk.StringVar(
+            value="Sẵn sàng — nhập dải IP rồi bấm Quét ngay.")
+        ttk.Label(footer, textvariable=self.status_var,
+                  style="Hint.TLabel").pack(side="left")
 
     # -- scanning ----------------------------------------------------------
 
@@ -326,10 +370,25 @@ class BeeSkyApp:
                              values=row_values(record),
                              tags=(tag,) if tag else ())
         bad = sum(1 for r in records if r.get("status") != "OK")
+        self._update_stats(records, bad)
         self.status_var.set(
             f"Quét xong: {len(records)} máy, {bad} máy cần kiểm tra."
             if records else "Quét xong: không tìm thấy máy nào.")
         self._finish_scan()
+
+    def _update_stats(self, records: list[dict], bad: int) -> None:
+        """Refresh the four stat cards from the latest scan."""
+        self.stat_total_var.set(str(len(records)))
+        total_ths = sum(r["ths"] for r in records
+                        if r.get("ths") is not None)
+        self.stat_ths_var.set(f"{total_ths:.2f}")
+        self.stat_problem_var.set(str(bad))
+        self._problem_value_label.configure(
+            fg=ui_theme.BAD if bad else ui_theme.TEXT)
+        temps = [r["max_temp_c"] for r in records
+                 if r.get("max_temp_c") is not None]
+        self.stat_temp_var.set(
+            f"{max(temps):.0f} °C" if temps else "-")
 
     # -- detail pane ---------------------------------------------------------
 

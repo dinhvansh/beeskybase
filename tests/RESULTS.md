@@ -146,9 +146,9 @@ PASS: miner back: BACK_ONLINE printed + webhook received
 PASS: logfile channel recorded all three events
 
 Captured webhook payloads:
-{"ts": 1794282403.3720913, "time": "2026-11-10 03:46:43", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
-{"ts": 1794282403.8305504, "time": "2026-11-10 03:46:43", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "OFFLINE", "severity": "critical", "detail": "miner went offline / unreachable", "data": {"last_seen": 1794282403.630678}}
-{"ts": 1794282404.4236083, "time": "2026-11-10 03:46:44", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "BACK_ONLINE", "severity": "info", "detail": "miner is back online", "data": {}}
+{"ts": 1794289282.5952525, "time": "2026-11-10 05:41:22", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
+{"ts": 1794289283.0497391, "time": "2026-11-10 05:41:23", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "OFFLINE", "severity": "critical", "detail": "miner went offline / unreachable", "data": {"last_seen": 1794289282.852182}}
+{"ts": 1794289283.633352, "time": "2026-11-10 05:41:23", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "BACK_ONLINE", "severity": "info", "detail": "miner is back online", "data": {}}
 
 WATCH TEST PASSED
 ```
@@ -178,7 +178,7 @@ PASS: hashrate drop phase: /api/events gains HASHRATE_DROP
 PASS: drop event: severity major, drop_pct ~= 40
 
 Captured drop event:
-{"ts": 1794282409.504003, "time": "2026-11-10 03:46:49", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
+{"ts": 1794289288.719094, "time": "2026-11-10 05:41:28", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
 
 WEB TEST PASSED
 ```
@@ -219,7 +219,7 @@ PASS: hashrate drop: HASHRATE_DROP arrives at the cloud
 PASS: drop event: severity major, drop_pct ~= 40, site tag
 
 Captured cloud event:
-{"ts": 1794282416.8439379, "time": "2026-11-10 03:46:56", "site": "Xưởng 1", "agent_id": 1, "ip": "127.0.0.1", "model": "Antminer S19 Pro", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
+{"ts": 1794289296.0640268, "time": "2026-11-10 05:41:36", "site": "Xưởng 1", "agent_id": 1, "ip": "127.0.0.1", "model": "Antminer S19 Pro", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
 PASS: /api/miners?site= shows ~66 TH/s, record annotated with site
 
 CLOUD TEST PASSED
@@ -265,7 +265,7 @@ PASS: site 2 command finishes
 PASS: dashd reboot: status done, result from /system/reboot
 
 Captured dashd reboot command:
-{"id": 1, "agent_id": 2, "site": "Xưởng 2", "ip": "127.0.0.1", "type": "reboot", "payload": {}, "status": "done", "result": "dashd accepted reboot (system reboots in 3s)", "created_at": "2026-11-10 03:46:58", "created_ts": 1794282418.4444592, "claimed_at": "2026-11-10 03:46:58", "finished_at": "2026-11-10 03:46:58"}
+{"id": 1, "agent_id": 2, "site": "Xưởng 2", "ip": "127.0.0.1", "type": "reboot", "payload": {}, "status": "done", "result": "dashd accepted reboot (system reboots in 3s)", "created_at": "2026-11-10 05:41:37", "created_ts": 1794289297.6671667, "claimed_at": "2026-11-10 05:41:37", "finished_at": "2026-11-10 05:41:37"}
 PASS: dashd mock recorded exactly one POST /system/reboot
 PASS: dashd switch_pool {pool_id: 1} finishes done
 PASS: dashd mock activated pool slot 1
@@ -275,7 +275,7 @@ PASS: site 1 agent reports its cgminer miner
 PASS: cgminer reboot finishes done
 
 Captured cgminer reboot command:
-{"id": 4, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "type": "reboot", "payload": {}, "status": "done", "result": "cgminer accepted the privileged 'restart' command", "created_at": "2026-11-10 03:47:01", "created_ts": 1794282421.2771792, "claimed_at": "2026-11-10 03:47:02", "finished_at": "2026-11-10 03:47:02"}
+{"id": 4, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "type": "reboot", "payload": {}, "status": "done", "result": "cgminer accepted the privileged 'restart' command", "created_at": "2026-11-10 05:41:40", "created_ts": 1794289300.509857, "claimed_at": "2026-11-10 05:41:41", "finished_at": "2026-11-10 05:41:41"}
 PASS: cgminer mock recorded the restart RPC
 PASS: cgminer reboot on a read-only API -> failed
 PASS: failure result carries the miner's 'Access denied'
@@ -346,12 +346,12 @@ PASS: CHIPS_LOST also lands in repair history as auto_event
 PASS: auto row: site/ip keyed, no cost/technician
 
 Captured auto repair row:
-{"id": 1, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "mac_or_serial": null, "created_at": "2026-11-10 03:47:12", "created_ts": 1794282432.7923918, "kind": "auto_event", "title": "CHIPS_LOST", "detail": "lost 3 chip(s) (342 -> 339 alive)", "cost_vnd": null, "technician": null}
+{"id": 1, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "mac_or_serial": null, "created_at": "2026-11-10 05:41:52", "created_ts": 1794289312.0016782, "kind": "auto_event", "title": "CHIPS_LOST", "detail": "lost 3 chip(s) (342 -> 339 alive)", "cost_vnd": null, "technician": null}
 PASS: POST /api/repairs (logged in) -> 201 manual row
 PASS: manual row listed with cost_vnd + technician
 
 Captured manual repair row:
-{"id": 2, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "mac_or_serial": null, "created_at": "2026-11-10 03:47:13", "created_ts": 1794282433.2233443, "kind": "manual", "title": "Thay board 2", "detail": "Board 2 chết 3 chip — đã thay board, test lại đạt", "cost_vnd": 1500000, "technician": "Tuấn"}
+{"id": 2, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "mac_or_serial": null, "created_at": "2026-11-10 05:41:52", "created_ts": 1794289312.4380627, "kind": "manual", "title": "Thay board 2", "detail": "Board 2 chết 3 chip — đã thay board, test lại đạt", "cost_vnd": 1500000, "technician": "Tuấn"}
 PASS: POST /api/repairs with blank title -> 400
 
 REPAIRS TEST PASSED
@@ -412,7 +412,7 @@ PASS: no POOL_GAP while the gap stays ~5%
 PASS: pool at 40% of farm -> POOL_GAP (major) in the event feed
 
 Captured POOL_GAP event:
-{"ts": 1794282436.913463, "time": "2026-11-10 03:47:16", "site": "Xưởng 1", "agent_id": 1, "ip": null, "model": null, "type": "POOL_GAP", "severity": "major", "detail": "pool reports 43.65 TH/s vs farm 109.13 TH/s — gap 60.0% exceeds 10% for 2 consecutive checks", "data": {"pool_ths": 43.65, "farm_ths": 109.13, "gap_pct": 60.0, "threshold_pct": 10.0}}
+{"ts": 1794289316.1482992, "time": "2026-11-10 05:41:56", "site": "Xưởng 1", "agent_id": 1, "ip": null, "model": null, "type": "POOL_GAP", "severity": "major", "detail": "pool reports 43.65 TH/s vs farm 109.13 TH/s — gap 60.0% exceeds 10% for 2 consecutive checks", "data": {"pool_ths": 43.65, "farm_ths": 109.13, "gap_pct": 60.0, "threshold_pct": 10.0}}
 PASS: latest sample shows the ~60% gap
 PASS: energy accumulates > 0 kWh for the dashd miner
 
@@ -454,10 +454,10 @@ PASS: updater: channel enabled with a compiled-in key
 PASS: verify: valid RSA signature over the manifest verifies
 PASS: verify: one flipped manifest byte fails verification
 PASS: verify: truncated signature fails verification
-PASS: check: signed manifest accepted (ok + signature_ok) — {"current": "0.13.0", "latest": "0.14.0", "update_available": true}
+PASS: check: signed manifest accepted (ok + signature_ok) — {"current": "0.15.0", "latest": "0.16.0", "update_available": true}
 PASS: check: newer version reported as update available
 PASS: check: tampered manifest refused end-to-end
-PASS: apply: newer signed release installs onto the dummy — updated beesky to BeeSky 0.14.0 (previous file kept as beesky.old) — restart to run it
+PASS: apply: newer signed release installs onto the dummy — updated beesky to BeeSky 0.16.0 (previous file kept as beesky.old) — restart to run it
 PASS: apply: dummy now holds the new binary bytes
 PASS: apply: previous file kept as beesky.old backup
 PASS: apply: executable bit preserved on the new file
@@ -474,7 +474,6 @@ PASS: cli: bare `update` refuses cleanly (exit 2) when unconfigured
 
 UPDATE TEST PASSED
 ```
-
 ---
 
 # v0.11 mock test — firmware identify / install / gated unlock
@@ -831,4 +830,87 @@ PASS: gui: save wrote the config JSON
 PASS: gui: saved JSON round-trips the form values
 
 AGENT APP TEST PASSED
+```
+
+---
+
+# v0.15 mock test — desktop apps visual overhaul (shared ui_theme)
+
+`beesky/ui_theme.py` is the new shared design system for both
+desktop windows: the cloud dashboard's palette (bg #0B0B0D,
+panels #15151A/#1C1C22, border #26262E, text #F2F2F3, muted
+#9CA3AF, accent #F5D800, status #34D399/#FBBF24/#F87171) on
+ttk 'clam' — card frames, label-above form fields, accent/ghost
+buttons, dark entries with a yellow focus border, a 30px-row
+treeview, slim dark scrollbars and a status pill.
+`beesky/agent_gui.py` is rebuilt on it: header (logo 40px +
+'BeeSky Agent' title + version chip), a 'Kết nối cloud' card
+(Cloud URL, masked agent key with Hiện key toggle, Tên trại,
+the one-time-key note), a 'Quét tại trại' card (Dải IP quét,
+Chu kỳ quét), the three action buttons (labels unchanged)
+plus a status pill that follows Chạy thử (dim 'Chưa chạy thử'
+/ warn / ok / bad), footer status line. `beesky/gui.py` is
+rebuilt on it too: header band (logo + 'BeeSky' + subtitle
+'Giám sát & chẩn đoán máy đào ASIC' + version), a 'Mục tiêu
+quét' toolbar card (wide target entry, Quét ngay / Xuất
+phiếu sửa / Mở web tại chỗ / Quét lại, plus the stock-firmware
+User/Mật khẩu fields), FOUR stat cards (Tổng số máy / Tổng
+hashrate / Máy có vấn đề / Nhiệt độ cao nhất) driven by
+show_records(), the results tree and the 'Chi tiết máy đã
+chọn' detail pane as cards, and a footer status bar. No
+CLI/agent/cloud code changed; all behaviour is preserved.
+
+**Full-chain note (v0.11 flake, handled as in v0.12–v0.14):**
+the v0.15 chain regenerated v0.1–v0.10 green in-chain (156
+PASS lines) and then stopped at the known load-sensitive
+v0.11 firmware assertion `unlock order: identify ->
+first.bmu -> kill -> second.bmu -> patch marker` (indices
+ident=0 first=5 kill=3 second=8 marker=11 — the shared-log
+append order of the race kill vs the first upload; the
+companion assertion 'kill landed inside the first-upload
+window' passes and the unlock itself succeeds). Control:
+the IDENTICAL failure reproduces on the pristine v0.14 tree
+(HEAD 8d9e53b, changes stashed), so it is pre-existing and
+environmental — this diff touches no firmware-path code
+(gui.py / agent_gui.py / ui_theme.py only). No firmware or
+legacy test logic was 'fixed'. The v0.11–v0.14 evidence
+blocks above are therefore the ship-time blocks, kept
+verbatim; every suite after v0.11 was re-verified standalone
+against the final v0.15 tree: logo 17/17 PASS, history
+22/22 PASS, agents-ui 30/30 PASS, agent-app 41/41 PASS
+(incl. the config-GUI assertions: fields, key mask toggle,
+save round-trip, auto-start disabled off Windows), main-GUI
+smoke PASSED (mock S19 Pro row 339/342 CHECK), theme test
+25/25 PASS (below).
+
+## Assertions (`tests/mock_theme_test.py`, under `xvfb-run`)
+
+```
+PASS: theme: a font family is chosen
+PASS: theme: root background is the dashboard bg
+PASS: theme: TEntry fieldbackground is panel2
+PASS: theme: TEntry padding is (10, 7)
+PASS: theme: Accent.TButton background is the BeeSky yellow
+PASS: theme: Ghost.TButton background is panel2
+PASS: theme: Treeview background is the card panel
+PASS: theme: Treeview rowheight is 30
+PASS: theme: Card.TFrame background is the card panel
+PASS: theme: palette constants match the spec hex values
+PASS: agent gui: 'Kết nối cloud' card is present
+PASS: agent gui: 'Quét tại trại' card is present
+PASS: agent gui: the three action buttons keep their labels
+PASS: agent gui: status pill starts at 'Chưa chạy thử'
+PASS: agent gui: pill recolours to the ok colour
+PASS: main gui: 'Mục tiêu quét' is present
+PASS: main gui: 'Tổng số máy' is present
+PASS: main gui: 'Tổng hashrate' is present
+PASS: main gui: 'Máy có vấn đề' is present
+PASS: main gui: 'Nhiệt độ cao nhất' is present
+PASS: main gui: 'Chi tiết máy đã chọn' is present
+PASS: main gui: toolbar buttons keep their labels
+PASS: main gui: stat cards follow a scan (1 máy, 100.50 TH/s)
+PASS: main gui: problem stat counts and turns red
+PASS: main gui: max-temp stat shows the hottest miner
+
+THEME TEST PASSED
 ```

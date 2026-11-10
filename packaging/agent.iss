@@ -25,7 +25,7 @@
 ; .github/workflows/build-windows.yml — never by hand)
 
 #define MyAppName "BeeSky Agent"
-#define MyAppVersion "0.14.0"
+#define MyAppVersion "0.15.0"
 #define MyAppPublisher "BeeSkyBase"
 #define MyAppExeName "beesky-agent.exe"
 
