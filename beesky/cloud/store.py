@@ -7,7 +7,12 @@ any events; this module keeps them in one stdlib ``sqlite3`` database.
 Tables:
 
   agents     one row per farm agent: site name, SHA-256 hash of its
-             agent key (the key itself is never stored), timestamps.
+             agent key (the key itself is never stored), timestamps,
+             and a ``revoked`` flag (v0.13): a revoked agent's key no
+             longer authenticates, so its ingests are rejected. Agents
+             are minted either by the ``cloud-add-agent`` CLI or from
+             the dashboard (Cài đặt -> Agent & trại); both paths share
+             :meth:`CloudStore.create_agent`.
   snapshots  scan snapshots per agent — only the latest is served, but
              a short history (100 per agent) is kept for debugging.
   events     fleet events pushed by agents, newest first; pruned to
@@ -99,7 +104,8 @@ class CloudStore:
                     key_hash    TEXT NOT NULL UNIQUE,
                     created_at  REAL NOT NULL,
                     last_seen_at REAL,
-                    interval_s  REAL
+                    interval_s  REAL,
+                    revoked     INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE TABLE IF NOT EXISTS snapshots (
                     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -199,6 +205,16 @@ class CloudStore:
                     ON history_samples(site, ts);
                 """
             )
+            # Migration for databases created before v0.13: the
+            # CREATE TABLE above is a no-op there, so add the
+            # agents.revoked column explicitly when it is missing.
+            agent_cols = [r[1] for r in
+                          self._db.execute("PRAGMA table_info(agents)")]
+            if agent_cols and "revoked" not in agent_cols:
+                with self._db:
+                    self._db.execute(
+                        "ALTER TABLE agents ADD COLUMN revoked "
+                        "INTEGER NOT NULL DEFAULT 0")
 
     def close(self) -> None:
         with self._lock:
@@ -218,12 +234,63 @@ class CloudStore:
             return int(cur.lastrowid)
 
     def agent_by_key(self, key: str) -> dict | None:
-        """Look an agent up by its plaintext key (hashed for the query)."""
+        """Look an agent up by its plaintext key (hashed for the query).
+
+        Revoked agents (v0.13) do not authenticate: this is the single
+        lookup behind every agent-facing endpoint (ingest, command
+        claim/result), so filtering here invalidates the key for all
+        of them at once.
+        """
         with self._lock:
             row = self._db.execute(
-                "SELECT * FROM agents WHERE key_hash = ?",
+                "SELECT * FROM agents WHERE key_hash = ? AND revoked = 0",
                 (hash_key(key),)).fetchone()
         return dict(row) if row else None
+
+    def revoke_agent(self, agent_id: int) -> bool:
+        """Revoke an agent (v0.13): its key stops authenticating.
+
+        The row (and its snapshots/events history) is kept so the
+        dashboard can show the agent as revoked; only the credential
+        dies. Returns False when no such agent exists.
+        """
+        with self._lock, self._db:
+            if self._db.execute(
+                    "SELECT 1 FROM agents WHERE id = ?",
+                    (agent_id,)).fetchone() is None:
+                return False
+            self._db.execute(
+                "UPDATE agents SET revoked = 1 WHERE id = ?",
+                (agent_id,))
+        return True
+
+    def agent_views(self, now: float | None = None) -> list[dict]:
+        """Public agent list for the viewer API — no key material.
+
+        Neither the plaintext key (never stored) nor its SHA-256 hash
+        leaves the store through this view. ``online`` mirrors the
+        sites_summary rule (seen within 3x the agent's interval);
+        revoked agents are always offline.
+        """
+        now = time.time() if now is None else float(now)
+        views = []
+        for agent in self.list_agents():
+            interval = agent.get("interval_s") or 30.0
+            last_seen = agent.get("last_seen_at")
+            revoked = bool(agent.get("revoked"))
+            online = (not revoked and last_seen is not None
+                      and now - float(last_seen) <= 3.0 * float(interval))
+            views.append({
+                "id": agent["id"],
+                "site": agent["site"],
+                "created_at": _stamp(agent.get("created_at")),
+                "created_ts": agent.get("created_at"),
+                "last_seen_at": last_seen,
+                "last_seen": _stamp(last_seen),
+                "online": online,
+                "revoked": revoked,
+            })
+        return views
 
     def list_agents(self) -> list[dict]:
         with self._lock:
@@ -232,10 +299,15 @@ class CloudStore:
         return [dict(r) for r in rows]
 
     def agent_by_site(self, site: str) -> dict | None:
-        """The (first) agent registered for *site*, or None."""
+        """The (first) live agent registered for *site*, or None.
+
+        Revoked agents (v0.13) are skipped, so a re-created agent for
+        the same site takes over command routing / pool accounting.
+        """
         with self._lock:
             row = self._db.execute(
-                "SELECT * FROM agents WHERE site = ? ORDER BY id LIMIT 1",
+                "SELECT * FROM agents WHERE site = ? AND revoked = 0 "
+                "ORDER BY id LIMIT 1",
                 (site,)).fetchone()
         return dict(row) if row else None
 
@@ -981,6 +1053,8 @@ class CloudStore:
         now = time.time() if now is None else float(now)
         sites = []
         for agent in self.list_agents():
+            if agent.get("revoked"):
+                continue  # revoked agents leave the fleet views (v0.13)
             snap = self.latest_snapshot(agent["id"])
             miners = snap[1] if snap else []
             ths_values = [m["ths"] for m in miners
@@ -1014,6 +1088,8 @@ class CloudStore:
         """Latest records across agents, each annotated with its site."""
         merged = []
         for agent in self.list_agents():
+            if agent.get("revoked"):
+                continue  # revoked agents leave the fleet views (v0.13)
             if site and agent["site"] != site:
                 continue
             snap = self.latest_snapshot(agent["id"])

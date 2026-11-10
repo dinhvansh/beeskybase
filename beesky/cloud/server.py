@@ -56,6 +56,15 @@ Viewer (browser), behind a single admin password taken from the
   GET  /api/history   farm hashrate history (v0.12): throttled
                       per-site samples, 1/min, kept 30 days
                       (``?site=``, ``?hours=`` default 24)
+  GET  /api/agents    agent management (v0.13): registered agents
+                      (id, site, created, last seen, online, revoked)
+                      — never any key or hash material
+  POST /api/agents    {"site"} -> mint an agent from the web (the
+                      same store path as `cloud-add-agent`); the
+                      response carries the raw key ONCE — the store
+                      keeps only its SHA-256, as with the CLI
+  POST /api/agents/revoke  {"id"} -> revoke an agent: its key stops
+                      authenticating, so further ingests return 401
   GET|POST /login     password form -> session cookie (in-memory)
   GET  /logout
 
@@ -183,7 +192,7 @@ def make_handler(store: CloudStore, dashboard_html: bytes,
     sessions = SessionStore()
 
     class Handler(BaseHTTPRequestHandler):
-        server_version = "BeeSkyCloud/0.12"
+        server_version = "BeeSkyCloud/0.13"
         protocol_version = "HTTP/1.1"
 
         def log_message(self, *_args):  # noqa: D102 — silence access log
@@ -401,6 +410,11 @@ def make_handler(store: CloudStore, dashboard_html: bytes,
                 self._send_json(200, {
                     "electricity_price_vnd_kwh":
                         store.electricity_price_vnd()})
+            elif path == "/api/agents":
+                now = time.time()
+                self._send_json(200, {
+                    "generated_at": _stamp(now), "generated_ts": now,
+                    "agents": store.agent_views(now)})
             else:
                 self._send_json(404, {"error": "not found", "path": path})
 
@@ -429,11 +443,57 @@ def make_handler(store: CloudStore, dashboard_html: bytes,
             elif path == "/api/settings":
                 if self._viewer_gate(path):
                     self._handle_update_settings()
+            elif path == "/api/agents":
+                if self._viewer_gate(path):
+                    self._handle_create_agent()
+            elif path == "/api/agents/revoke":
+                if self._viewer_gate(path):
+                    self._handle_revoke_agent()
             else:
                 length = int(self.headers.get("Content-Length") or 0)
                 if length:
                     self.rfile.read(length)  # drain unknown bodies
                 self._send_json(404, {"error": "not found", "path": path})
+
+        # -- agent management (v0.13) -------------------------------------
+
+        def _handle_create_agent(self) -> None:
+            """Mint an agent from the web — the `cloud-add-agent` path.
+
+            The raw key is generated here, handed to the store (which
+            persists only its SHA-256) and returned in THIS response;
+            it is never retrievable again, exactly like the CLI.
+            """
+            body = self._read_json_body()
+            if body is None:
+                self._send_json(400, {"error": "invalid JSON body"})
+                return
+            site = body.get("site")
+            if not isinstance(site, str) or not site.strip():
+                self._send_json(400, {"error": "site is required"})
+                return
+            site = site.strip()
+            key = secrets.token_urlsafe(32)
+            agent_id = store.create_agent(site, key)
+            self._send_json(201, {"ok": True, "id": agent_id,
+                                  "site": site, "key": key})
+
+        def _handle_revoke_agent(self) -> None:
+            body = self._read_json_body()
+            if body is None:
+                self._send_json(400, {"error": "invalid JSON body"})
+                return
+            agent_id = body.get("id")
+            if isinstance(agent_id, bool) \
+                    or not isinstance(agent_id, int):
+                self._send_json(400, {"error": "id must be an integer"})
+                return
+            if not store.revoke_agent(agent_id):
+                self._send_json(404, {
+                    "error": f"no agent with id {agent_id}"})
+                return
+            self._send_json(200, {"ok": True, "id": agent_id,
+                                  "revoked": True})
 
         # -- commands (v0.6 remote actions) ------------------------------
 

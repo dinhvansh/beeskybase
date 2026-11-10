@@ -42,13 +42,17 @@
   .brand-name .cloud-word { color: var(--muted); font-weight: 600; }
   .brand-sub { color: var(--muted); font-size: 11.5px; margin-top: 2px; line-height: 1.35; }
   .nav-item {
-    display: block; width: 100%; text-align: left; background: transparent;
+    display: flex; align-items: center; gap: 10px;
+    width: 100%; text-align: left; background: transparent;
     color: var(--muted); border: 0; border-radius: 8px;
     padding: 10px 12px; font-size: 14px; font-weight: 600; cursor: pointer;
     font-family: inherit;
   }
   .nav-item:hover { color: var(--text); background: #1A1A20; }
   .nav-item.active { color: var(--yellow); background: rgba(245, 216, 0, .10); }
+  /* Inline stroke icons (v0.13) — Lucide-style geometry, currentColor
+     so nav icons follow the muted/active colour of their item. */
+  .nav-ic { width: 19px; height: 19px; flex: 0 0 auto; }
   .sidebar-foot {
     margin-top: auto; padding: 12px 8px 2px; color: var(--muted);
     font-size: 11.5px; line-height: 1.5; border-top: 1px solid var(--line);
@@ -70,7 +74,11 @@
     border-radius: 8px; padding: 8px 11px; font-size: 13px; font-family: inherit;
   }
   select:focus, input:focus, textarea:focus { outline: 1px solid var(--yellow); }
-  a.logout { color: var(--yellow); font-size: 13px; font-weight: 600; text-decoration: none; }
+  a.logout {
+    color: var(--yellow); font-size: 13px; font-weight: 600; text-decoration: none;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  a.logout svg { width: 15px; height: 15px; }
   a.logout:hover { text-decoration: underline; }
   main { padding: 22px 24px 34px; width: 100%; max-width: 1440px; margin: 0 auto; }
   footer { color: var(--muted); font-size: 12px; text-align: center; padding: 0 24px 22px; }
@@ -99,8 +107,15 @@
   .card {
     background: var(--panel); border: 1px solid var(--line);
     border-radius: 12px; box-shadow: 0 1px 3px rgba(0, 0, 0, .35);
-    padding: 16px 18px;
+    padding: 16px 18px; position: relative;
   }
+  .ic-chip {
+    position: absolute; top: 14px; right: 14px; width: 34px; height: 34px;
+    border-radius: 9px; background: var(--panel2); border: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: center; color: var(--muted);
+  }
+  .ic-chip svg { width: 18px; height: 18px; }
+  .card.alert .ic-chip { color: var(--bad); border-color: #4A2326; }
   .card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .6px; }
   .card .value { font-size: 28px; font-weight: 700; margin-top: 5px; font-variant-numeric: tabular-nums; }
   .card .value small { font-size: 14px; color: var(--muted); font-weight: 400; }
@@ -251,6 +266,41 @@
   .form-msg { color: var(--ok); font-size: 13px; }
   .form-msg.err { color: var(--bad); }
 
+  /* -- agent management (v0.13) ------------------------------------------------- */
+  .agents-box { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .agentrow {
+    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 13px;
+  }
+  .agentrow:last-child { border-bottom: 0; }
+  .agentrow .site-name { font-weight: 800; }
+  .agentrow .meta { color: var(--muted); font-size: 12.5px; }
+  .agentrow .spacer { flex: 1; }
+  .agentrow .revoked-tag {
+    color: var(--bad); font-weight: 800; font-size: 11.5px;
+    text-transform: uppercase; letter-spacing: .4px;
+  }
+  .btn-danger {
+    background: var(--panel2); color: var(--bad); border: 1px solid #4A2326;
+    border-radius: 8px; padding: 5px 11px; font-size: 12px; font-weight: 700;
+    cursor: pointer; white-space: nowrap; font-family: inherit;
+  }
+  .btn-danger:hover { background: var(--bad); color: #000; }
+  .btn-danger:disabled { opacity: .45; cursor: wait; }
+  .key-panel {
+    border: 1px solid var(--warn); background: #241D08; border-radius: 10px;
+    padding: 14px 16px; margin-bottom: 16px;
+  }
+  .key-panel[hidden] { display: none; }
+  .key-warn { color: var(--warn); font-weight: 700; font-size: 13.5px; line-height: 1.55; margin-bottom: 4px; }
+  .key-panel label { display: block; color: var(--muted); font-size: 12.5px; margin: 12px 0 5px; }
+  .key-row { display: flex; gap: 8px; align-items: stretch; }
+  .key-row input {
+    flex: 1; min-width: 0; font-family: ui-monospace, Consolas, monospace;
+    font-size: 12.5px;
+  }
+  .key-panel .btn-link { margin-top: 12px; }
+
   /* -- small screens: sidebar becomes a top bar --------------------------------- */
   @media (max-width: 900px) {
     .layout { flex-direction: column; }
@@ -281,14 +331,14 @@
 	<path d="M-293.5,39.735l43.177-40.898c-6.461-1.813-13.225-2.9-20.197-3.179l-23.907,22.645l-0.724,0.686l-19.627-13.415
 		c-5.2,2.727-10.092,5.958-14.612,9.632l34.963,23.896L-293.5,39.735z"/>
 </g></svg><div class="brand-text"><div class="brand-name"><span class="bee">Bee</span>Sky <span class="cloud-word">Cloud</span></div><div class="brand-sub">Quản lý nhiều trại / xưởng từ xa</div></div></div>
-    <button class="nav-item active" type="button" data-view="overview">Tổng quan</button>
-    <button class="nav-item" type="button" data-view="miners">Máy đào</button>
-    <button class="nav-item" type="button" data-view="heatmap">Bản đồ nhiệt</button>
-    <button class="nav-item" type="button" data-view="energy">Điện năng</button>
-    <button class="nav-item" type="button" data-view="repairs">Lịch sử sửa</button>
-    <button class="nav-item" type="button" data-view="events">Sự kiện</button>
-    <button class="nav-item" type="button" data-view="settings">Cài đặt</button>
-    <div class="sidebar-foot">Agent tại trại tự đẩy số liệu lên · Lệnh từ xa đi xuống qua agent của trại.<br>BeeSky Cloud v0.12</div>
+    <button class="nav-item active" type="button" data-view="overview"><svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>Tổng quan</button>
+    <button class="nav-item" type="button" data-view="miners"><svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>Máy đào</button>
+    <button class="nav-item" type="button" data-view="heatmap"><svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/></svg>Bản đồ nhiệt</button>
+    <button class="nav-item" type="button" data-view="energy"><svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Điện năng</button>
+    <button class="nav-item" type="button" data-view="repairs"><svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>Lịch sử sửa</button>
+    <button class="nav-item" type="button" data-view="events"><svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>Sự kiện</button>
+    <button class="nav-item" type="button" data-view="settings"><svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>Cài đặt</button>
+    <div class="sidebar-foot">Agent tại trại tự đẩy số liệu lên · Lệnh từ xa đi xuống qua agent của trại.<br>BeeSky Cloud v0.13</div>
   </aside>
 
   <div class="main-col">
@@ -297,17 +347,17 @@
       <div class="spacer"></div>
       <span class="last-update">Cập nhật lần cuối: <span id="last-update">–</span></span>
       <label class="site-select">Trại: <select id="site-filter"><option value="">Tất cả các trại</option></select></label>
-      <a class="logout" href="/logout">Đăng xuất</a>
+      <a class="logout" href="/logout"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>Đăng xuất</a>
     </div>
 
     <main>
       <!-- TỔNG QUAN ---------------------------------------------------- -->
       <section class="view active" id="view-overview">
         <div class="cards">
-          <div class="card"><div class="label">Tổng số trại</div><div class="value" id="card-sites">–</div></div>
-          <div class="card"><div class="label">Tổng số máy</div><div class="value" id="card-total">–</div></div>
-          <div class="card"><div class="label">Tổng hashrate</div><div class="value" id="card-hashrate">–</div></div>
-          <div class="card" id="card-problems-wrap"><div class="label">Máy có vấn đề</div><div class="value" id="card-problems">–</div></div>
+          <div class="card"><div class="ic-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01"/><path d="M16 6h.01"/><path d="M12 6h.01"/><path d="M12 10h.01"/><path d="M12 14h.01"/><path d="M16 10h.01"/><path d="M16 14h.01"/><path d="M8 10h.01"/><path d="M8 14h.01"/></svg></div><div class="label">Tổng số trại</div><div class="value" id="card-sites">–</div></div>
+          <div class="card"><div class="ic-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/></svg></div><div class="label">Tổng số máy</div><div class="value" id="card-total">–</div></div>
+          <div class="card"><div class="ic-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div><div class="label">Tổng hashrate</div><div class="value" id="card-hashrate">–</div></div>
+          <div class="card" id="card-problems-wrap"><div class="ic-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg></div><div class="label">Máy có vấn đề</div><div class="value" id="card-problems">–</div></div>
         </div>
 
         <div class="panel chart-panel">
@@ -412,6 +462,42 @@
       <section class="view" id="view-settings">
         <h2 class="view-heading">Cài đặt <span class="accent">· Settings</span></h2>
 
+        <div class="panel form-panel" id="agents-panel">
+          <h3>Agent &amp; trại</h3>
+          <p class="hint">Mỗi trại chạy một chương trình <b>agent</b> trong mạng nội bộ của trại:
+            agent quét các máy đào rồi tự đẩy số liệu lên cloud này. Tạo agent ngay tại đây —
+            không cần chạy lệnh <code>beesky cloud-add-agent</code> trên máy chủ nữa.
+            Key của agent <b>chỉ hiện một lần</b> lúc tạo; cloud chỉ lưu bản băm SHA-256.
+            Thu hồi một agent = key của nó bị vô hiệu ngay, agent ở trại sẽ không đẩy dữ liệu lên được nữa.</p>
+          <div class="key-panel" id="agent-key-panel" hidden>
+            <div class="key-warn">Key chỉ hiện MỘT lần này — copy lưu lại ngay, cloud chỉ giữ bản băm SHA-256 nên không xem lại được.</div>
+            <label>Agent key — trại <b id="ak-site"></b></label>
+            <div class="key-row">
+              <input id="ak-key" type="text" readonly>
+              <button class="btn-action" id="ak-copy" type="button">Copy key</button>
+            </div>
+            <label>Lệnh chạy agent tại trại — sửa dải IP cho đúng mạng của trại trước khi chạy:</label>
+            <div class="key-row">
+              <input id="ak-cmd" type="text">
+              <button class="btn-action" id="ak-copy-cmd" type="button">Copy lệnh</button>
+            </div>
+            <button class="btn-link" id="ak-done" type="button">Đã lưu key — đóng khung này</button>
+          </div>
+          <form id="agent-form" class="form-grid">
+            <label class="f">Tên trại mới
+              <input id="ag-site" type="text" placeholder="vd: Xưởng 2" required>
+            </label>
+            <div class="form-actions">
+              <button type="submit" class="btn-primary">Tạo agent</button>
+              <span class="form-msg" id="ag-msg"></span>
+            </div>
+          </form>
+          <h3 class="sub-head">Agent đã đăng ký</h3>
+          <div class="agents-box" id="agents-list">
+            <div class="empty">Đang tải…</div>
+          </div>
+        </div>
+
         <div class="panel form-panel">
           <h3>So sánh pool — cấu hình theo trại</h3>
           <p class="hint">Khai báo API của pool để cloud đối chiếu hashrate của trại với số pool ghi nhận
@@ -481,7 +567,7 @@
       </section>
     </main>
 
-    <footer>BeeSky Cloud v0.12 — dữ liệu tự làm mới mỗi 10 giây · Agent tại trại quét &amp; đẩy lên, lệnh từ xa đi qua agent</footer>
+    <footer>BeeSky Cloud v0.13 — dữ liệu tự làm mới mỗi 10 giây · Agent tại trại quét &amp; đẩy lên, lệnh từ xa đi qua agent</footer>
   </div>
 </div>
 
@@ -629,7 +715,7 @@ async function refreshSites() {
             ? '<span class="prob">' + s.problem_count + "</span>" : "<b>0</b>") +
           " · Nhiệt độ cao nhất: <b>" + (s.max_temp === null || s.max_temp === undefined ? "–" : s.max_temp.toFixed(0) + " °C") + "</b>" +
           "</div></div>").join("")
-      : '<div class="empty">Chưa có trại nào — tạo agent bằng lệnh <b>beesky cloud-add-agent</b> rồi chạy agent tại trại.</div>';
+      : '<div class="empty">Chưa có trại nào — mở mục <b>Cài đặt → Agent &amp; trại</b> để tạo agent ngay trên web (hoặc dùng lệnh <b>beesky cloud-add-agent</b>) rồi chạy agent tại trại.</div>';
     document.querySelectorAll(".site-card").forEach((card) => {
       card.addEventListener("click", () => {
         selectedSite = card.getAttribute("data-site");
@@ -1005,6 +1091,124 @@ async function refreshHistory() {
   } catch (e) { /* giữ nguyên biểu đồ cũ khi poll lỗi */ }
 }
 
+// -- agent management (v0.13) ----------------------------------------------
+function agentRowHtml(a) {
+  let status;
+  if (a.revoked) {
+    status = '<span class="revoked-tag">Đã thu hồi</span>';
+  } else if (a.online) {
+    status = '<span class="dot"></span><span>Đang trực tuyến</span>';
+  } else {
+    status = '<span class="dot stale"></span><span>Mất tín hiệu</span>';
+  }
+  const action = a.revoked ? ""
+    : '<button class="btn-danger btn-revoke" type="button" data-id="' + a.id +
+      '" data-site="' + esc(a.site) + '">Thu hồi</button>';
+  return '<div class="agentrow">' + status +
+    '<span class="site-name">' + esc(a.site) + "</span>" +
+    '<span class="meta">Tạo lúc ' + esc(a.created_at || "–") +
+    " · Online cuối: " + esc(a.last_seen || "chưa có") + "</span>" +
+    '<span class="spacer"></span>' + action + "</div>";
+}
+async function refreshAgents() {
+  try {
+    const r = await fetch("/api/agents");
+    if (r.status === 401) { location.href = "/login"; return; }
+    const data = await r.json();
+    const agents = data.agents || [];
+    $("agents-list").innerHTML = agents.length
+      ? agents.map(agentRowHtml).join("")
+      : '<div class="empty">Chưa có agent nào — điền tên trại ở biểu mẫu phía trên để tạo agent đầu tiên.</div>';
+    document.querySelectorAll(".btn-revoke").forEach((btn) => {
+      btn.addEventListener("click", () => revokeAgent(btn));
+    });
+  } catch (e) { /* giữ nguyên danh sách cũ khi poll lỗi */ }
+}
+
+async function revokeAgent(btn) {
+  const id = parseInt(btn.getAttribute("data-id"), 10);
+  const site = btn.getAttribute("data-site");
+  if (!window.confirm("Thu hồi agent của trại \"" + site + "\"?\n" +
+      "Key hiện tại sẽ bị vô hiệu NGAY — agent ở trại sẽ không đẩy dữ liệu lên được nữa. " +
+      "Muốn trại hoạt động lại phải tạo agent mới và chạy lại với key mới.")) return;
+  btn.disabled = true;
+  try {
+    const r = await fetch("/api/agents/revoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: id })
+    });
+    if (r.status === 401) { location.href = "/login"; return; }
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      window.alert("Không thu hồi được: " + (err.error || ("HTTP " + r.status)));
+    }
+  } catch (e) {
+    window.alert("Không thu hồi được: " + e);
+  } finally {
+    btn.disabled = false;
+    refreshAgents();
+    refreshSites();
+  }
+}
+
+function copyField(input, btn) {
+  const done = () => {
+    const old = btn.textContent;
+    btn.textContent = "Đã copy ✓";
+    setTimeout(() => { btn.textContent = old; }, 1600);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(input.value).then(done, () => {
+      input.select();
+      try { document.execCommand("copy"); } catch (e) { /* chọn sẵn để copy tay */ }
+      done();
+    });
+  } else {
+    input.select();
+    try { document.execCommand("copy"); } catch (e) { /* chọn sẵn để copy tay */ }
+    done();
+  }
+}
+$("ak-copy").addEventListener("click", () => copyField($("ak-key"), $("ak-copy")));
+$("ak-copy-cmd").addEventListener("click", () => copyField($("ak-cmd"), $("ak-copy-cmd")));
+$("ak-done").addEventListener("click", () => { $("agent-key-panel").hidden = true; });
+
+$("agent-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const msg = $("ag-msg");
+  msg.classList.remove("err");
+  const site = $("ag-site").value.trim();
+  if (!site) { msg.textContent = "Chưa nhập tên trại."; msg.classList.add("err"); return; }
+  try {
+    const r = await fetch("/api/agents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ site: site })
+    });
+    if (r.status === 401) { location.href = "/login"; return; }
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      msg.textContent = "Lỗi: " + (err.error || ("HTTP " + r.status));
+      msg.classList.add("err");
+      return;
+    }
+    const data = await r.json();
+    $("ag-site").value = "";
+    msg.textContent = "Đã tạo agent cho trại " + site + " — copy key bên dưới ngay.";
+    $("ak-site").textContent = site;
+    $("ak-key").value = data.key;
+    $("ak-cmd").value = "beesky agent 192.168.1.10-192.168.1.60 --cloud " +
+      location.origin + " --key " + data.key + " --site \"" + site + "\"";
+    $("agent-key-panel").hidden = false;
+    refreshAgents();
+    refreshSites();
+  } catch (e) {
+    msg.textContent = "Lỗi: " + e;
+    msg.classList.add("err");
+  }
+});
+
 // -- settings (v0.12): pool configs + electricity price --------------------
 let priceLoaded = false;
 function cfgHtml(c) {
@@ -1129,7 +1333,7 @@ $("price-form").addEventListener("submit", async (ev) => {
 });
 
 async function refreshAll() {
-  await Promise.all([refreshSites(), refreshMiners(), refreshEvents(), refreshCommands(), refreshRepairs(), refreshPool(), refreshEnergy(), refreshHistory(), refreshPoolConfigs()]);
+  await Promise.all([refreshSites(), refreshMiners(), refreshEvents(), refreshCommands(), refreshRepairs(), refreshPool(), refreshEnergy(), refreshHistory(), refreshPoolConfigs(), refreshAgents()]);
 }
 
 function clearMinerSelection() {

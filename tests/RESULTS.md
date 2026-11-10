@@ -146,9 +146,9 @@ PASS: miner back: BACK_ONLINE printed + webhook received
 PASS: logfile channel recorded all three events
 
 Captured webhook payloads:
-{"ts": 1794272700.585619, "time": "2026-11-10 01:05:00", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
-{"ts": 1794272701.142727, "time": "2026-11-10 01:05:01", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "OFFLINE", "severity": "critical", "detail": "miner went offline / unreachable", "data": {"last_seen": 1794272700.8870063}}
-{"ts": 1794272701.8054109, "time": "2026-11-10 01:05:01", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "BACK_ONLINE", "severity": "info", "detail": "miner is back online", "data": {}}
+{"ts": 1794282403.3720913, "time": "2026-11-10 03:46:43", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
+{"ts": 1794282403.8305504, "time": "2026-11-10 03:46:43", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "OFFLINE", "severity": "critical", "detail": "miner went offline / unreachable", "data": {"last_seen": 1794282403.630678}}
+{"ts": 1794282404.4236083, "time": "2026-11-10 03:46:44", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "BACK_ONLINE", "severity": "info", "detail": "miner is back online", "data": {}}
 
 WATCH TEST PASSED
 ```
@@ -178,7 +178,7 @@ PASS: hashrate drop phase: /api/events gains HASHRATE_DROP
 PASS: drop event: severity major, drop_pct ~= 40
 
 Captured drop event:
-{"ts": 1794272706.907265, "time": "2026-11-10 01:05:06", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
+{"ts": 1794282409.504003, "time": "2026-11-10 03:46:49", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
 
 WEB TEST PASSED
 ```
@@ -219,7 +219,7 @@ PASS: hashrate drop: HASHRATE_DROP arrives at the cloud
 PASS: drop event: severity major, drop_pct ~= 40, site tag
 
 Captured cloud event:
-{"ts": 1794272714.3738256, "time": "2026-11-10 01:05:14", "site": "Xưởng 1", "agent_id": 1, "ip": "127.0.0.1", "model": "Antminer S19 Pro", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
+{"ts": 1794282416.8439379, "time": "2026-11-10 03:46:56", "site": "Xưởng 1", "agent_id": 1, "ip": "127.0.0.1", "model": "Antminer S19 Pro", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
 PASS: /api/miners?site= shows ~66 TH/s, record annotated with site
 
 CLOUD TEST PASSED
@@ -265,7 +265,7 @@ PASS: site 2 command finishes
 PASS: dashd reboot: status done, result from /system/reboot
 
 Captured dashd reboot command:
-{"id": 1, "agent_id": 2, "site": "Xưởng 2", "ip": "127.0.0.1", "type": "reboot", "payload": {}, "status": "done", "result": "dashd accepted reboot (system reboots in 3s)", "created_at": "2026-11-10 01:05:16", "created_ts": 1794272716.1127403, "claimed_at": "2026-11-10 01:05:16", "finished_at": "2026-11-10 01:05:16"}
+{"id": 1, "agent_id": 2, "site": "Xưởng 2", "ip": "127.0.0.1", "type": "reboot", "payload": {}, "status": "done", "result": "dashd accepted reboot (system reboots in 3s)", "created_at": "2026-11-10 03:46:58", "created_ts": 1794282418.4444592, "claimed_at": "2026-11-10 03:46:58", "finished_at": "2026-11-10 03:46:58"}
 PASS: dashd mock recorded exactly one POST /system/reboot
 PASS: dashd switch_pool {pool_id: 1} finishes done
 PASS: dashd mock activated pool slot 1
@@ -275,7 +275,7 @@ PASS: site 1 agent reports its cgminer miner
 PASS: cgminer reboot finishes done
 
 Captured cgminer reboot command:
-{"id": 4, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "type": "reboot", "payload": {}, "status": "done", "result": "cgminer accepted the privileged 'restart' command", "created_at": "2026-11-10 01:05:18", "created_ts": 1794272718.952201, "claimed_at": "2026-11-10 01:05:19", "finished_at": "2026-11-10 01:05:19"}
+{"id": 4, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "type": "reboot", "payload": {}, "status": "done", "result": "cgminer accepted the privileged 'restart' command", "created_at": "2026-11-10 03:47:01", "created_ts": 1794282421.2771792, "claimed_at": "2026-11-10 03:47:02", "finished_at": "2026-11-10 03:47:02"}
 PASS: cgminer mock recorded the restart RPC
 PASS: cgminer reboot on a read-only API -> failed
 PASS: failure result carries the miner's 'Access denied'
@@ -346,12 +346,12 @@ PASS: CHIPS_LOST also lands in repair history as auto_event
 PASS: auto row: site/ip keyed, no cost/technician
 
 Captured auto repair row:
-{"id": 1, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "mac_or_serial": null, "created_at": "2026-11-10 01:05:30", "created_ts": 1794272730.6463869, "kind": "auto_event", "title": "CHIPS_LOST", "detail": "lost 3 chip(s) (342 -> 339 alive)", "cost_vnd": null, "technician": null}
+{"id": 1, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "mac_or_serial": null, "created_at": "2026-11-10 03:47:12", "created_ts": 1794282432.7923918, "kind": "auto_event", "title": "CHIPS_LOST", "detail": "lost 3 chip(s) (342 -> 339 alive)", "cost_vnd": null, "technician": null}
 PASS: POST /api/repairs (logged in) -> 201 manual row
 PASS: manual row listed with cost_vnd + technician
 
 Captured manual repair row:
-{"id": 2, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "mac_or_serial": null, "created_at": "2026-11-10 01:05:31", "created_ts": 1794272731.0474641, "kind": "manual", "title": "Thay board 2", "detail": "Board 2 chết 3 chip — đã thay board, test lại đạt", "cost_vnd": 1500000, "technician": "Tuấn"}
+{"id": 2, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "mac_or_serial": null, "created_at": "2026-11-10 03:47:13", "created_ts": 1794282433.2233443, "kind": "manual", "title": "Thay board 2", "detail": "Board 2 chết 3 chip — đã thay board, test lại đạt", "cost_vnd": 1500000, "technician": "Tuấn"}
 PASS: POST /api/repairs with blank title -> 400
 
 REPAIRS TEST PASSED
@@ -412,12 +412,12 @@ PASS: no POOL_GAP while the gap stays ~5%
 PASS: pool at 40% of farm -> POOL_GAP (major) in the event feed
 
 Captured POOL_GAP event:
-{"ts": 1794272734.9326997, "time": "2026-11-10 01:05:34", "site": "Xưởng 1", "agent_id": 1, "ip": null, "model": null, "type": "POOL_GAP", "severity": "major", "detail": "pool reports 43.65 TH/s vs farm 109.13 TH/s — gap 60.0% exceeds 10% for 2 consecutive checks", "data": {"pool_ths": 43.65, "farm_ths": 109.13, "gap_pct": 60.0, "threshold_pct": 10.0}}
+{"ts": 1794282436.913463, "time": "2026-11-10 03:47:16", "site": "Xưởng 1", "agent_id": 1, "ip": null, "model": null, "type": "POOL_GAP", "severity": "major", "detail": "pool reports 43.65 TH/s vs farm 109.13 TH/s — gap 60.0% exceeds 10% for 2 consecutive checks", "data": {"pool_ths": 43.65, "farm_ths": 109.13, "gap_pct": 60.0, "threshold_pct": 10.0}}
 PASS: latest sample shows the ~60% gap
 PASS: energy accumulates > 0 kWh for the dashd miner
 
 Captured energy report (excerpt):
-{"today": {"day": "2026-11-10", "kwh": 0.0018, "est_cost_vnd": 4}, "per_day": [{"day": "2026-11-10", "kwh": 0.0018, "est_cost_vnd": 4}], "per_miner": [{"site": "Xưởng 1", "ip": "127.0.0.1", "kwh": 0.0018, "est_cost_vnd": 4}]}
+{"today": {"day": "2026-11-10", "kwh": 0.0027, "est_cost_vnd": 5}, "per_day": [{"day": "2026-11-10", "kwh": 0.0027, "est_cost_vnd": 5}], "per_miner": [{"site": "Xưởng 1", "ip": "127.0.0.1", "kwh": 0.0027, "est_cost_vnd": 5}]}
 PASS: POST /api/settings sets the electricity price
 PASS: energy estimates now use 3000 VND/kWh
 
@@ -454,10 +454,10 @@ PASS: updater: channel enabled with a compiled-in key
 PASS: verify: valid RSA signature over the manifest verifies
 PASS: verify: one flipped manifest byte fails verification
 PASS: verify: truncated signature fails verification
-PASS: check: signed manifest accepted (ok + signature_ok) — {"current": "0.11.0", "latest": "0.12.0", "update_available": true}
+PASS: check: signed manifest accepted (ok + signature_ok) — {"current": "0.13.0", "latest": "0.14.0", "update_available": true}
 PASS: check: newer version reported as update available
 PASS: check: tampered manifest refused end-to-end
-PASS: apply: newer signed release installs onto the dummy — updated beesky to BeeSky 0.12.0 (previous file kept as beesky.old) — restart to run it
+PASS: apply: newer signed release installs onto the dummy — updated beesky to BeeSky 0.14.0 (previous file kept as beesky.old) — restart to run it
 PASS: apply: dummy now holds the new binary bytes
 PASS: apply: previous file kept as beesky.old backup
 PASS: apply: executable bit preserved on the new file
@@ -666,4 +666,81 @@ PASS: history after +70 s: second point appears, site filter ok
 PASS: history for an unknown site is empty
 
 HISTORY TEST PASSED
+```
+
+---
+
+# v0.13 mock test — dashboard icons + agent management UI
+
+`tests/mock_agents_ui_test.py` covers the v0.13 additions.
+Store level: `CloudStore.agent_views` never carries key
+material (neither the plaintext key — never stored — nor its
+SHA-256 hash); `revoke_agent` flips the new `agents.revoked`
+flag and the revoked key immediately fails `agent_by_key`,
+the single lookup behind every agent-facing endpoint (ingest,
+command claim/result), while its history rows stay put; a
+pre-v0.13 database is migrated on open (ALTER TABLE adds the
+column) and its legacy agents keep authenticating until
+revoked. HTTP level (real `beesky cloud`, password set):
+all three agent endpoints are 401 logged out; POST
+/api/agents mints through the same store path as
+`cloud-add-agent` (`secrets.token_urlsafe(32)` ->
+`create_agent`) and returns the raw key exactly once; GET
+/api/agents lists id/site/created/last-seen/online/revoked
+with the key and its hash absent from the payload; a real
+snapshot ingest with the web-minted key succeeds and flips
+the agent online; revoke validates its input (400 non-integer
+id, 404 unknown id) and afterwards the same ingest is 401.
+Dashboard: the Cài đặt view gains an "Agent & trại" panel
+(create form, one-time key panel with copy buttons and a
+ready-to-run `beesky agent` command prefilled with the
+page origin, registered-agents table with Thu hồi buttons)
+above the pool form, and the whole cloud UI gains inline
+Lucide-style stroke icons — seven sidebar nav icons
+(layout-grid / server / thermometer / zap / wrench / bell /
+gear), four stat-card icon chips (building / cpu / activity /
+alert-triangle) and a log-out icon, all currentColor so the
+active nav state colours its icon with the accent; the local
+web dashboard received the same stat-card chips (server /
+activity / alert-triangle / thermometer) as a pure HTML/CSS
+addition. Every pre-v0.13 dashboard marker asserted by the
+older suites is still present.
+
+Flake disclosure (mirroring v0.11.2/v0.12): the full-chain regeneration for v0.13 ran v0.1-v0.10 green in-chain (156 PASS, 0 FAIL), then stopped at the same load-sensitive v0.11 firmware race-order assertion under this VM's shared-host contention (kill logged at index 3, first.bmu at 5, while the companion 'kill landed inside the first-upload window' assertion passed and the unlock itself succeeded); the firmware suite reproduced the same indices on two standalone retries this session. No firmware or legacy test code was changed for this. The v0.11, v0.11.2 and v0.12 evidence blocks above are therefore the ship-time blocks, kept verbatim; the suites behind them were re-verified this session — v0.1-v0.10 in-chain as said, and mock_logo_test.py + mock_history_test.py standalone green against the v0.13 tree — and the new suite below re-asserts every dashboard marker they rely on.
+
+## Assertions
+
+```
+PASS: store: agent_views carries no key material
+PASS: store: fresh agent is not revoked and offline
+PASS: store: agent_by_key authenticates before revoke
+PASS: store: revoke of unknown id -> False
+PASS: store: revoke existing agent -> True
+PASS: store: revoked key no longer authenticates
+PASS: store: revoked agent shows revoked + offline in views
+PASS: store: revoked site has no live agent_by_site
+PASS: store: pre-v0.13 db migrated — legacy agent authenticates
+PASS: store: migrated agent can be revoked like any other
+PASS: cloud server starts
+PASS: GET /api/agents without login -> 401
+PASS: POST /api/agents without login -> 401
+PASS: POST /api/agents/revoke without login -> 401
+PASS: login with right password -> session
+PASS: GET /api/agents with session -> 200, empty at first
+PASS: POST /api/agents with blank site -> 400
+PASS: POST /api/agents mints + returns the raw key once
+PASS: GET /api/agents lists the minted agent, key + hash absent
+PASS: ingest with the web-minted key -> 200
+PASS: agent shows online after its first ingest
+PASS: POST /api/agents/revoke with non-integer id -> 400
+PASS: POST /api/agents/revoke with unknown id -> 404
+PASS: POST /api/agents/revoke revokes the minted agent
+PASS: revoked agent listed as revoked + offline
+PASS: ingest with the revoked key -> 401
+PASS: dashboard: agent management section ids present
+PASS: dashboard: seven sidebar nav icons (inline SVG)
+PASS: dashboard: stat-card icon chips + logout icon
+PASS: dashboard: legacy markers survive (nav/heat/pool/logo)
+
+AGENTS UI TEST PASSED
 ```

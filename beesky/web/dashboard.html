@@ -51,8 +51,15 @@
   .card {
     background: var(--panel); border: 1px solid var(--line);
     border-radius: 12px; box-shadow: 0 1px 3px rgba(0, 0, 0, .35);
-    padding: 16px 18px;
+    padding: 16px 18px; position: relative;
   }
+  .ic-chip {
+    position: absolute; top: 14px; right: 14px; width: 34px; height: 34px;
+    border-radius: 9px; background: var(--panel2); border: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: center; color: var(--muted);
+  }
+  .ic-chip svg { width: 18px; height: 18px; }
+  .card.alert .ic-chip { color: var(--bad); border-color: #4A2326; }
   .card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .6px; }
   .card .value { font-size: 28px; font-weight: 700; margin-top: 5px; font-variant-numeric: tabular-nums; }
   .card .value small { font-size: 14px; color: var(--muted); font-weight: 400; }
@@ -140,10 +147,10 @@
 
 <main>
   <section class="cards">
-    <div class="card"><div class="label">Tổng số máy</div><div class="value" id="card-total">–</div></div>
-    <div class="card"><div class="label">Tổng hashrate</div><div class="value" id="card-hashrate">–</div></div>
-    <div class="card" id="card-problems-wrap"><div class="label">Máy có vấn đề</div><div class="value" id="card-problems">–</div></div>
-    <div class="card"><div class="label">Nhiệt độ cao nhất</div><div class="value" id="card-temp">–</div></div>
+    <div class="card"><div class="ic-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg></div><div class="label">Tổng số máy</div><div class="value" id="card-total">–</div></div>
+    <div class="card"><div class="ic-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div><div class="label">Tổng hashrate</div><div class="value" id="card-hashrate">–</div></div>
+    <div class="card" id="card-problems-wrap"><div class="ic-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg></div><div class="label">Máy có vấn đề</div><div class="value" id="card-problems">–</div></div>
+    <div class="card"><div class="ic-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/></svg></div><div class="label">Nhiệt độ cao nhất</div><div class="value" id="card-temp">–</div></div>
   </section>
 
   <h2>Danh sách máy <span class="accent">· Miners</span></h2>
