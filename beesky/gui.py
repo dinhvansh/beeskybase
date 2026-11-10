@@ -126,8 +126,8 @@ class BeeSkyApp:
         self._load_logo_image()
         self._set_window_icon()
         self._build_widgets(default_target)
-        ui_theme.center_window(root, width=1120, height=730,
-                               minsize=(940, 620))
+        ui_theme.center_window(root, width=1120, height=880,
+                               minsize=(940, 720))
         self.root.after(100, self._poll_queue)
 
     # -- brand icon ------------------------------------------------------
@@ -190,10 +190,15 @@ class BeeSkyApp:
     def _build_widgets(self, default_target: str) -> None:
         main = ttk.Frame(self.root, padding=(16, 12, 16, 12))
         main.pack(fill="both", expand=True)
+        # Grid (not pack) so that when the window is shorter than the full
+        # content request, the RESULTS TABLE row absorbs the shrink and the
+        # detail pane below it always keeps its full height.
+        main.columnconfigure(0, weight=1)
+        main.rowconfigure(3, weight=1, minsize=150)
 
         # -- header band ------------------------------------------------
         header = ttk.Frame(main)
-        header.pack(fill="x")
+        header.grid(row=0, column=0, sticky="ew")
         if self._logo_image is not None:
             # 512px master subsampled to ~40px for the header.
             self._logo_image_small = self._logo_image.subsample(13)
@@ -209,8 +214,8 @@ class BeeSkyApp:
                   style="Sub.TLabel").pack(side="right")
 
         # -- toolbar card -------------------------------------------------
-        toolbar = ui_theme.card(main, title="Mục tiêu quét")
-        toolbar.pack(fill="x", pady=(12, 0))
+        toolbar = ui_theme.card(main, title="Mục tiêu quét", pad=12)
+        toolbar.grid(row=1, column=0, sticky="ew", pady=(12, 0))
         target_row = ttk.Frame(toolbar, style="Card.TFrame")
         target_row.pack(fill="x")
         self.target_var = tk.StringVar(value=default_target)
@@ -252,7 +257,7 @@ class BeeSkyApp:
 
         # -- stats row ------------------------------------------------------
         stats = ttk.Frame(main)
-        stats.pack(fill="x", pady=(12, 0))
+        stats.grid(row=2, column=0, sticky="ew", pady=(12, 0))
         for col in range(4):
             stats.columnconfigure(col, weight=1)
         self.stat_total_var = self._stat_card(stats, 0, "Tổng số máy",
@@ -265,8 +270,8 @@ class BeeSkyApp:
                                              "Nhiệt độ cao nhất", "-")
 
         # -- results table --------------------------------------------------
-        table_card = ui_theme.card(main)
-        table_card.pack(fill="both", expand=True, pady=(12, 0))
+        table_card = ui_theme.card(main, pad=12)
+        table_card.grid(row=3, column=0, sticky="nsew", pady=(12, 0))
         table_frame = ttk.Frame(table_card, style="Card.TFrame")
         table_frame.pack(fill="both", expand=True)
         columns = ("ip", "model", "source", "ths", "chips", "temp", "fans",
@@ -294,9 +299,10 @@ class BeeSkyApp:
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
 
         # -- detail pane ------------------------------------------------------
-        detail_card = ui_theme.card(main, title="Chi tiết máy đã chọn")
-        detail_card.pack(fill="x", pady=(12, 0))
-        self.detail = tk.Text(detail_card, height=6,
+        detail_card = ui_theme.card(main, title="Chi tiết máy đã chọn",
+                                    pad=12)
+        detail_card.grid(row=4, column=0, sticky="ew", pady=(12, 0))
+        self.detail = tk.Text(detail_card, height=5,
                               bg=ui_theme.PANEL2, fg=FG,
                               insertbackground=FG, relief="flat",
                               font=(self._family, ui_theme.BODY_SIZE),
@@ -308,7 +314,7 @@ class BeeSkyApp:
 
         # -- footer status bar --------------------------------------------------
         footer = ttk.Frame(main)
-        footer.pack(fill="x", pady=(10, 0))
+        footer.grid(row=5, column=0, sticky="ew", pady=(10, 0))
         self.status_var = tk.StringVar(
             value="Sẵn sàng — nhập dải IP rồi bấm Quét ngay.")
         ttk.Label(footer, textvariable=self.status_var,
