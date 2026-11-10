@@ -77,12 +77,16 @@ def _fan_speeds(stats: dict) -> list[int]:
 # --------------------------------------------------------------------------
 
 def _finalise_record(ip: str, model: str, elapsed_s: int, gh_5s, gh_av,
-                     chains: list[dict], fans: list[int], source: str) -> dict:
+                     chains: list[dict], fans: list[int], source: str,
+                     power_w=None) -> dict:
     """Apply the problem rules and assemble a status record.
 
     Shared by every vendor adapter. *chains* entries must carry ``index``,
     ``chips_total``, ``chips_alive``, ``dead_positions`` (possibly empty when
-    the vendor API only reports counts) and ``temp_c``.
+    the vendor API only reports counts) and ``temp_c``. *power_w* is the
+    miner's wall power draw in watts when the source reports one (v0.9 —
+    VNish dashd ``power_consumption``, some cgminer stats), else ``None``;
+    the cloud integrates it into energy reports.
     """
     gh_main = gh_5s if gh_5s is not None else gh_av
     for chain in chains:
@@ -128,6 +132,7 @@ def _finalise_record(ip: str, model: str, elapsed_s: int, gh_5s, gh_av,
         "ghs_5s": gh_5s,
         "ghs_av": gh_av,
         "ths": (gh_main / 1000.0) if gh_main is not None else None,
+        "power_w": float(power_w) if power_w is not None else None,
         "chains": chains,
         "fans_rpm": fans,
         "chips_alive": sum(c["chips_alive"] for c in chains),
@@ -136,6 +141,22 @@ def _finalise_record(ip: str, model: str, elapsed_s: int, gh_5s, gh_av,
         "problems": problems,
         "status": "CHECK" if problems else "OK",
     }
+
+
+# Stat/summary keys under which some cgminer firmwares report wall power
+# (watts). Absent on classic Bitmain bmminer — the record then keeps
+# power_w=None and energy accounting skips the miner (v0.9).
+_POWER_KEYS = ("Power", "Wattage", "power_consumption", "Power Consumption")
+
+
+def _power_w(summary: dict, stats: dict):
+    """Wall power in watts from a cgminer summary/stats pair, or None."""
+    for source in (stats, summary):
+        for key in _POWER_KEYS:
+            val = _num(source.get(key))
+            if val is not None and val > 0:
+                return val
+    return None
 
 
 def build_record(ip: str, summary: dict, stats: dict, source: str = "cgminer") -> dict:
@@ -171,12 +192,14 @@ def build_record(ip: str, summary: dict, stats: dict, source: str = "cgminer") -
         })
 
     return _finalise_record(ip, model, elapsed, gh_5s, gh_av,
-                            chains, _fan_speeds(stats), source)
+                            chains, _fan_speeds(stats), source,
+                            power_w=_power_w(summary, stats))
 
 
 def build_record_from_boards(ip: str, *, model: str = "Unknown", elapsed_s: int = 0,
                              ths_realtime=None, ths_average=None,
-                             chains=(), fans_rpm=(), source: str) -> dict:
+                             chains=(), fans_rpm=(), source: str,
+                             power_w=None) -> dict:
     """Build a record from already-parsed per-board data (HTTP adapters).
 
     Hashrates are given in TH/s (the unit HTTP dashboards use); chain entries
@@ -193,14 +216,15 @@ def build_record_from_boards(ip: str, *, model: str = "Unknown", elapsed_s: int 
     gh_5s = ths_realtime * 1000.0 if ths_realtime is not None else None
     gh_av = ths_average * 1000.0 if ths_average is not None else None
     return _finalise_record(ip, model, int(elapsed_s or 0), gh_5s, gh_av,
-                            norm_chains, [int(f) for f in fans_rpm], source)
+                            norm_chains, [int(f) for f in fans_rpm], source,
+                            power_w=power_w)
 
 
 def error_record(ip: str, message: str, source: str = "cgminer") -> dict:
     """Status record for a candidate that stopped answering its API."""
     return {
         "ip": ip, "model": "Unknown", "source": source, "elapsed_s": 0,
-        "ghs_5s": None, "ghs_av": None, "ths": None,
+        "ghs_5s": None, "ghs_av": None, "ths": None, "power_w": None,
         "chains": [], "fans_rpm": [], "chips_alive": 0, "chips_total": 0,
         "max_temp_c": None,
         "problems": [{"code": "FETCH_ERROR", "detail": message}],

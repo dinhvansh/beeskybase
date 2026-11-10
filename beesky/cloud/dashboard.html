@@ -166,6 +166,23 @@
     border-radius: 6px; padding: 7px 9px; font-size: 13px;
   }
   .rf-msg { color: var(--ok); font-size: 12px; }
+  .poolrow {
+    display: flex; gap: 14px; align-items: baseline; padding: 10px 14px;
+    border-bottom: 1px solid var(--line); flex-wrap: wrap;
+  }
+  .poolrow:last-child { border-bottom: 0; }
+  .poolrow .site { color: var(--yellow); font-weight: 800; white-space: nowrap; }
+  .poolrow .num { font-weight: 700; white-space: nowrap; }
+  .poolrow .num small { color: var(--muted); font-weight: 400; }
+  .poolrow .when { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .gap { font-size: 12px; font-weight: 800; padding: 2px 9px; border-radius: 4px; white-space: nowrap; }
+  .gap.fine { background: #123526; color: var(--ok); }
+  .gap.warn { background: #3a2f10; color: var(--warn); }
+  .gap.bad { background: #3d1512; color: var(--bad); }
+  .energy-sum { padding: 12px 14px; border-bottom: 1px solid var(--line); font-size: 15px; }
+  .energy-sum b { font-size: 20px; }
+  table.energy { min-width: 0; }
+  table.energy td, table.energy th { padding: 7px 14px; }
 </style>
 </head>
 <body>
@@ -193,6 +210,11 @@
     <div class="empty">Đang tải…</div>
   </div>
 
+  <h2>So sánh với pool <span class="accent">· Farm vs pool</span></h2>
+  <div class="events" id="pool-panel">
+    <div class="empty">Đang tải…</div>
+  </div>
+
   <h2>Danh sách máy <span class="accent">· Miners</span></h2>
   <div class="tablewrap">
     <table>
@@ -211,6 +233,11 @@
 
   <h2>Bản đồ nhiệt <span class="accent">· Heat map</span></h2>
   <div class="heatwrap" id="heatmap">
+    <div class="empty">Đang tải…</div>
+  </div>
+
+  <h2>Điện năng <span class="accent">· Energy</span></h2>
+  <div class="events" id="energy-panel">
     <div class="empty">Đang tải…</div>
   </div>
 
@@ -242,7 +269,7 @@
   </div>
 </main>
 
-<footer>BeeSky Cloud v0.8 — dữ liệu tự làm mới mỗi 10 giây · Agent tại trại quét &amp; đẩy lên, lệnh từ xa đi qua agent</footer>
+<footer>BeeSky Cloud v0.9 — dữ liệu tự làm mới mỗi 10 giây · Agent tại trại quét &amp; đẩy lên, lệnh từ xa đi qua agent</footer>
 
 <script>
 "use strict";
@@ -477,7 +504,8 @@ const SEV_LABEL = { info: "Thông tin", warning: "Cảnh báo", major: "Nghiêm 
 const TYPE_LABEL = {
   OFFLINE: "Mất kết nối", BACK_ONLINE: "Đã kết nối lại",
   HASHRATE_DROP: "Sụt hashrate", OVER_TEMP: "Quá nhiệt",
-  CHIPS_LOST: "Mất chip", CHAIN_DOWN: "Board ngắt"
+  CHIPS_LOST: "Mất chip", CHAIN_DOWN: "Board ngắt",
+  POOL_GAP: "Lệch pool"
 };
 
 async function refreshEvents() {
@@ -601,8 +629,84 @@ $("repair-form").addEventListener("submit", async (ev) => {
   }
 });
 
+// -- farm vs pool comparison (v0.9) ------------------------------------
+function gapBadge(gap) {
+  if (gap === null || gap === undefined) return "";
+  const cls = gap > 10 ? "bad" : (gap > 5 ? "warn" : "fine");
+  const sign = gap > 0 ? "−" : "+";
+  return '<span class="gap ' + cls + '">Lệch ' + sign + Math.abs(gap).toFixed(1) + "%</span>";
+}
+function poolRowHtml(site, latest) {
+  if (!latest) {
+    return '<div class="poolrow"><span class="site">' + esc(site) + "</span>" +
+      '<span class="when">Đã cấu hình pool — đang chờ lần kiểm tra đầu tiên…</span></div>';
+  }
+  return '<div class="poolrow"><span class="site">' + esc(site) + "</span>" +
+    '<span class="num">Trại: ' + latest.farm_ths.toFixed(2) + " <small>TH/s</small></span>" +
+    '<span class="num">Pool: ' + latest.pool_ths.toFixed(2) + " <small>TH/s</small></span>" +
+    gapBadge(latest.gap_pct) +
+    '<span class="when">Kiểm tra lúc ' + esc(latest.time || "") + "</span></div>";
+}
+async function refreshPool() {
+  try {
+    const r = await fetch("/api/pool" + siteParam());
+    if (r.status === 401) { location.href = "/login"; return; }
+    const data = await r.json();
+    const panel = $("pool-panel");
+    if (selectedSite) {
+      const cfg = await (await fetch("/api/pool-config?site=" + encodeURIComponent(selectedSite))).json();
+      if (!(cfg.configs || []).length) {
+        panel.innerHTML = '<div class="empty">Chưa cấu hình pool cho trại này — ' +
+          "thêm cấu hình qua API /api/pool-config để so sánh hashrate trại với pool.</div>";
+        return;
+      }
+      panel.innerHTML = poolRowHtml(selectedSite, data.latest);
+    } else {
+      const pools = data.pools || [];
+      panel.innerHTML = pools.length
+        ? pools.map((p) => poolRowHtml(p.site, p.latest)).join("")
+        : '<div class="empty">Chưa có trại nào cấu hình pool — thêm qua API /api/pool-config.</div>';
+    }
+  } catch (e) { /* giữ nguyên dữ liệu cũ khi poll lỗi */ }
+}
+
+// -- energy report (v0.9) ----------------------------------------------
+function fmtVnd(v) {
+  return Number(v || 0).toLocaleString("vi-VN") + " ₫";
+}
+async function refreshEnergy() {
+  try {
+    const r = await fetch("/api/energy?days=7" + (selectedSite ? "&site=" + encodeURIComponent(selectedSite) : ""));
+    if (r.status === 401) { location.href = "/login"; return; }
+    const data = await r.json();
+    const panel = $("energy-panel");
+    if (!data.total_kwh) {
+      panel.innerHTML = '<div class="empty">Chưa có dữ liệu điện — nguồn máy chưa báo ' +
+        "công suất (W) hoặc agent chưa đẩy đủ hai bản ghi liên tiếp để tích lũy. " +
+        "Máy chạy VNish/HashCore báo công suất qua API; máy gốc đời cũ thường không có số này.</div>";
+      return;
+    }
+    const dayRows = (data.per_day || []).slice().reverse().map((d) =>
+      "<tr><td>" + esc(d.day) + "</td><td>" + d.kwh.toFixed(2) + " kWh</td><td>" +
+      fmtVnd(d.est_cost_vnd) + "</td></tr>").join("");
+    const top = (data.per_miner || []).slice(0, 5).map((m) =>
+      "<tr><td>" + esc(m.site || "") + "</td><td>" + esc(m.ip) + "</td><td>" +
+      m.kwh.toFixed(2) + " kWh</td><td>" + fmtVnd(m.est_cost_vnd) + "</td></tr>").join("");
+    panel.innerHTML =
+      '<div class="energy-sum">Hôm nay: <b>' + data.today.kwh.toFixed(2) + " kWh</b>" +
+      " · ước tính <b>" + fmtVnd(data.today.est_cost_vnd) + "</b>" +
+      ' <span style="color:var(--muted);font-size:12px">(giá điện ' +
+      fmtVnd(data.electricity_price_vnd_kwh) + "/kWh · 7 ngày: " +
+      data.total_kwh.toFixed(2) + " kWh ≈ " + fmtVnd(data.total_est_cost_vnd) + ")</span></div>" +
+      '<table class="energy"><thead><tr><th>Ngày</th><th>Điện năng</th><th>Ước tính</th></tr></thead>' +
+      "<tbody>" + dayRows + "</tbody></table>" +
+      (top ? '<table class="energy"><thead><tr><th>Trại</th><th>Máy tốn điện nhất (7 ngày)</th><th>Điện năng</th><th>Ước tính</th></tr></thead>' +
+        "<tbody>" + top + "</tbody></table>" : "");
+  } catch (e) { /* giữ nguyên dữ liệu cũ khi poll lỗi */ }
+}
+
 async function refreshAll() {
-  await Promise.all([refreshSites(), refreshMiners(), refreshEvents(), refreshCommands(), refreshRepairs()]);
+  await Promise.all([refreshSites(), refreshMiners(), refreshEvents(), refreshCommands(), refreshRepairs(), refreshPool(), refreshEnergy()]);
 }
 
 function clearMinerSelection() {

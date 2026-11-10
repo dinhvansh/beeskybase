@@ -40,6 +40,19 @@ Viewer (browser), behind a single admin password taken from the
                       problem events + manual technician entries
   POST /api/repairs   {"site", "ip", "title", "detail", "cost_vnd",
                       "technician"} -> add a manual repair entry
+  GET  /api/pool-config  pool API configs (v0.9), public view only —
+                      header NAMES, never their values (``?site=``)
+  POST /api/pool-config  {"site", "adapter", "url", "headers",
+                      "json_path", "unit", "worker_filter",
+                      "notify_gap_pct"} -> upsert one site's config;
+                      omitting "headers" keeps the stored secrets
+  GET  /api/pool      farm-vs-pool latest sample + 24 h series
+                      (``?site=``; a background poller samples every
+                      BEESKY_POOL_POLL_S seconds, default 300)
+  GET  /api/energy    energy report (v0.9): per-day + per-miner kWh
+                      with cost estimates (``?site=``, ``?days=``)
+  GET|POST /api/settings  cloud settings — currently just
+                      ``electricity_price_vnd_kwh`` (default 2000)
   GET|POST /login     password form -> session cookie (in-memory)
   GET  /logout
 
@@ -53,6 +66,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import os
 import re
 import secrets
 import sys
@@ -63,6 +77,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from ..core.actions import COMMAND_TYPES
+from .pools import DEFAULT_POLL_S, UNIT_TO_THS, PoolPoller
 from .store import CloudStore
 
 MAX_BODY_BYTES = 16 * 1024 * 1024
@@ -165,7 +180,7 @@ def make_handler(store: CloudStore, dashboard_html: bytes,
     sessions = SessionStore()
 
     class Handler(BaseHTTPRequestHandler):
-        server_version = "BeeSkyCloud/0.8"
+        server_version = "BeeSkyCloud/0.9"
         protocol_version = "HTTP/1.1"
 
         def log_message(self, *_args):  # noqa: D102 — silence access log
@@ -314,6 +329,61 @@ def make_handler(store: CloudStore, dashboard_html: bytes,
                 self._send_json(200, {
                     "generated_at": _stamp(now), "generated_ts": now,
                     "repairs": store.list_repairs(site, ip, n)})
+            elif path == "/api/pool-config":
+                site = (query.get("site") or [None])[0]
+                configs = store.list_pool_configs()
+                if site:
+                    configs = [c for c in configs if c["site"] == site]
+                now = time.time()
+                self._send_json(200, {
+                    "generated_at": _stamp(now), "generated_ts": now,
+                    "configs": configs})
+            elif path == "/api/pool":
+                site = (query.get("site") or [None])[0]
+                now = time.time()
+                if site:
+                    self._send_json(200, {
+                        "generated_at": _stamp(now), "generated_ts": now,
+                        "site": site,
+                        "latest": store.latest_pool_sample(site),
+                        "series_24h": store.pool_series(
+                            site, now - 24 * 3600)})
+                else:
+                    pools = [{
+                        "site": s,
+                        "latest": store.latest_pool_sample(s),
+                        "series_24h": store.pool_series(
+                            s, now - 24 * 3600),
+                    } for s in store.list_pool_config_sites()]
+                    self._send_json(200, {
+                        "generated_at": _stamp(now), "generated_ts": now,
+                        "pools": pools})
+            elif path == "/api/energy":
+                site = (query.get("site") or [None])[0]
+                raw_days = (query.get("days") or ["7"])[0]
+                try:
+                    days = int(raw_days)
+                except ValueError:
+                    days = 7
+                price = store.electricity_price_vnd()
+                report = store.energy_report(site, days)
+                report["electricity_price_vnd_kwh"] = price
+                for entry in report["per_day"]:
+                    entry["est_cost_vnd"] = round(entry["kwh"] * price)
+                for entry in report["per_miner"]:
+                    entry["est_cost_vnd"] = round(entry["kwh"] * price)
+                report["today"]["est_cost_vnd"] = round(
+                    report["today"]["kwh"] * price)
+                report["total_est_cost_vnd"] = round(
+                    report["total_kwh"] * price)
+                now = time.time()
+                self._send_json(200, {
+                    "generated_at": _stamp(now), "generated_ts": now,
+                    **report})
+            elif path == "/api/settings":
+                self._send_json(200, {
+                    "electricity_price_vnd_kwh":
+                        store.electricity_price_vnd()})
             else:
                 self._send_json(404, {"error": "not found", "path": path})
 
@@ -336,6 +406,12 @@ def make_handler(store: CloudStore, dashboard_html: bytes,
             elif path == "/api/repairs":
                 if self._viewer_gate(path):
                     self._handle_create_repair()
+            elif path == "/api/pool-config":
+                if self._viewer_gate(path):
+                    self._handle_upsert_pool_config()
+            elif path == "/api/settings":
+                if self._viewer_gate(path):
+                    self._handle_update_settings()
             else:
                 length = int(self.headers.get("Content-Length") or 0)
                 if length:
@@ -372,6 +448,74 @@ def make_handler(store: CloudStore, dashboard_html: bytes,
             command = store.create_command(agent["id"], site, ip,
                                            command_type, payload)
             self._send_json(201, {"ok": True, "command": command})
+
+        # -- pool comparison + settings (v0.9) ---------------------------
+
+        def _handle_upsert_pool_config(self) -> None:
+            body = self._read_json_body()
+            if body is None:
+                self._send_json(400, {"error": "invalid JSON body"})
+                return
+            site = body.get("site")
+            if not isinstance(site, str) or not site:
+                self._send_json(400, {"error": "site is required"})
+                return
+            adapter = body.get("adapter") or "generic"
+            if adapter not in ("generic", "emcd"):
+                self._send_json(400, {
+                    "error": "adapter must be 'generic' or 'emcd'"})
+                return
+            unit = body.get("unit") or "TH/s"
+            if unit not in UNIT_TO_THS:
+                self._send_json(400, {
+                    "error": f"unit must be one of {sorted(UNIT_TO_THS)}"})
+                return
+            headers = body.get("headers", None)
+            if headers is not None and not isinstance(headers, dict):
+                self._send_json(400, {
+                    "error": "headers must be an object or omitted "
+                             "(omitted keeps the stored secrets)"})
+                return
+            gap = body.get("notify_gap_pct", 10.0)
+            if isinstance(gap, bool) \
+                    or not isinstance(gap, (int, float)) or gap < 0:
+                self._send_json(400, {
+                    "error": "notify_gap_pct must be a non-negative "
+                             "number"})
+                return
+            worker_filter = body.get("worker_filter")
+            view = store.upsert_pool_config(
+                site,
+                adapter=str(adapter),
+                url=str(body.get("url") or ""),
+                headers=headers,
+                json_path=str(body.get("json_path") or ""),
+                unit=str(unit),
+                worker_filter=(None if worker_filter is None
+                               else str(worker_filter)),
+                notify_gap_pct=float(gap))
+            self._send_json(201, {"ok": True, "config": view})
+
+        def _handle_update_settings(self) -> None:
+            body = self._read_json_body()
+            if body is None:
+                self._send_json(400, {"error": "invalid JSON body"})
+                return
+            price = body.get("electricity_price_vnd_kwh")
+            if price is not None:
+                if isinstance(price, bool) \
+                        or not isinstance(price, (int, float)) \
+                        or price < 0:
+                    self._send_json(400, {
+                        "error": "electricity_price_vnd_kwh must be a "
+                                 "non-negative number"})
+                    return
+                store.set_setting("electricity_price_vnd_kwh",
+                                  repr(float(price)))
+            self._send_json(200, {
+                "ok": True,
+                "electricity_price_vnd_kwh":
+                    store.electricity_price_vnd()})
 
         # -- repairs (v0.8 repair history) -------------------------------
 
@@ -517,6 +661,19 @@ def make_handler(store: CloudStore, dashboard_html: bytes,
     return Handler
 
 
+def _pool_poll_interval() -> float:
+    """Pool poll interval: BEESKY_POOL_POLL_S env, default 300 s."""
+    raw = os.environ.get("BEESKY_POOL_POLL_S")
+    if raw:
+        try:
+            value = float(raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    return DEFAULT_POLL_S
+
+
 def run_cloud_server(store: CloudStore, host: str = "127.0.0.1",
                      port: int = 8788, password: str | None = None) -> None:
     """Serve the cloud app until Ctrl+C."""
@@ -524,6 +681,10 @@ def run_cloud_server(store: CloudStore, host: str = "127.0.0.1",
     httpd = ThreadingHTTPServer((host, port),
                                 make_handler(store, dashboard_html, password))
     httpd.daemon_threads = True
+    poller = PoolPoller(store, _pool_poll_interval())
+    poller.start()
+    print(f"Pool poller: mỗi {poller.interval_s:g} giây cho các trại "
+          "đã cấu hình pool (BEESKY_POOL_POLL_S).", flush=True)
     print(f"BeeSky cloud: http://{host}:{port} — db {store.path}", flush=True)
     if password:
         print("Trang xem: ĐÃ đặt mật khẩu (BEESKY_CLOUD_PASSWORD).",
@@ -542,5 +703,6 @@ def run_cloud_server(store: CloudStore, host: str = "127.0.0.1",
     except KeyboardInterrupt:
         print("\nbeesky cloud stopped")
     finally:
+        poller.stop()
         httpd.server_close()
         store.close()

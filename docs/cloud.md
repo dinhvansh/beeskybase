@@ -91,6 +91,65 @@ Viewer side — session cookie after `POST /login`:
 | `GET /api/events?n=&site=` | Stored events, newest first |
 | `POST /api/commands` | `{"site", "ip", "type", "payload"}` → queue a remote action (reboot, switch_pool) for that site's agent — v0.6, see docs/actions.md |
 | `GET /api/commands?n=&site=` | Remote-action history, newest first |
+| `GET /api/pool-config?site=` | Pool configs, public view: config fields + header NAMES only — secret header values are never returned |
+| `POST /api/pool-config` | Upsert one site's pool config: `{"site", "adapter", "url", "headers", "json_path", "unit", "worker_filter", "notify_gap_pct"}` — omit `"headers"` to keep the stored secrets |
+| `GET /api/pool?site=` | Farm-vs-pool: latest sample + last-24h series (all configured sites when `site` is omitted) |
+| `GET /api/energy?site=&days=` | Energy report: per-day + per-miner kWh with VNĐ cost estimates |
+| `GET|POST /api/settings` | Cloud settings — `{"electricity_price_vnd_kwh": 2000}` (POST updates) |
+
+## Farm vs pool comparison (v0.9)
+
+EMCD Monitoring's standout check, in BeeSky form: the **farm side** is
+the sum of miner-reported TH/s in each site's latest snapshot; the
+**pool side** is what the pool's own API reports for the account. A
+persistent shortfall on the pool side means hashrate is leaking —
+wrong pool config, dead stratum, hijacked workers — or the pool is
+under-reporting. A background poller in the cloud samples every
+configured site every `BEESKY_POOL_POLL_S` seconds (default 300) and
+stores both sides plus `gap_pct = (farm − pool) / farm × 100`. When
+the gap exceeds the site's `notify_gap_pct` (default 10%) on **two
+consecutive** samples, a `POOL_GAP` event (severity `major`) lands in
+the normal event feed — at most one per hour per site.
+
+Pool reads go through a small adapter framework
+(`beesky/cloud/pools.py`):
+
+- **generic** — you describe the pool's JSON API: `url`, optional
+  `headers` (the API key usually rides in one — values are stored in
+  the cloud DB and never echoed back by any GET), a dot-notation
+  `json_path` to the hashrate value (numeric segments index lists,
+  e.g. `data.workers.0.hashrate`), and the `unit` the value is in
+  (`TH/s` | `GH/s` | `PH/s`). With `worker_filter` set, the path's
+  parent must resolve to a list of worker objects; workers whose
+  `worker`/`name`/`worker_name` contains the filter are summed over
+  the final field (`data.workers.hashrate` + filter `"xuong1"`).
+- **emcd** — a *preset* of generic, deliberately shipped with
+  **placeholder** url/path values: EMCD's exact pool-API shape could
+  not be verified from anything available locally, so BeeSky does not
+  fake a schema. Open your EMCD account's API documentation (EMCD
+  dashboard → API), copy the real hashrate endpoint + field path into
+  the site config (adapter `emcd` or `generic` — identical behaviour),
+  and it works from then on.
+
+## Energy reports (v0.9)
+
+Where a miner's source reports wall power, the record carries
+`power_w`: VNish/HashCore dashd returns `power_consumption` (watts,
+a required field of `/api/v1/summary`), and cgminer records pick up
+`Power` / `Wattage`-style stat keys when a firmware offers them.
+Classic stock Bitmain firmware reports neither — those miners show
+the dashboard's honest "chưa có dữ liệu điện" empty state instead of
+a fabricated number.
+
+On every ingested snapshot the cloud integrates each miner's energy
+since its previous snapshot — `kWh += power_w × dt / 3.6e6`, with dt
+capped at 3× the agent's interval so an outage does not invent hours
+of full-power usage — into per-hour buckets. `GET /api/energy` rolls
+them up per day and per miner, with cost estimates at the configured
+electricity price (`electricity_price_vnd_kwh`, default 2000 VNĐ/kWh,
+changeable via `POST /api/settings`). The dashboard's "Điện năng"
+panel shows today's kWh + estimate, a 7-day table and the top-5
+consumers.
 
 ## Security notes
 

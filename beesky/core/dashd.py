@@ -6,6 +6,8 @@ Implemented against the firmware's own OpenAPI document
 
   GET /api/v1/summary  -> {"miner": AntmMinerStats | null}
         miner.miner_type, miner.hr_realtime / hr_average (TH/s scale),
+        miner.power_consumption (required int32 field in the doc — the
+        miner's wall draw in watts; becomes record["power_w"], v0.9),
         miner.miner_status.miner_state_time (seconds in "mining" state),
         miner.chains[] = AntmBoard {id, chip_temp{max}, pcb_temp{max},
         chip_statuses{red, orange, grey}, status{state}},
@@ -267,6 +269,7 @@ class DashdClient:
             chains=chains,
             fans_rpm=fans,
             source="vnish",
+            power_w=_as_float(miner.get("power_consumption")),
         )
 
 

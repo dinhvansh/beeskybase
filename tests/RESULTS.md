@@ -146,9 +146,9 @@ PASS: miner back: BACK_ONLINE printed + webhook received
 PASS: logfile channel recorded all three events
 
 Captured webhook payloads:
-{"ts": 1794270963.9782426, "time": "2026-11-10 00:36:03", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
-{"ts": 1794270964.534958, "time": "2026-11-10 00:36:04", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "OFFLINE", "severity": "critical", "detail": "miner went offline / unreachable", "data": {"last_seen": 1794270964.2907462}}
-{"ts": 1794270965.199767, "time": "2026-11-10 00:36:05", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "BACK_ONLINE", "severity": "info", "detail": "miner is back online", "data": {}}
+{"ts": 1794271559.8703005, "time": "2026-11-10 00:45:59", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
+{"ts": 1794271560.4077578, "time": "2026-11-10 00:46:00", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "OFFLINE", "severity": "critical", "detail": "miner went offline / unreachable", "data": {"last_seen": 1794271560.175383}}
+{"ts": 1794271561.0419304, "time": "2026-11-10 00:46:01", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "BACK_ONLINE", "severity": "info", "detail": "miner is back online", "data": {}}
 
 WATCH TEST PASSED
 ```
@@ -178,7 +178,7 @@ PASS: hashrate drop phase: /api/events gains HASHRATE_DROP
 PASS: drop event: severity major, drop_pct ~= 40
 
 Captured drop event:
-{"ts": 1794270970.4025803, "time": "2026-11-10 00:36:10", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
+{"ts": 1794271566.149038, "time": "2026-11-10 00:46:06", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
 
 WEB TEST PASSED
 ```
@@ -219,7 +219,7 @@ PASS: hashrate drop: HASHRATE_DROP arrives at the cloud
 PASS: drop event: severity major, drop_pct ~= 40, site tag
 
 Captured cloud event:
-{"ts": 1794270977.8722496, "time": "2026-11-10 00:36:17", "site": "Xưởng 1", "agent_id": 1, "ip": "127.0.0.1", "model": "Antminer S19 Pro", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
+{"ts": 1794271573.590439, "time": "2026-11-10 00:46:13", "site": "Xưởng 1", "agent_id": 1, "ip": "127.0.0.1", "model": "Antminer S19 Pro", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
 PASS: /api/miners?site= shows ~66 TH/s, record annotated with site
 
 CLOUD TEST PASSED
@@ -265,7 +265,7 @@ PASS: site 2 command finishes
 PASS: dashd reboot: status done, result from /system/reboot
 
 Captured dashd reboot command:
-{"id": 1, "agent_id": 2, "site": "Xưởng 2", "ip": "127.0.0.1", "type": "reboot", "payload": {}, "status": "done", "result": "dashd accepted reboot (system reboots in 3s)", "created_at": "2026-11-10 00:36:19", "created_ts": 1794270979.6454341, "claimed_at": "2026-11-10 00:36:19", "finished_at": "2026-11-10 00:36:19"}
+{"id": 1, "agent_id": 2, "site": "Xưởng 2", "ip": "127.0.0.1", "type": "reboot", "payload": {}, "status": "done", "result": "dashd accepted reboot (system reboots in 3s)", "created_at": "2026-11-10 00:46:15", "created_ts": 1794271575.351122, "claimed_at": "2026-11-10 00:46:15", "finished_at": "2026-11-10 00:46:15"}
 PASS: dashd mock recorded exactly one POST /system/reboot
 PASS: dashd switch_pool {pool_id: 1} finishes done
 PASS: dashd mock activated pool slot 1
@@ -275,7 +275,7 @@ PASS: site 1 agent reports its cgminer miner
 PASS: cgminer reboot finishes done
 
 Captured cgminer reboot command:
-{"id": 4, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "type": "reboot", "payload": {}, "status": "done", "result": "cgminer accepted the privileged 'restart' command", "created_at": "2026-11-10 00:36:22", "created_ts": 1794270982.4835896, "claimed_at": "2026-11-10 00:36:23", "finished_at": "2026-11-10 00:36:23"}
+{"id": 4, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "type": "reboot", "payload": {}, "status": "done", "result": "cgminer accepted the privileged 'restart' command", "created_at": "2026-11-10 00:46:18", "created_ts": 1794271578.1906705, "claimed_at": "2026-11-10 00:46:19", "finished_at": "2026-11-10 00:46:19"}
 PASS: cgminer mock recorded the restart RPC
 PASS: cgminer reboot on a read-only API -> failed
 PASS: failure result carries the miner's 'Access denied'
@@ -346,13 +346,80 @@ PASS: CHIPS_LOST also lands in repair history as auto_event
 PASS: auto row: site/ip keyed, no cost/technician
 
 Captured auto repair row:
-{"id": 1, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "mac_or_serial": null, "created_at": "2026-11-10 00:36:37", "created_ts": 1794270997.0189164, "kind": "auto_event", "title": "CHIPS_LOST", "detail": "lost 3 chip(s) (342 -> 339 alive)", "cost_vnd": null, "technician": null}
+{"id": 1, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "mac_or_serial": null, "created_at": "2026-11-10 00:46:29", "created_ts": 1794271589.2647822, "kind": "auto_event", "title": "CHIPS_LOST", "detail": "lost 3 chip(s) (342 -> 339 alive)", "cost_vnd": null, "technician": null}
 PASS: POST /api/repairs (logged in) -> 201 manual row
 PASS: manual row listed with cost_vnd + technician
 
 Captured manual repair row:
-{"id": 2, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "mac_or_serial": null, "created_at": "2026-11-10 00:36:37", "created_ts": 1794270997.3705814, "kind": "manual", "title": "Thay board 2", "detail": "Board 2 chết 3 chip — đã thay board, test lại đạt", "cost_vnd": 1500000, "technician": "Tuấn"}
+{"id": 2, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "mac_or_serial": null, "created_at": "2026-11-10 00:46:29", "created_ts": 1794271589.658533, "kind": "manual", "title": "Thay board 2", "detail": "Board 2 chết 3 chip — đã thay board, test lại đạt", "cost_vnd": 1500000, "technician": "Tuấn"}
 PASS: POST /api/repairs with blank title -> 400
 
 REPAIRS TEST PASSED
+```
+
+---
+
+# v0.9 mock test — farm-vs-pool comparison + energy reports
+
+`tests/mock_energy_pool_test.py` checks the pool-config
+redaction + POOL_GAP rule + energy integration in-process
+against `CloudStore` (gap fires only on the second
+consecutive over-threshold sample, deduped to 1/hour; energy
+= power_w x dt with dt capped at 3x the agent interval),
+the generic pool adapter against an in-process mock pool
+(dot-path, GH/s -> TH/s, worker_filter), then builds the
+v0.5 cloud shape on 127.0.0.1: `beesky cloud` (:18793,
+password set, poll interval 1 s), the mock dashd S19 Pro
+(:18098, power_consumption 3210 W), a mock pool JSON server
+(:18123) and `beesky agent --interval 1`. Assertions: new
+endpoints -> 401 logged out; the miner record carries
+power_w 3210; the pool config round-trips with its secret
+header sent to the pool but never echoed by the cloud; a
+~5% gap samples quietly while the pool at 40% of farm
+raises a major POOL_GAP event; energy accumulates > 0 kWh
+and cost estimates follow the settable electricity price.
+
+## Assertions + captured samples
+
+```
+PASS: store: config view lists header NAMES, never values
+PASS: store: re-POST without headers keeps the stored secrets
+PASS: store: gap fires on 2nd consecutive breach, deduped 1/hour
+PASS: store: samples back under threshold never fire
+PASS: store: energy integrates power_w across snapshots (0.06 kWh)
+PASS: store: dt capped at 3x interval (adds 3600 W x 90 s = 0.09)
+PASS: adapter: dot path + GH/s -> TH/s conversion
+PASS: adapter: worker_filter sums only matching workers (60)
+PASS: cloud-add-agent prints a key once
+PASS: cloud starts and serves /login
+PASS: GET /api/pool-config without login -> 401
+PASS: GET /api/pool without login -> 401
+PASS: GET /api/energy without login -> 401
+PASS: GET /api/settings without login -> 401
+PASS: POST /api/pool-config without login -> 401
+PASS: POST /api/settings without login -> 401
+PASS: login with right password -> session
+PASS: GET /api/settings: default price 2000 VND/kWh
+PASS: cloud dashboard: pool + energy panels present
+PASS: /api/sites shows the site after agent push
+PASS: farm hashrate from dashd snapshot (~109.13 TH/s)
+PASS: miner record carries power_w from dashd power_consumption
+PASS: POST /api/pool-config -> 201, view has names not values
+PASS: GET /api/pool-config never echoes the secret header
+PASS: poller samples pool vs farm (gap ~5%, under threshold)
+PASS: poller sent the configured secret header to the pool
+PASS: no POOL_GAP while the gap stays ~5%
+PASS: pool at 40% of farm -> POOL_GAP (major) in the event feed
+
+Captured POOL_GAP event:
+{"ts": 1794271593.505313, "time": "2026-11-10 00:46:33", "site": "Xưởng 1", "agent_id": 1, "ip": null, "model": null, "type": "POOL_GAP", "severity": "major", "detail": "pool reports 43.65 TH/s vs farm 109.13 TH/s — gap 60.0% exceeds 10% for 2 consecutive checks", "data": {"pool_ths": 43.65, "farm_ths": 109.13, "gap_pct": 60.0, "threshold_pct": 10.0}}
+PASS: latest sample shows the ~60% gap
+PASS: energy accumulates > 0 kWh for the dashd miner
+
+Captured energy report (excerpt):
+{"today": {"day": "2026-11-10", "kwh": 0.0018, "est_cost_vnd": 4}, "per_day": [{"day": "2026-11-10", "kwh": 0.0018, "est_cost_vnd": 4}], "per_miner": [{"site": "Xưởng 1", "ip": "127.0.0.1", "kwh": 0.0018, "est_cost_vnd": 4}]}
+PASS: POST /api/settings sets the electricity price
+PASS: energy estimates now use 3000 VND/kWh
+
+ENERGY/POOL TEST PASSED
 ```

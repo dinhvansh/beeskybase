@@ -22,6 +22,17 @@ Tables:
              entered by a technician through the viewer API. Records
              carry no MAC/serial, so history is keyed by site + IP;
              ``mac_or_serial`` is kept for the day a source provides it.
+  pool_configs / pool_samples
+             farm-vs-pool comparison (v0.9): per-site pool API config
+             (header values are secrets — the store hands them only to
+             the poller, never to viewer views) and the poller's
+             samples: pool-side TH/s next to the farm-side snapshot sum
+             and the gap between them.
+  energy_hours
+             energy accounting (v0.9): per (site, miner, hour) kWh
+             integrated from record ``power_w`` across consecutive
+             snapshots inside :meth:`CloudStore.add_snapshot`.
+  settings   tiny key/value table (electricity price for estimates).
 
 All access is serialised through one lock, so the store is safe to
 share between the threads of a ``ThreadingHTTPServer``.
@@ -39,6 +50,7 @@ SNAPSHOT_HISTORY = 100
 EVENT_HISTORY = 5000
 COMMAND_HISTORY = 5000
 REPAIR_HISTORY = 10000
+POOL_SAMPLE_HISTORY = 2000
 
 # Event types that also become auto repair-history rows (v0.8): the
 # problem events a technician would want on a miner's timeline. The
@@ -130,6 +142,41 @@ class CloudStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_repairs_miner
                     ON repairs(site, ip, id);
+                CREATE TABLE IF NOT EXISTS pool_configs (
+                    site           TEXT PRIMARY KEY,
+                    adapter        TEXT NOT NULL DEFAULT 'generic',
+                    url            TEXT NOT NULL DEFAULT '',
+                    headers_json   TEXT NOT NULL DEFAULT '{}',
+                    json_path      TEXT NOT NULL DEFAULT '',
+                    unit           TEXT NOT NULL DEFAULT 'TH/s',
+                    worker_filter  TEXT,
+                    notify_gap_pct REAL NOT NULL DEFAULT 10.0
+                );
+                CREATE TABLE IF NOT EXISTS pool_samples (
+                    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                    site     TEXT NOT NULL,
+                    ts       REAL NOT NULL,
+                    pool_ths REAL NOT NULL,
+                    farm_ths REAL NOT NULL,
+                    gap_pct  REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_pool_samples_site
+                    ON pool_samples(site, id);
+                CREATE TABLE IF NOT EXISTS energy_hours (
+                    site       TEXT NOT NULL,
+                    ip         TEXT NOT NULL,
+                    hour_bucket REAL NOT NULL,
+                    day        TEXT NOT NULL,
+                    kwh        REAL NOT NULL DEFAULT 0,
+                    samples    INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (site, ip, hour_bucket)
+                );
+                CREATE INDEX IF NOT EXISTS idx_energy_day
+                    ON energy_hours(day);
+                CREATE TABLE IF NOT EXISTS settings (
+                    key   TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
                 """
             )
 
@@ -197,17 +244,73 @@ class CloudStore:
 
     def add_snapshot(self, agent_id: int, ts: float,
                      miners: list[dict]) -> None:
+        ts = float(ts)
         with self._lock, self._db:
+            self._integrate_energy(agent_id, ts, miners)
             self._db.execute(
                 "INSERT INTO snapshots (agent_id, ts, miners_json) "
                 "VALUES (?, ?, ?)",
-                (agent_id, float(ts),
+                (agent_id, ts,
                  json.dumps(miners, ensure_ascii=False)))
             self._db.execute(
                 "DELETE FROM snapshots WHERE agent_id = ? AND id NOT IN "
                 "(SELECT id FROM snapshots WHERE agent_id = ? "
                 " ORDER BY id DESC LIMIT ?)",
                 (agent_id, agent_id, SNAPSHOT_HISTORY))
+
+    def _integrate_energy(self, agent_id: int, ts: float,
+                          miners: list[dict]) -> None:
+        """Accumulate kWh from ``power_w`` — caller holds lock + txn.
+
+        For each miner present in BOTH the previous snapshot and this
+        one, energy = power_w × dt, integrated into the hour bucket of
+        *ts*. dt is capped at 3× the agent's scan interval so a long
+        cloud/agent outage does not fabricate hours of phantom usage
+        at full power, and a miner missing from the previous snapshot
+        earns nothing yet (its baseline is being established).
+        """
+        prev = self._db.execute(
+            "SELECT ts, miners_json FROM snapshots WHERE agent_id = ? "
+            "ORDER BY id DESC LIMIT 1", (agent_id,)).fetchone()
+        if prev is None:
+            return
+        dt = ts - float(prev["ts"])
+        if dt <= 0:
+            return
+        agent = self._db.execute(
+            "SELECT site, interval_s FROM agents WHERE id = ?",
+            (agent_id,)).fetchone()
+        if agent is None:
+            return
+        interval = float(agent["interval_s"] or 30.0)
+        dt = min(dt, 3.0 * interval)
+        try:
+            prev_miners = json.loads(prev["miners_json"])
+        except json.JSONDecodeError:
+            return
+        prev_ips = {m.get("ip") for m in prev_miners
+                    if isinstance(m, dict)}
+        bucket = float(int(ts // 3600) * 3600)
+        day = time.strftime("%Y-%m-%d", time.localtime(ts))
+        for miner in miners:
+            if not isinstance(miner, dict):
+                continue
+            power = miner.get("power_w")
+            ip = miner.get("ip")
+            if power is None or not ip or ip not in prev_ips:
+                continue
+            try:
+                kwh = float(power) * dt / 3.6e6
+            except (TypeError, ValueError):
+                continue
+            if kwh <= 0:
+                continue
+            self._db.execute(
+                "INSERT INTO energy_hours (site, ip, hour_bucket, day, "
+                "kwh, samples) VALUES (?, ?, ?, ?, ?, 1) "
+                "ON CONFLICT(site, ip, hour_bucket) DO UPDATE SET "
+                "kwh = kwh + excluded.kwh, samples = samples + 1",
+                (agent["site"], ip, bucket, day, kwh))
 
     def latest_snapshot(self, agent_id: int) -> tuple[float, list[dict]] | None:
         """(ts, miners) of the newest snapshot for *agent_id*, or None."""
@@ -507,6 +610,280 @@ class CloudStore:
         with self._lock:
             rows = self._db.execute(query, params).fetchall()
         return [self._command_view(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # settings (v0.9)
+    # ------------------------------------------------------------------
+
+    def get_setting(self, key: str, default: str | None = None) -> str | None:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT value FROM settings WHERE key = ?",
+                (key,)).fetchone()
+        return row["value"] if row else default
+
+    def set_setting(self, key: str, value: str) -> None:
+        with self._lock, self._db:
+            self._db.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, str(value)))
+
+    def electricity_price_vnd(self) -> float:
+        """Configured electricity price (VNĐ/kWh), default 2000."""
+        raw = self.get_setting("electricity_price_vnd_kwh")
+        try:
+            price = float(raw) if raw is not None else 2000.0
+        except ValueError:
+            price = 2000.0
+        return price if price >= 0 else 2000.0
+
+    # ------------------------------------------------------------------
+    # pool comparison (v0.9) — config, samples, POOL_GAP events
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def pool_config_view(raw: dict) -> dict:
+        """Public view of a pool config — secret values NEVER included.
+
+        Header *names* are listed and ``headers_set`` says whether any
+        are stored; the values themselves only leave the store through
+        :meth:`pool_config_raw` (the poller's internal path).
+        """
+        try:
+            headers = json.loads(raw.get("headers_json") or "{}")
+        except json.JSONDecodeError:
+            headers = {}
+        if not isinstance(headers, dict):
+            headers = {}
+        return {
+            "site": raw["site"],
+            "adapter": raw["adapter"],
+            "url": raw["url"],
+            "json_path": raw["json_path"],
+            "unit": raw["unit"],
+            "worker_filter": raw["worker_filter"],
+            "notify_gap_pct": raw["notify_gap_pct"],
+            "header_names": sorted(headers.keys()),
+            "headers_set": bool(headers),
+        }
+
+    def upsert_pool_config(self, site: str, *, adapter: str = "generic",
+                           url: str = "", headers: dict | None = None,
+                           json_path: str = "", unit: str = "TH/s",
+                           worker_filter: str | None = None,
+                           notify_gap_pct: float = 10.0) -> dict:
+        """Create or replace a site's pool config; returns the view.
+
+        ``headers=None`` keeps the previously stored headers (so the
+        viewer can edit other fields without re-sending secrets); pass
+        a dict — possibly empty — to replace them.
+        """
+        with self._lock, self._db:
+            existing = self._db.execute(
+                "SELECT headers_json FROM pool_configs WHERE site = ?",
+                (site,)).fetchone()
+            headers_json = (existing["headers_json"] if existing
+                            else "{}") if headers is None else json.dumps(
+                                headers, ensure_ascii=False)
+            self._db.execute(
+                "INSERT INTO pool_configs (site, adapter, url, "
+                "headers_json, json_path, unit, worker_filter, "
+                "notify_gap_pct) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(site) DO UPDATE SET adapter = excluded.adapter, "
+                "url = excluded.url, headers_json = excluded.headers_json, "
+                "json_path = excluded.json_path, unit = excluded.unit, "
+                "worker_filter = excluded.worker_filter, "
+                "notify_gap_pct = excluded.notify_gap_pct",
+                (site, adapter, url, headers_json, json_path, unit,
+                 worker_filter, float(notify_gap_pct)))
+            row = self._db.execute(
+                "SELECT * FROM pool_configs WHERE site = ?",
+                (site,)).fetchone()
+        return self.pool_config_view(dict(row))
+
+    def pool_config_raw(self, site: str) -> dict | None:
+        """Full config incl. parsed headers — poller use ONLY."""
+        with self._lock:
+            row = self._db.execute(
+                "SELECT * FROM pool_configs WHERE site = ?",
+                (site,)).fetchone()
+        if row is None:
+            return None
+        raw = dict(row)
+        try:
+            headers = json.loads(raw.pop("headers_json") or "{}")
+        except json.JSONDecodeError:
+            headers = {}
+        raw["headers"] = headers if isinstance(headers, dict) else {}
+        return raw
+
+    def list_pool_configs(self) -> list[dict]:
+        """All pool configs, public (redacted) view."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT * FROM pool_configs ORDER BY site").fetchall()
+        return [self.pool_config_view(dict(r)) for r in rows]
+
+    def list_pool_config_sites(self) -> list[str]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT site FROM pool_configs ORDER BY site").fetchall()
+        return [r["site"] for r in rows]
+
+    def farm_ths(self, site: str) -> float | None:
+        """Farm-side TH/s for *site*: sum over its latest snapshot."""
+        agent = self.agent_by_site(site)
+        if agent is None:
+            return None
+        snap = self.latest_snapshot(agent["id"])
+        if not snap:
+            return None
+        values = [m["ths"] for m in snap[1]
+                  if isinstance(m, dict) and m.get("ths") is not None]
+        return round(sum(values), 4) if values else None
+
+    def record_pool_sample(self, site: str, ts: float, pool_ths: float,
+                           farm_ths: float) -> dict:
+        """Store one pool sample; maybe emit a POOL_GAP event.
+
+        gap_pct is the pool shortfall relative to the farm side:
+        ``(farm - pool) / farm * 100``. The event (severity ``major``)
+        fires when this sample AND the previous one both exceed the
+        site's ``notify_gap_pct`` — a single bad poll never alarms —
+        and at most once per hour per site (repairs-style dedupe).
+        Returns the sample dict plus ``event_fired``.
+        """
+        ts = float(ts)
+        if farm_ths > 0:
+            gap_pct = (farm_ths - pool_ths) / farm_ths * 100.0
+        elif pool_ths > 0:
+            gap_pct = -100.0  # pool reports hash the farm cannot see
+        else:
+            gap_pct = 0.0
+        event_fired = False
+        with self._lock, self._db:
+            prev = self._db.execute(
+                "SELECT gap_pct FROM pool_samples WHERE site = ? "
+                "ORDER BY id DESC LIMIT 1", (site,)).fetchone()
+            self._db.execute(
+                "INSERT INTO pool_samples (site, ts, pool_ths, farm_ths, "
+                "gap_pct) VALUES (?, ?, ?, ?, ?)",
+                (site, ts, float(pool_ths), float(farm_ths),
+                 round(gap_pct, 2)))
+            self._db.execute(
+                "DELETE FROM pool_samples WHERE site = ? AND id NOT IN "
+                "(SELECT id FROM pool_samples WHERE site = ? "
+                " ORDER BY id DESC LIMIT ?)",
+                (site, site, POOL_SAMPLE_HISTORY))
+            config = self._db.execute(
+                "SELECT notify_gap_pct FROM pool_configs WHERE site = ?",
+                (site,)).fetchone()
+            threshold = float(config["notify_gap_pct"]) \
+                if config else 10.0
+            if prev is not None and gap_pct > threshold \
+                    and float(prev["gap_pct"]) > threshold:
+                last = self._db.execute(
+                    "SELECT MAX(ts) FROM events WHERE site = ? "
+                    "AND type = 'POOL_GAP'", (site,)).fetchone()[0]
+                agent = self._db.execute(
+                    "SELECT id FROM agents WHERE site = ? "
+                    "ORDER BY id LIMIT 1", (site,)).fetchone()
+                if agent is not None and (last is None
+                                          or ts - float(last) >= 3600.0):
+                    detail = (
+                        f"pool reports {pool_ths:.2f} TH/s vs farm "
+                        f"{farm_ths:.2f} TH/s — gap {gap_pct:.1f}% exceeds "
+                        f"{threshold:.0f}% for 2 consecutive checks")
+                    self._db.execute(
+                        "INSERT INTO events (agent_id, site, ts, type, "
+                        "severity, ip, model, detail, data_json) "
+                        "VALUES (?, ?, ?, 'POOL_GAP', 'major', NULL, "
+                        "NULL, ?, ?)",
+                        (agent["id"], site, ts, detail,
+                         json.dumps({"pool_ths": round(pool_ths, 2),
+                                     "farm_ths": round(farm_ths, 2),
+                                     "gap_pct": round(gap_pct, 2),
+                                     "threshold_pct": threshold},
+                                    ensure_ascii=False)))
+                    self._db.execute(
+                        "DELETE FROM events WHERE id NOT IN "
+                        "(SELECT id FROM events ORDER BY id DESC LIMIT ?)",
+                        (EVENT_HISTORY,))
+                    event_fired = True
+        return {"site": site, "ts": ts, "time": _stamp(ts),
+                "pool_ths": round(float(pool_ths), 2),
+                "farm_ths": round(float(farm_ths), 2),
+                "gap_pct": round(gap_pct, 2),
+                "event_fired": event_fired}
+
+    def latest_pool_sample(self, site: str) -> dict | None:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT * FROM pool_samples WHERE site = ? "
+                "ORDER BY id DESC LIMIT 1", (site,)).fetchone()
+        if row is None:
+            return None
+        return {"site": site, "ts": row["ts"], "time": _stamp(row["ts"]),
+                "pool_ths": row["pool_ths"], "farm_ths": row["farm_ths"],
+                "gap_pct": row["gap_pct"]}
+
+    def pool_series(self, site: str, since_ts: float) -> list[dict]:
+        """Samples for *site* since *since_ts*, oldest first."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT * FROM pool_samples WHERE site = ? AND ts >= ? "
+                "ORDER BY id", (site, float(since_ts))).fetchall()
+        return [{"ts": r["ts"], "time": _stamp(r["ts"]),
+                 "pool_ths": r["pool_ths"], "farm_ths": r["farm_ths"],
+                 "gap_pct": r["gap_pct"]} for r in rows]
+
+    # ------------------------------------------------------------------
+    # energy reports (v0.9)
+    # ------------------------------------------------------------------
+
+    def energy_report(self, site: str | None = None,
+                      days: int = 7) -> dict:
+        """Per-day + per-miner kWh over the last *days* local days.
+
+        Days are local calendar days ending today; days without data
+        simply do not appear in ``per_day`` (the panel's honest empty
+        state keys off an all-zero total).
+        """
+        days = max(1, min(int(days), 366))
+        now = time.time()
+        cutoff_day = time.strftime(
+            "%Y-%m-%d", time.localtime(now - (days - 1) * 86400))
+        today = time.strftime("%Y-%m-%d", time.localtime(now))
+        clauses = ["day >= ?"]
+        params: list = [cutoff_day]
+        if site:
+            clauses.append("site = ?")
+            params.append(site)
+        where = " AND ".join(clauses)
+        with self._lock:
+            day_rows = self._db.execute(
+                f"SELECT day, SUM(kwh) AS kwh FROM energy_hours "
+                f"WHERE {where} GROUP BY day ORDER BY day",
+                params).fetchall()
+            miner_rows = self._db.execute(
+                f"SELECT site, ip, SUM(kwh) AS kwh FROM energy_hours "
+                f"WHERE {where} GROUP BY site, ip "
+                f"ORDER BY kwh DESC", params).fetchall()
+        per_day = [{"day": r["day"], "kwh": round(float(r["kwh"]), 4)}
+                   for r in day_rows]
+        per_miner = [{"site": r["site"], "ip": r["ip"],
+                      "kwh": round(float(r["kwh"]), 4)}
+                     for r in miner_rows]
+        today_kwh = next((d["kwh"] for d in per_day if d["day"] == today),
+                         0.0)
+        return {
+            "days": days,
+            "today": {"day": today, "kwh": today_kwh},
+            "per_day": per_day,
+            "per_miner": per_miner,
+            "total_kwh": round(sum(d["kwh"] for d in per_day), 4),
+        }
 
     # ------------------------------------------------------------------
     # viewer summaries
