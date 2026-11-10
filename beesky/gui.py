@@ -126,8 +126,8 @@ class BeeSkyApp:
         self._load_logo_image()
         self._set_window_icon()
         self._build_widgets(default_target)
-        ui_theme.center_window(root, width=1080, height=680,
-                               minsize=(900, 560))
+        ui_theme.center_window(root, width=1120, height=730,
+                               minsize=(940, 620))
         self.root.after(100, self._poll_queue)
 
     # -- brand icon ------------------------------------------------------
@@ -276,7 +276,7 @@ class BeeSkyApp:
                     "temp": "Nhiệt độ", "fans": "Quạt", "status": "Trạng thái"}
         widths = {"ip": 110, "model": 170, "source": 100, "ths": 110,
                   "chips": 70, "temp": 70, "fans": 130, "status": 90}
-        self.tree = ttk.Treeview(table_frame, columns=columns,
+        self.tree = ttk.Treeview(table_frame, columns=columns, height=7,
                                  show="headings", selectmode="browse")
         for col in columns:
             self.tree.heading(col, text=headings[col])
