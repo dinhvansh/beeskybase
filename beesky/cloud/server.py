@@ -144,9 +144,11 @@ def _dashboard_candidates() -> list[Path]:
 
 
 def _load_dashboard_html() -> bytes:
+    from .. import __version__
     for path in _dashboard_candidates():
         try:
-            return path.read_bytes()
+            return path.read_bytes().replace(
+                b"{{VERSION}}", __version__.encode("utf-8"))
         except OSError:
             continue
     return _FALLBACK_HTML.encode("utf-8")

@@ -140,8 +140,23 @@ def test_desktop(root) -> None:
           == ui_theme.ENTRY_FILL.casefold())
 
 
+def test_version_stamp() -> None:
+    """v0.18.1: served dashboards carry the running version, never a
+    stale hard-coded one (the footers sat at v0.13/v0.8 for months)."""
+    from beesky import __version__
+    from beesky.cloud.server import _load_dashboard_html as load_cloud
+    from beesky.web.server import _load_dashboard_html as load_web
+    for name, loader in (("cloud", load_cloud), ("web", load_web)):
+        html = loader().decode("utf-8")
+        check(f"{name}: served footer shows current version",
+              f"v{__version__}" in html)
+        check(f"{name}: no un-stamped placeholder left",
+              "{{VERSION}}" not in html)
+
+
 def main() -> int:
     test_web()
+    test_version_stamp()
     root = tk.Tk()
     try:
         ui_theme.setup_theme(root)

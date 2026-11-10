@@ -1131,3 +1131,35 @@ was therefore restored to the committed ship-time blocks and every
 later suite was re-verified standalone against the v0.18 tree — logo,
 history, agents-ui, agent-app, theme, agent-bg, rounded, glass, GUI,
 cloud, web: all green.
+
+## v0.18.1 — dashboard version stamp
+PASS: web cloud/dashboard.html: glass token is translucent white .045
+PASS: web cloud/dashboard.html: glass line token is rgba .09
+PASS: web cloud/dashboard.html: backdrop blur 16px saturate 150% applied
+PASS: web cloud/dashboard.html: ambient radial-gradient body backdrop
+PASS: web cloud/dashboard.html: @supports no-backdrop-filter fallback
+PASS: web cloud/dashboard.html: reduced-transparency fallback
+PASS: web cloud/dashboard.html: glass shadow token (rim inset + drop)
+PASS: web cloud/dashboard.html: accent CTA stays solid yellow
+PASS: web web/dashboard.html: glass token is translucent white .045
+PASS: web web/dashboard.html: glass line token is rgba .09
+PASS: web web/dashboard.html: backdrop blur 16px saturate 150% applied
+PASS: web web/dashboard.html: ambient radial-gradient body backdrop
+PASS: web web/dashboard.html: @supports no-backdrop-filter fallback
+PASS: web web/dashboard.html: reduced-transparency fallback
+PASS: web web/dashboard.html: glass shadow token (rim inset + drop)
+PASS: web web/dashboard.html: accent CTA stays solid yellow
+PASS: cloud: served footer shows current version
+PASS: cloud: no un-stamped placeholder left
+PASS: web: served footer shows current version
+PASS: web: no un-stamped placeholder left
+PASS: desktop: card surface is drawn
+PASS: desktop: card fill is PANEL_GLASS, outline GLASS_BORDER
+PASS: desktop: card draws exactly one rim-light item
+PASS: desktop: rim light colour is RIM_LIGHT
+PASS: desktop: rim survives a resize without double-drawing
+PASS: desktop: ghost button draws one rim item, accent none
+PASS: desktop: ghost colours are the glass triple
+PASS: desktop: disabled ghost drops the rim, mutes to glass
+PASS: desktop: entry shape is ENTRY_FILL / ENTRY_BORDER
+PASS: desktop: hosted entry bg matches the glass fill

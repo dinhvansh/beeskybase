@@ -116,3 +116,10 @@ Owner approved chasing the 2026 trend (Apple iOS 26 Liquid Glass). Brand palette
   restored to ship-time blocks; v0.11–v0.18 suites re-verified standalone, all green
   (logo, history, agents-ui, agent-app 41, agent-bg 52, theme, rounded, glass 26, GUI,
   cloud, web). tests/RESULTS.md: 423 PASS lines.
+
+## v0.18.1 — dashboard version stamp fix
+Live-screenshot review caught the web footers stuck at "BeeSky Cloud v0.13" / "BeeSky v0.8"
+(hard-coded at redesign time, never bumped since). Both dashboards now carry a {{VERSION}}
+placeholder that the servers stamp with beesky.__version__ when serving — single source of
+truth, can never go stale again. Pinned by 4 new assertions in mock_glass_test (30 total);
+cloud/web/agent-bg suites re-run green.
