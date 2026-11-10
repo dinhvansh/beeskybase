@@ -153,9 +153,8 @@ def setup_theme(root: tk.Tk) -> str:
     # Card-hosted content sits on the RoundedCard's simulated-glass
     # fill, so these backgrounds are PANEL_GLASS (v0.18), matching
     # the canvas-drawn surface pixel-for-pixel at the label edges.
-    style.configure("Card.TFrame", background=PANEL_GLASS, borderwidth=1,
-                    relief="solid", bordercolor=GLASS_BORDER,
-                    lightcolor=GLASS_BORDER, darkcolor=GLASS_BORDER)
+    style.configure("Card.TFrame", background=PANEL_GLASS, borderwidth=0,
+                    relief="flat")
     style.configure("Card.TLabel", background=PANEL_GLASS,
                     foreground=TEXT, font=body)
     style.configure("Card.Section.TLabel", background=PANEL_GLASS,

@@ -187,3 +187,11 @@ with the scrollbar hidden), Model 170→160 to compensate. GUI/theme/glass/agent
 Owner spotted the last toolbar button ("Quét lại") crowding the scan card's rounded frame.
 The toolbar card's inner padding goes 12 → 18, so every control — first entry and last
 button alike — now sits a clear 18px inside the frame on all sides. GUI/agent-bg green.
+
+## v0.19.4 — the inner frame is gone (Card.TFrame border removed)
+Owner: "đè lên khung trong kìa" — pixel forensics found it: the Card.TFrame style (inner
+frames inside cards) still carried a 1px solid GLASS_BORDER from the pre-rounded era, so
+every row inside a card drew its own rectangle; the toolbar buttons sat inside that inner
+frame and its border peeked through the gaps between buttons. Card.TFrame is now borderless
+— the RoundedCard is the only frame. Pixel-verified: the gap dashes are gone. Theme/GUI/
+glass/agent suites green.
