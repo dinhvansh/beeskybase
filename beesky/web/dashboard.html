@@ -18,6 +18,9 @@
     --warn: #FBBF24;
     --bad: #F87171;
     --orange: #FB923C;
+    --radius-card: 16px;
+    --radius-widget: 12px;
+    --radius-pill: 999px;
   }
   * { box-sizing: border-box; }
   body {
@@ -41,7 +44,7 @@
   header .spacer { flex: 1; }
   header .meta { color: var(--muted); font-size: 12px; text-align: right; }
   button {
-    background: var(--yellow); color: #000; border: 0; border-radius: 8px;
+    background: var(--yellow); color: #000; border: 0; border-radius: var(--radius-widget);
     padding: 9px 18px; font-weight: 700; cursor: pointer; font-size: 13.5px;
   }
   button:hover { filter: brightness(1.08); }
@@ -50,12 +53,12 @@
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
   .card {
     background: var(--panel); border: 1px solid var(--line);
-    border-radius: 12px; box-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+    border-radius: var(--radius-card); box-shadow: 0 1px 3px rgba(0, 0, 0, .35);
     padding: 16px 18px; position: relative;
   }
   .ic-chip {
     position: absolute; top: 14px; right: 14px; width: 34px; height: 34px;
-    border-radius: 9px; background: var(--panel2); border: 1px solid var(--line);
+    border-radius: var(--radius-widget); background: var(--panel2); border: 1px solid var(--line);
     display: flex; align-items: center; justify-content: center; color: var(--muted);
   }
   .ic-chip svg { width: 18px; height: 18px; }
@@ -68,7 +71,7 @@
   h2 .accent { color: var(--yellow); font-weight: 600; }
   .tablewrap {
     overflow-x: auto; background: var(--panel); border: 1px solid var(--line);
-    border-radius: 12px; box-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+    border-radius: var(--radius-card); box-shadow: 0 1px 3px rgba(0, 0, 0, .35);
   }
   table { width: 100%; border-collapse: collapse; min-width: 860px; font-variant-numeric: tabular-nums; }
   th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; font-size: 13px; }
@@ -81,7 +84,7 @@
   tr:last-child td { border-bottom: 0; }
   tr.offline td { opacity: .45; }
   .pill {
-    display: inline-block; padding: 2px 10px; border-radius: 999px;
+    display: inline-block; padding: 2px 10px; border-radius: var(--radius-pill);
     font-size: 12px; font-weight: 700;
   }
   .pill.ok { background: #0E2C22; color: var(--ok); }
@@ -90,7 +93,7 @@
   .problems { color: #F3B8B2; font-size: 12px; margin-top: 4px; line-height: 1.5; }
   .events {
     background: var(--panel); border: 1px solid var(--line);
-    border-radius: 12px; box-shadow: 0 1px 3px rgba(0, 0, 0, .35); overflow: hidden;
+    border-radius: var(--radius-card); box-shadow: 0 1px 3px rgba(0, 0, 0, .35); overflow: hidden;
   }
   .event {
     display: flex; gap: 10px; align-items: baseline; padding: 10px 16px;
@@ -100,7 +103,7 @@
   .event .time { color: var(--muted); font-size: 12px; white-space: nowrap; }
   .event .who { font-weight: 700; white-space: nowrap; }
   .event .detail { color: #D8D8DC; }
-  .sev { font-size: 11px; font-weight: 800; padding: 2px 9px; border-radius: 999px; text-transform: uppercase; white-space: nowrap; }
+  .sev { font-size: 11px; font-weight: 800; padding: 2px 9px; border-radius: var(--radius-pill); text-transform: uppercase; white-space: nowrap; }
   .sev.info { background: #1D2735; color: #9DB8CC; }
   .sev.warning { background: #33290E; color: var(--warn); }
   .sev.major { background: #33200E; color: var(--orange); }
@@ -109,12 +112,12 @@
   footer { color: var(--muted); font-size: 12px; text-align: center; padding: 0 20px 22px; }
   .heatwrap {
     background: var(--panel); border: 1px solid var(--line);
-    border-radius: 12px; box-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+    border-radius: var(--radius-card); box-shadow: 0 1px 3px rgba(0, 0, 0, .35);
     padding: 14px 16px;
   }
   .heatmap { display: flex; flex-wrap: wrap; gap: 8px; }
   .tile {
-    width: 94px; border-radius: 8px; padding: 7px 9px;
+    width: 94px; border-radius: var(--radius-widget); padding: 7px 9px;
     border: 2px solid transparent; background: var(--panel2); color: var(--text);
   }
   .tile .octet { font-size: 19px; font-weight: 800; line-height: 1.15; }

@@ -1014,3 +1014,39 @@ PASS: gui: an error status renders 'Lỗi gần nhất' + the error
 
 AGENT BG TEST PASSED
 ```
+
+## v0.17 standalone verification (chain halted externally after v0.10 stage)
+Chain run_mock_test_v17.sh regenerated v0.1-v0.10 in-chain green (156 PASS), then the run was halted externally (no FAIL line in the log). Ship-time v0.11-v0.16 blocks above are the committed ones, restored verbatim. The v0.11-v0.17 suites were re-verified standalone against the v0.17 tree: firmware (PASS on retry - its unlock-order assertion is timing-sensitive: FAIL/PASS/FAIL observed back-to-back on the identical tree), history, agents-ui, logo, cloud, theme, gui, agent-app, agent-bg all PASSED. Rounded suite evidence:
+PASS: tokens: radius scale is 16 / 12 / 999
+PASS: web cloud/dashboard.html: radius tokens are defined
+PASS: web cloud/dashboard.html: no pre-token literal radii remain
+PASS: web cloud/dashboard.html: token vars are actually used
+PASS: web web/dashboard.html: radius tokens are defined
+PASS: web web/dashboard.html: no pre-token literal radii remain
+PASS: web web/dashboard.html: token vars are actually used
+PASS: button: accent constructs at >= 36px tall
+PASS: button: cget reports text + state like ttk
+PASS: button: press+release inside fires the command
+PASS: button: release outside cancels the click
+PASS: button: keyboard focus draws the focus ring
+PASS: button: Return and Space activate a focused button
+PASS: button: invoke() fires while enabled
+PASS: button: configure(state=) updates cget('state')
+PASS: button: a disabled button never fires (click or invoke)
+PASS: button: set_text relabels and resizes
+PASS: button: ghost + danger-ghost variants construct
+PASS: entry: .entry hosts the real tk.Entry
+PASS: entry: typing flows into the textvariable
+PASS: entry: variable writes flow into the entry
+PASS: entry: show='*' masks (cget delegates to the entry)
+PASS: entry: configure(show='') unmasks ('Hiện key' path)
+PASS: entry: focus turns the frame outline accent
+PASS: card: ui_theme.card returns a ttk.Frame (RoundedCard)
+PASS: card: title + content findable by tree walk
+PASS: card: the rounded surface is drawn on its canvas
+PASS: pill: status_pill returns a RoundedPill
+PASS: pill: set_pill recolours + retexts (cget('bg') = OK)
+PASS: windows: agent key_entry is a RoundedEntry
+PASS: windows: agent buttons are RoundedButtons
+PASS: windows: agent pills are RoundedPills
+PASS: windows: main scan_button is a RoundedButton

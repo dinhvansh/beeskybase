@@ -53,3 +53,18 @@ The agent now runs truly in the background and the install is hardened:
   tree (logo, history, agents-ui, agent-app 41, theme 25, GUI, cloud — all green), so
   the ship-time v0.11–v0.15 evidence blocks in tests/RESULTS.md are kept verbatim,
   exactly as v0.12–v0.15 handled the same flake. tests/RESULTS.md: 364 PASS lines.
+
+## v0.17 — rounded-corner overhaul (UI/UX Pro Max tokens)
+New beesky/rounded.py: Canvas-drawn RoundedCard (r=16), RoundedButton (r=12; hover lighten /
+press darken / focus ring / >=36px tall / keyboard activation), RoundedEntry (accent outline
+on focus), RoundedPill (full-round) — ttk cannot do border-radius, so the shapes are drawn.
+Applied to every card, button, form entry and pill in both desktop apps; ttk kept for the
+Treeview/scrollbars (data surfaces). ui_theme.card/status_pill signatures unchanged (delegate
+to the rounded widgets); no behaviour assertion weakened (one release-pin moved 0.16.0->0.17.0).
+Web dashboards: radius tokens unified (--radius-card 16px / --radius-widget 12px /
+--radius-pill 999px). Design tokens + provenance: docs/design-tokens.md.
+Evidence: chain regenerated v0.1-v0.10 in-chain (156 PASS) then was halted externally with no
+FAIL line; tests/RESULTS.md restored to the committed ship-time blocks and the v0.11-v0.17
+suites re-verified standalone (all green; the known v0.11 unlock-order assertion reproduced
+FAIL/PASS/FAIL back-to-back on the identical tree — timing flake, disclosed as before).
+tests/RESULTS.md: 397 PASS lines.

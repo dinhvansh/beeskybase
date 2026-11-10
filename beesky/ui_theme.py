@@ -43,6 +43,17 @@ BODY_SIZE = 11
 SMALL_SIZE = 10
 STAT_SIZE = 24
 
+# -- radius scale (v0.17, see docs/design-tokens.md) --------------------------
+# One radius system for desktop + web: cards/panels round at 16,
+# interactive widgets (buttons, inputs) at 12, chips/pills fully
+# round. ttk cannot draw these — beesky/rounded.py renders them on
+# tk.Canvas; the web dashboards use the same values as CSS tokens
+# (--radius-card / --radius-widget / --radius-pill).
+
+RADIUS_CARD = 16
+RADIUS_WIDGET = 12
+RADIUS_PILL = 999
+
 _PREFERRED_FAMILIES = ("Segoe UI", "Helvetica Neue", "Noto Sans",
                        "DejaVu Sans")
 
@@ -221,17 +232,16 @@ def center_window(win: tk.Tk, width: int | None = None,
 
 def card(parent: tk.Misc, title: str | None = None,
          pad: int = 16) -> ttk.Frame:
-    """A panel card; the caller packs/grids it and fills it.
+    """A rounded panel card (radius RADIUS_CARD); the caller
+    packs/grids it and fills it.
 
     With *title*, a section header is placed at the top inside the
-    card and the caller packs its content below it.
+    card and the caller packs its content below it. The return
+    value is a beesky.rounded.RoundedCard — a ttk.Frame subclass,
+    so every pre-v0.17 call site works unchanged.
     """
-    frame = ttk.Frame(parent, style="Card.TFrame", padding=pad)
-    if title is not None:
-        ttk.Label(frame, text=title,
-                  style="Card.Section.TLabel").pack(
-                      anchor="w", pady=(0, 10))
-    return frame
+    from . import rounded  # deferred: rounded imports this module
+    return rounded.RoundedCard(parent, title=title, pad=pad)
 
 
 def labeled_field(parent: tk.Misc, row: int, label: str,
@@ -269,18 +279,23 @@ _PILL_COLORS = {
 
 
 def status_pill(parent: tk.Misc, text: str = "",
-                state: str = "dim") -> tk.Label:
-    """A small solid status chip (tk.Label — ttk has no solid-fill
-    label that recolours per state without a new style each)."""
-    bg, fg = _PILL_COLORS.get(state, _PILL_COLORS["dim"])
-    family = font_family(parent)
-    return tk.Label(parent, text=text, bg=bg, fg=fg,
-                    font=(family, SMALL_SIZE, "bold"),
-                    padx=10, pady=3)
+                state: str = "dim", backdrop: str | None = None):
+    """A small solid status chip — since v0.17 a full-round
+    beesky.rounded.RoundedPill instead of the square tk.Label.
+
+    *backdrop* is the surface the pill sits on (window BG by
+    default, PANEL inside a card) so its canvas corners blend in.
+    """
+    from . import rounded  # deferred: rounded imports this module
+    return rounded.RoundedPill(parent, text=text, tone=state,
+                               backdrop=backdrop)
 
 
-def set_pill(pill: tk.Label, state: str, text: str | None = None) -> None:
+def set_pill(pill, state: str, text: str | None = None) -> None:
     """Recolour (and optionally retext) a pill from status_pill()."""
+    if hasattr(pill, "set_tone"):  # RoundedPill
+        pill.set_tone(state, text)
+        return
     bg, fg = _PILL_COLORS.get(state, _PILL_COLORS["dim"])
     pill.configure(bg=bg, fg=fg)
     if text is not None:

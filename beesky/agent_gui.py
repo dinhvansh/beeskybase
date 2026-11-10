@@ -37,6 +37,7 @@ from tkinter import ttk
 from . import __version__
 from . import gui as _gui_theme
 from . import ui_theme
+from .rounded import RoundedButton, RoundedEntry, RoundedPill
 from .agent_app import insecure_cloud_warning, install_task, \
     log_file_path, read_status, remove_task, status_file_path, \
     task_installed, test_ingest, _is_windows
@@ -120,10 +121,8 @@ class AgentConfigApp:
                   style="Title.TLabel").pack(anchor="w")
         ttk.Label(titles, text="Cấu hình agent tại trại",
                   style="Sub.TLabel").pack(anchor="w")
-        tk.Label(header, text=f"v{__version__}", bg=ui_theme.PANEL2,
-                 fg=ui_theme.MUTED, padx=8, pady=2,
-                 font=(ui_theme.font_family(self.root),
-                       ui_theme.SMALL_SIZE, "bold")).pack(side="right")
+        RoundedPill(header, text=f"v{__version__}",
+                    tone="dim").pack(side="right")
 
         # -- card 1: cloud connection ----------------------------------
         self.cloud_var = tk.StringVar()
@@ -137,7 +136,8 @@ class AgentConfigApp:
         body.pack(fill="x")
         body.columnconfigure(0, weight=1)
 
-        cloud_entry = ttk.Entry(body, textvariable=self.cloud_var)
+        cloud_entry = RoundedEntry(body, textvariable=self.cloud_var,
+                                   backdrop=ui_theme.PANEL)
         ui_theme.labeled_field(body, 0, "Cloud URL:", cloud_entry)
         # Dynamic http:// hint in the cloud field's hint slot (grid
         # row 2 — see ui_theme.labeled_field's row math).
@@ -150,8 +150,10 @@ class AgentConfigApp:
                                  lambda *_a: self._refresh_cloud_hint())
 
         key_box = ttk.Frame(body, style="Card.TFrame")
-        self.key_entry = ttk.Entry(key_box, textvariable=self.key_var,
-                                   show="*")
+        self.key_entry = RoundedEntry(key_box,
+                                      textvariable=self.key_var,
+                                      show="*",
+                                      backdrop=ui_theme.PANEL)
         self.key_entry.pack(side="left", fill="x", expand=True)
         ttk.Checkbutton(key_box, text="Hiện key",
                         variable=self.show_key_var,
@@ -160,7 +162,8 @@ class AgentConfigApp:
                             side="left", padx=(8, 0))
         ui_theme.labeled_field(body, 1, "Agent key:", key_box)
 
-        site_entry = ttk.Entry(body, textvariable=self.site_var)
+        site_entry = RoundedEntry(body, textvariable=self.site_var,
+                                  backdrop=ui_theme.PANEL)
         ui_theme.labeled_field(body, 2, "Tên trại:", site_entry,
                                hint="vd Xưởng 1")
 
@@ -178,13 +181,16 @@ class AgentConfigApp:
         sbody.pack(fill="x")
         sbody.columnconfigure(0, weight=1)
 
-        target_entry = ttk.Entry(sbody, textvariable=self.target_var)
+        target_entry = RoundedEntry(sbody,
+                                    textvariable=self.target_var,
+                                    backdrop=ui_theme.PANEL)
         ui_theme.labeled_field(sbody, 0, "Dải IP quét:", target_entry,
                                hint="vd 192.168.1.10-192.168.1.60")
 
-        interval_entry = ttk.Entry(sbody,
-                                   textvariable=self.interval_var,
-                                   width=10)
+        interval_entry = RoundedEntry(sbody,
+                                      textvariable=self.interval_var,
+                                      width=10,
+                                      backdrop=ui_theme.PANEL)
         ui_theme.labeled_field(sbody, 1, "Chu kỳ quét (giây):",
                                interval_entry)
         interval_entry.grid_configure(sticky="w")
@@ -195,11 +201,12 @@ class AgentConfigApp:
         bg_row = ttk.Frame(bg, style="Card.TFrame")
         bg_row.pack(fill="x")
         self.bg_pill = ui_theme.status_pill(
-            bg_row, text="Chưa có dữ liệu", state="dim")
+            bg_row, text="Chưa có dữ liệu", state="dim",
+            backdrop=ui_theme.PANEL)
         self.bg_pill.pack(side="left")
-        self.view_log_button = ttk.Button(
-            bg_row, text="Xem log", style="Ghost.TButton",
-            command=self._open_log)
+        self.view_log_button = RoundedButton(
+            bg_row, text="Xem log", variant="ghost",
+            command=self._open_log, backdrop=ui_theme.PANEL)
         self.view_log_button.pack(side="right")
         self.bg_status_var = tk.StringVar(
             value="Agent chưa chạy vòng nào — trạng thái sẽ hiện "
@@ -213,16 +220,16 @@ class AgentConfigApp:
         # -- actions + status pill ---------------------------------------
         actions = ttk.Frame(main)
         actions.pack(fill="x", pady=(14, 0))
-        self.save_button = ttk.Button(actions, text="Lưu cấu hình",
-                                      style="Accent.TButton",
-                                      command=self.save_config)
+        self.save_button = RoundedButton(
+            actions, text="Lưu cấu hình", variant="accent",
+            command=self.save_config)
         self.save_button.pack(side="left")
-        self.test_button = ttk.Button(actions, text="Chạy thử",
-                                      style="Ghost.TButton",
-                                      command=self.start_test)
+        self.test_button = RoundedButton(
+            actions, text="Chạy thử", variant="ghost",
+            command=self.start_test)
         self.test_button.pack(side="left", padx=(10, 0))
-        self.autostart_button = ttk.Button(
-            actions, text="Bật tự khởi động", style="Ghost.TButton",
+        self.autostart_button = RoundedButton(
+            actions, text="Bật tự khởi động", variant="ghost",
             command=self.toggle_autostart)
         self.autostart_button.pack(side="left", padx=(10, 0))
         self.test_pill = ui_theme.status_pill(
