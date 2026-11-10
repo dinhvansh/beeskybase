@@ -83,10 +83,12 @@ def main() -> int:
           "beesky-logo-512.png" in gui and "subsample" in gui)
 
     # -- version -----------------------------------------------------------
+    # Version-relative since v0.12 (same fix the update test got in
+    # v0.11): the wiring intent is "installer define == package
+    # version", not a literal release number that ages out each bump.
     import beesky
-    check("version bumped to 0.11.2",
-          beesky.__version__ == "0.11.2"
-          and '#define MyAppVersion "0.11.2"' in iss,
+    check("version: installer define matches the package version",
+          f'#define MyAppVersion "{beesky.__version__}"' in iss,
           f"package reports {beesky.__version__}")
 
     if FAILURES:

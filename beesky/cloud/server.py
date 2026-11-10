@@ -53,6 +53,9 @@ Viewer (browser), behind a single admin password taken from the
                       with cost estimates (``?site=``, ``?days=``)
   GET|POST /api/settings  cloud settings — currently just
                       ``electricity_price_vnd_kwh`` (default 2000)
+  GET  /api/history   farm hashrate history (v0.12): throttled
+                      per-site samples, 1/min, kept 30 days
+                      (``?site=``, ``?hours=`` default 24)
   GET|POST /login     password form -> session cookie (in-memory)
   GET  /logout
 
@@ -180,7 +183,7 @@ def make_handler(store: CloudStore, dashboard_html: bytes,
     sessions = SessionStore()
 
     class Handler(BaseHTTPRequestHandler):
-        server_version = "BeeSkyCloud/0.9"
+        server_version = "BeeSkyCloud/0.12"
         protocol_version = "HTTP/1.1"
 
         def log_message(self, *_args):  # noqa: D102 — silence access log
@@ -358,6 +361,20 @@ def make_handler(store: CloudStore, dashboard_html: bytes,
                     self._send_json(200, {
                         "generated_at": _stamp(now), "generated_ts": now,
                         "pools": pools})
+            elif path == "/api/history":
+                site = (query.get("site") or [None])[0]
+                raw_hours = (query.get("hours") or ["24"])[0]
+                try:
+                    hours = float(raw_hours)
+                except ValueError:
+                    hours = 24.0
+                hours = max(1.0, min(hours, 24 * 30.0))
+                now = time.time()
+                self._send_json(200, {
+                    "generated_at": _stamp(now), "generated_ts": now,
+                    "site": site,
+                    "points": store.history_series(
+                        site, now - hours * 3600)})
             elif path == "/api/energy":
                 site = (query.get("site") or [None])[0]
                 raw_days = (query.get("days") or ["7"])[0]

@@ -33,6 +33,11 @@ Tables:
              integrated from record ``power_w`` across consecutive
              snapshots inside :meth:`CloudStore.add_snapshot`.
   settings   tiny key/value table (electricity price for estimates).
+  history_samples
+             farm hashrate history (v0.12): one throttled sample per
+             site per minute taken inside :meth:`CloudStore.add_snapshot`
+             (site totals: TH/s, miner counts, max temp), kept 30 days;
+             feeds the overview chart via ``GET /api/history``.
 
 All access is serialised through one lock, so the store is safe to
 share between the threads of a ``ThreadingHTTPServer``.
@@ -51,6 +56,11 @@ EVENT_HISTORY = 5000
 COMMAND_HISTORY = 5000
 REPAIR_HISTORY = 10000
 POOL_SAMPLE_HISTORY = 2000
+
+# History sampling (v0.12): at most one history_samples row per site
+# per HISTORY_SAMPLE_INTERVAL_S, rows kept for HISTORY_RETENTION_S.
+HISTORY_SAMPLE_INTERVAL_S = 60.0
+HISTORY_RETENTION_S = 30 * 86400.0
 
 # Event types that also become auto repair-history rows (v0.8): the
 # problem events a technician would want on a miner's timeline. The
@@ -177,6 +187,16 @@ class CloudStore:
                     key   TEXT PRIMARY KEY,
                     value TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS history_samples (
+                    site           TEXT NOT NULL,
+                    ts             REAL NOT NULL,
+                    total_ths      REAL NOT NULL DEFAULT 0,
+                    miners_total   INTEGER NOT NULL DEFAULT 0,
+                    miners_problem INTEGER NOT NULL DEFAULT 0,
+                    max_temp_c     REAL
+                );
+                CREATE INDEX IF NOT EXISTS idx_history_site
+                    ON history_samples(site, ts);
                 """
             )
 
@@ -257,6 +277,73 @@ class CloudStore:
                 "(SELECT id FROM snapshots WHERE agent_id = ? "
                 " ORDER BY id DESC LIMIT ?)",
                 (agent_id, agent_id, SNAPSHOT_HISTORY))
+            self._sample_history(agent_id, ts, miners)
+
+    def _sample_history(self, agent_id: int, ts: float,
+                        miners: list[dict]) -> None:
+        """Append one throttled history sample — caller holds txn.
+
+        At most one row per site per HISTORY_SAMPLE_INTERVAL_S: agents
+        typically push every few seconds, and a minute of resolution
+        is plenty for a 24 h farm chart. Totals mirror sites_summary:
+        summed TH/s over records that carry it, problem = status not
+        OK. Rows older than HISTORY_RETENTION_S are pruned here, on
+        the write path, so no background job is needed.
+        """
+        agent = self._db.execute(
+            "SELECT site FROM agents WHERE id = ?",
+            (agent_id,)).fetchone()
+        if agent is None:
+            return
+        site = agent["site"]
+        last = self._db.execute(
+            "SELECT MAX(ts) FROM history_samples WHERE site = ?",
+            (site,)).fetchone()[0]
+        if last is not None \
+                and ts - float(last) < HISTORY_SAMPLE_INTERVAL_S:
+            return
+        ths_values = [m["ths"] for m in miners
+                      if isinstance(m, dict) and m.get("ths") is not None]
+        temp_values = [m["max_temp_c"] for m in miners
+                       if isinstance(m, dict)
+                       and m.get("max_temp_c") is not None]
+        self._db.execute(
+            "INSERT INTO history_samples (site, ts, total_ths, "
+            "miners_total, miners_problem, max_temp_c) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (site, ts, round(sum(ths_values), 4), len(miners),
+             sum(1 for m in miners
+                 if isinstance(m, dict) and m.get("status") != "OK"),
+             max(temp_values) if temp_values else None))
+        self._db.execute(
+            "DELETE FROM history_samples WHERE ts < ?",
+            (ts - HISTORY_RETENTION_S,))
+
+    def history_series(self, site: str | None = None,
+                       since_ts: float = 0.0) -> list[dict]:
+        """History samples since *since_ts*, oldest first.
+
+        With *site* empty/None every site's rows come back; the
+        dashboard sums same-minute buckets client-side for the
+        all-sites chart.
+        """
+        query = "SELECT * FROM history_samples WHERE ts >= ?"
+        params: list = [float(since_ts)]
+        if site:
+            query += " AND site = ?"
+            params.append(site)
+        query += " ORDER BY ts, site"
+        with self._lock:
+            rows = self._db.execute(query, params).fetchall()
+        return [{
+            "site": r["site"],
+            "ts": r["ts"],
+            "time": _stamp(r["ts"]),
+            "total_ths": r["total_ths"],
+            "miners_total": r["miners_total"],
+            "miners_problem": r["miners_problem"],
+            "max_temp_c": r["max_temp_c"],
+        } for r in rows]
 
     def _integrate_energy(self, agent_id: int, ts: float,
                           miners: list[dict]) -> None:

@@ -8,57 +8,113 @@
 <style>
   :root {
     --yellow: #F5D800;
-    --bg: #000000;
-    --panel: #141414;
-    --panel2: #1d1d1d;
-    --line: #2c2c2c;
-    --text: #ffffff;
-    --muted: #a8a8a8;
-    --ok: #4caf7d;
-    --warn: #d8a723;
-    --bad: #d9534f;
-    --orange: #d97b29;
+    --bg: #0B0B0D;
+    --sidebar: #101014;
+    --panel: #15151A;
+    --panel2: #1C1C22;
+    --line: #232329;
+    --text: #F2F2F3;
+    --muted: #9CA3AF;
+    --ok: #34D399;
+    --warn: #FBBF24;
+    --bad: #F87171;
+    --orange: #FB923C;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; background: var(--bg); color: var(--text);
-    font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
     font-size: 14px;
   }
-  header {
-    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-    padding: 14px 20px; border-bottom: 3px solid var(--yellow);
-    background: #0a0a0a;
+  .layout { display: flex; min-height: 100vh; align-items: stretch; }
+
+  /* -- sidebar ------------------------------------------------------- */
+  .sidebar {
+    width: 230px; flex: 0 0 230px; background: var(--sidebar);
+    border-right: 1px solid var(--line); padding: 20px 14px;
+    position: sticky; top: 0; height: 100vh;
+    display: flex; flex-direction: column; gap: 4px;
   }
-  .logo {
-    font-size: 26px; font-weight: 800; letter-spacing: 1px; color: var(--text);
+  .brand { display: flex; align-items: center; gap: 11px; padding: 2px 8px 18px; }
+  .brand .logo-mark { width: 38px; height: 38px; flex: 0 0 auto; }
+  .brand-name { font-size: 19px; font-weight: 800; letter-spacing: .3px; line-height: 1.15; }
+  .brand-name .bee { color: var(--yellow); }
+  .brand-name .cloud-word { color: var(--muted); font-weight: 600; }
+  .brand-sub { color: var(--muted); font-size: 11.5px; margin-top: 2px; line-height: 1.35; }
+  .nav-item {
+    display: block; width: 100%; text-align: left; background: transparent;
+    color: var(--muted); border: 0; border-radius: 8px;
+    padding: 10px 12px; font-size: 14px; font-weight: 600; cursor: pointer;
+    font-family: inherit;
   }
-  .logo .bee { color: var(--yellow); }
-  .logo .logo-mark {
-    width: 34px; height: 34px; vertical-align: middle; margin-right: 10px;
+  .nav-item:hover { color: var(--text); background: #1A1A20; }
+  .nav-item.active { color: var(--yellow); background: rgba(245, 216, 0, .10); }
+  .sidebar-foot {
+    margin-top: auto; padding: 12px 8px 2px; color: var(--muted);
+    font-size: 11.5px; line-height: 1.5; border-top: 1px solid var(--line);
   }
-  header .sub { color: var(--muted); font-size: 13px; }
-  header .spacer { flex: 1; }
-  header .meta { color: var(--muted); font-size: 12px; text-align: right; }
-  header a.logout { color: var(--yellow); font-size: 12px; }
-  select {
+
+  /* -- main column / topbar ------------------------------------------ */
+  .main-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 13px 24px; border-bottom: 1px solid var(--line);
+    background: #0E0E11; position: sticky; top: 0; z-index: 20;
+  }
+  .topbar-title { font-size: 17px; font-weight: 800; }
+  .topbar .spacer { flex: 1; }
+  .last-update { color: var(--muted); font-size: 12.5px; }
+  .site-select { color: var(--muted); font-size: 13px; }
+  select, input, textarea {
     background: var(--panel2); color: var(--text); border: 1px solid var(--line);
-    border-radius: 6px; padding: 8px 10px; font-size: 13px;
+    border-radius: 8px; padding: 8px 11px; font-size: 13px; font-family: inherit;
   }
-  main { padding: 18px 20px 30px; max-width: 1280px; margin: 0 auto; }
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  select:focus, input:focus, textarea:focus { outline: 1px solid var(--yellow); }
+  a.logout { color: var(--yellow); font-size: 13px; font-weight: 600; text-decoration: none; }
+  a.logout:hover { text-decoration: underline; }
+  main { padding: 22px 24px 34px; width: 100%; max-width: 1440px; margin: 0 auto; }
+  footer { color: var(--muted); font-size: 12px; text-align: center; padding: 0 24px 22px; }
+
+  /* -- views ---------------------------------------------------------- */
+  .view { display: none; }
+  .view.active { display: block; }
+  .view-heading { margin: 26px 0 12px; font-size: 17px; font-weight: 800; }
+  .view-heading:first-child { margin-top: 0; }
+  .view-heading .accent { color: var(--yellow); font-weight: 600; }
+  .panel-head-row { display: flex; align-items: baseline; gap: 14px; }
+  .panel-head-row .view-heading { flex: 1; }
+  .btn-link {
+    background: transparent; border: 0; color: var(--yellow); cursor: pointer;
+    font-size: 13px; font-weight: 700; font-family: inherit; padding: 0;
+  }
+  .btn-link:hover { text-decoration: underline; }
+
+  /* -- panels & cards -------------------------------------------------- */
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; box-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+  }
+  .listbox { overflow: hidden; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
   .card {
     background: var(--panel); border: 1px solid var(--line);
-    border-top: 3px solid var(--yellow); border-radius: 8px; padding: 14px 16px;
+    border-radius: 12px; box-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+    padding: 16px 18px;
   }
-  .card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
-  .card .value { font-size: 30px; font-weight: 800; margin-top: 4px; }
+  .card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .6px; }
+  .card .value { font-size: 28px; font-weight: 700; margin-top: 5px; font-variant-numeric: tabular-nums; }
   .card .value small { font-size: 14px; color: var(--muted); font-weight: 400; }
   .card.alert .value { color: var(--bad); }
-  .sites { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .chart-panel { margin-top: 16px; padding: 16px 18px 10px; }
+  .panel-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 6px; }
+  .panel-head h3 { margin: 0; font-size: 15px; font-weight: 800; }
+  .panel-head h3 .accent { color: var(--yellow); font-weight: 600; }
+  .chart-meta { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  #chart-wrap svg { width: 100%; height: auto; display: block; }
+  .sites { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 14px; }
   .site-card {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
-    padding: 14px 16px; cursor: pointer;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .35); padding: 16px 18px; cursor: pointer;
   }
   .site-card:hover { border-color: var(--yellow); }
   .site-card.selected { border-color: var(--yellow); box-shadow: 0 0 0 1px var(--yellow); }
@@ -68,61 +124,76 @@
   .site-card .stats { color: var(--muted); font-size: 13px; margin-top: 8px; line-height: 1.7; }
   .site-card .stats b { color: var(--text); }
   .site-card .stats .prob { color: var(--bad); font-weight: 700; }
-  h2 { margin: 26px 0 10px; font-size: 17px; }
-  h2 .accent { color: var(--yellow); }
-  .tablewrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
-  table { width: 100%; border-collapse: collapse; min-width: 960px; }
-  th, td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
-  th { background: var(--panel2); color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .4px; }
+
+  /* -- tables ------------------------------------------------------------ */
+  .tablewrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; min-width: 960px; font-variant-numeric: tabular-nums; }
+  th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; font-size: 13px; }
+  th {
+    background: var(--panel2); color: var(--muted); font-size: 12px;
+    text-transform: uppercase; letter-spacing: .4px;
+    position: sticky; top: 0; z-index: 1;
+  }
+  tbody tr:hover td { background: #191920; }
   tr:last-child td { border-bottom: 0; }
   .pill {
-    display: inline-block; padding: 2px 9px; border-radius: 20px;
+    display: inline-block; padding: 2px 10px; border-radius: 999px;
     font-size: 12px; font-weight: 700;
   }
-  .pill.ok { background: #123526; color: var(--ok); }
-  .pill.check { background: #3d1512; color: var(--bad); }
-  .problems { color: #f0b3ae; font-size: 12px; margin-top: 4px; line-height: 1.5; }
-  .events { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
-  .event {
-    display: flex; gap: 10px; align-items: baseline; padding: 9px 14px;
-    border-bottom: 1px solid var(--line); flex-wrap: wrap;
-  }
-  .event:last-child { border-bottom: 0; }
-  .event .time { color: var(--muted); font-size: 12px; white-space: nowrap; }
-  .event .who { font-weight: 700; white-space: nowrap; }
-  .event .site { color: var(--yellow); font-size: 12px; white-space: nowrap; }
-  .event .detail { color: #ddd; }
-  .sev { font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 4px; text-transform: uppercase; white-space: nowrap; }
-  .sev.info { background: #26313d; color: #9db8cc; }
-  .sev.warning { background: #3a2f10; color: var(--warn); }
-  .sev.major { background: #3d2410; color: var(--orange); }
-  .sev.critical { background: #3d1512; color: var(--bad); }
-  .empty { color: var(--muted); padding: 16px; text-align: center; }
-  footer { color: var(--muted); font-size: 12px; text-align: center; padding: 0 20px 22px; }
+  .pill.ok { background: #0E2C22; color: var(--ok); }
+  .pill.check { background: #33161A; color: var(--bad); }
+  .problems { color: #F3B8B2; font-size: 12px; margin-top: 4px; line-height: 1.5; }
+  tr.miner-row { cursor: pointer; }
+  tr.miner-row.selected td { background: #26210A; }
   .btn-action {
     background: var(--panel2); color: var(--yellow); border: 1px solid var(--yellow);
-    border-radius: 6px; padding: 5px 10px; font-size: 12px; font-weight: 700;
-    cursor: pointer; white-space: nowrap;
+    border-radius: 8px; padding: 5px 11px; font-size: 12px; font-weight: 700;
+    cursor: pointer; white-space: nowrap; font-family: inherit;
   }
   .btn-action:hover { background: var(--yellow); color: #000; }
   .btn-action:disabled { opacity: .45; cursor: wait; }
-  .cmd { display: flex; gap: 10px; align-items: baseline; padding: 9px 14px;
-    border-bottom: 1px solid var(--line); flex-wrap: wrap; }
-  .cmd:last-child { border-bottom: 0; }
-  .cmd .time { color: var(--muted); font-size: 12px; white-space: nowrap; }
-  .cmd .who { font-weight: 700; white-space: nowrap; }
-  .cmd .site { color: var(--yellow); font-size: 12px; white-space: nowrap; }
-  .cmd .result { color: #ddd; }
-  .cmdstat { font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 4px;
-    text-transform: uppercase; white-space: nowrap; }
-  .cmdstat.pending { background: #3a2f10; color: var(--warn); }
-  .cmdstat.sent { background: #3d2410; color: var(--orange); }
-  .cmdstat.done { background: #123526; color: var(--ok); }
-  .cmdstat.failed { background: #3d1512; color: var(--bad); }
-  .heatwrap {
-    background: var(--panel); border: 1px solid var(--line);
-    border-radius: 8px; padding: 12px 14px;
+
+  /* -- list rows (events / commands / repairs / pool) --------------------- */
+  .event, .cmd, .repair, .poolrow, .cfgrow {
+    display: flex; gap: 10px; align-items: baseline; padding: 10px 16px;
+    border-bottom: 1px solid var(--line); flex-wrap: wrap;
   }
+  .event:last-child, .cmd:last-child, .repair:last-child,
+  .poolrow:last-child, .cfgrow:last-child { border-bottom: 0; }
+  .event .time, .cmd .time, .repair .time { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .event .who, .cmd .who, .repair .who { font-weight: 700; white-space: nowrap; }
+  .event .site, .cmd .site, .repair .site, .poolrow .site, .cfgrow .site {
+    color: var(--yellow); font-size: 12px; white-space: nowrap;
+  }
+  .poolrow .site, .cfgrow .site { font-weight: 800; font-size: 13px; }
+  .event .detail, .cmd .result, .repair .detail { color: #D8D8DC; }
+  .poolrow .num { font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .poolrow .num small { color: var(--muted); font-weight: 400; }
+  .poolrow .when { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .cfgrow { font-size: 13px; color: #D8D8DC; }
+  .cfgrow .cfg-url { word-break: break-all; }
+  .sev, .kind, .cmdstat, .gap {
+    font-size: 11px; font-weight: 800; padding: 2px 9px; border-radius: 999px;
+    text-transform: uppercase; white-space: nowrap;
+  }
+  .sev.info { background: #1D2735; color: #9DB8CC; }
+  .sev.warning { background: #33290E; color: var(--warn); }
+  .sev.major { background: #33200E; color: var(--orange); }
+  .sev.critical { background: #33161A; color: var(--bad); }
+  .cmdstat.pending { background: #33290E; color: var(--warn); }
+  .cmdstat.sent { background: #33200E; color: var(--orange); }
+  .cmdstat.done { background: #0E2C22; color: var(--ok); }
+  .cmdstat.failed { background: #33161A; color: var(--bad); }
+  .kind.auto { background: #1D2735; color: #9DB8CC; }
+  .kind.manual { background: #33290E; color: var(--warn); }
+  .gap { text-transform: none; font-size: 12px; }
+  .gap.fine { background: #0E2C22; color: var(--ok); }
+  .gap.warn { background: #33290E; color: var(--warn); }
+  .gap.bad { background: #33161A; color: var(--bad); }
+  .empty { color: var(--muted); padding: 18px 16px; text-align: center; }
+
+  /* -- heat map ------------------------------------------------------------ */
+  .heatwrap { padding: 14px 16px; }
   .heat-site { color: var(--muted); font-size: 13px; font-weight: 700; margin: 4px 0 8px; }
   .heat-group { margin-bottom: 14px; }
   .heat-group:last-child { margin-bottom: 0; }
@@ -135,59 +206,72 @@
   .tile .tt { font-size: 15px; font-weight: 700; }
   .tile .hh { font-size: 11px; opacity: .85; white-space: nowrap; }
   .tile.problem { border-color: var(--bad); }
-  .tile.offline { background: #232323; border: 2px dashed #4a4a4a; color: var(--muted); }
-  tr.miner-row { cursor: pointer; }
-  tr.miner-row.selected td { background: #26210a; }
+  .tile.offline { background: #1C1C22; border: 2px dashed #3F3F46; color: var(--muted); }
+
+  /* -- repairs -------------------------------------------------------------- */
   .repairs-head {
-    padding: 11px 14px; font-weight: 800; background: var(--panel2);
+    padding: 12px 16px; font-weight: 800; background: var(--panel2);
     border-bottom: 1px solid var(--line);
   }
-  .repair {
-    display: flex; gap: 10px; align-items: baseline; padding: 9px 14px;
-    border-bottom: 1px solid var(--line); flex-wrap: wrap;
-  }
-  .repair:last-child { border-bottom: 0; }
-  .repair .time { color: var(--muted); font-size: 12px; white-space: nowrap; }
-  .repair .who { font-weight: 700; white-space: nowrap; }
-  .repair .site { color: var(--yellow); font-size: 12px; white-space: nowrap; }
-  .repair .detail { color: #ddd; }
-  .kind { font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 4px;
-    text-transform: uppercase; white-space: nowrap; }
-  .kind.auto { background: #26313d; color: #9db8cc; }
-  .kind.manual { background: #3a2f10; color: var(--warn); }
   .repair-form {
-    padding: 12px 14px; border-top: 1px solid var(--line);
+    padding: 14px 16px; border-top: 1px solid var(--line);
     display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
   }
   .repair-form[hidden] { display: none; }
   .repair-form .rf-title { width: 100%; color: var(--muted); font-size: 13px; }
-  .repair-form input {
-    background: var(--panel2); color: var(--text); border: 1px solid var(--line);
-    border-radius: 6px; padding: 7px 9px; font-size: 13px;
-  }
   .rf-msg { color: var(--ok); font-size: 12px; }
-  .poolrow {
-    display: flex; gap: 14px; align-items: baseline; padding: 10px 14px;
-    border-bottom: 1px solid var(--line); flex-wrap: wrap;
-  }
-  .poolrow:last-child { border-bottom: 0; }
-  .poolrow .site { color: var(--yellow); font-weight: 800; white-space: nowrap; }
-  .poolrow .num { font-weight: 700; white-space: nowrap; }
-  .poolrow .num small { color: var(--muted); font-weight: 400; }
-  .poolrow .when { color: var(--muted); font-size: 12px; white-space: nowrap; }
-  .gap { font-size: 12px; font-weight: 800; padding: 2px 9px; border-radius: 4px; white-space: nowrap; }
-  .gap.fine { background: #123526; color: var(--ok); }
-  .gap.warn { background: #3a2f10; color: var(--warn); }
-  .gap.bad { background: #3d1512; color: var(--bad); }
-  .energy-sum { padding: 12px 14px; border-bottom: 1px solid var(--line); font-size: 15px; }
+
+  /* -- energy ------------------------------------------------------------------ */
+  .energy-sum { padding: 14px 16px; border-bottom: 1px solid var(--line); font-size: 15px; }
   .energy-sum b { font-size: 20px; }
   table.energy { min-width: 0; }
-  table.energy td, table.energy th { padding: 7px 14px; }
+  table.energy td, table.energy th { padding: 8px 16px; position: static; }
+
+  /* -- settings forms ----------------------------------------------------------- */
+  .form-panel { padding: 18px 20px; margin-bottom: 18px; }
+  .form-panel h3 { margin: 0 0 6px; font-size: 15px; font-weight: 800; }
+  .form-panel .sub-head { margin: 20px 0 4px; }
+  .hint { color: var(--muted); font-size: 13px; line-height: 1.55; margin: 6px 0 14px; }
+  .hint code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; }
+  .form-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 12px 14px; align-items: end;
+  }
+  .form-grid .f { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+  .form-grid .f-wide { grid-column: 1 / -1; }
+  .form-grid textarea { resize: vertical; }
+  .form-actions { display: flex; align-items: center; gap: 12px; }
+  .btn-primary {
+    background: var(--yellow); color: #000; border: 0; border-radius: 8px;
+    padding: 10px 18px; font-weight: 700; cursor: pointer; font-size: 13.5px;
+    font-family: inherit;
+  }
+  .btn-primary:hover { filter: brightness(1.08); }
+  .btn-primary:disabled { opacity: .5; cursor: wait; }
+  .form-msg { color: var(--ok); font-size: 13px; }
+  .form-msg.err { color: var(--bad); }
+
+  /* -- small screens: sidebar becomes a top bar --------------------------------- */
+  @media (max-width: 900px) {
+    .layout { flex-direction: column; }
+    .sidebar {
+      width: 100%; flex: none; height: auto; position: static;
+      flex-direction: row; flex-wrap: wrap; align-items: center;
+      border-right: 0; border-bottom: 1px solid var(--line); padding: 12px 14px;
+    }
+    .brand { padding: 0 10px 0 0; }
+    .brand-sub { display: none; }
+    .nav-item { width: auto; padding: 8px 11px; }
+    .sidebar-foot { display: none; }
+    main { padding: 18px 16px 30px; }
+    .topbar { padding: 12px 16px; }
+  }
 </style>
 </head>
 <body>
-<header>
-  <div class="logo"><svg class="logo-mark" viewBox="-373.37 -15.87 198.58 198.58" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><g>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand"><svg class="logo-mark" viewBox="-373.37 -15.87 198.58 198.58" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><g>
 	<circle cx="-274.08" cy="83.421" r="99.29"/>
 	<circle fill="#F4D600" cx="-274.08" cy="83.421" r="87.763"/>
 	<path d="M-207.439,26.24l-86.987,82.395l-1.26,1.194l-64.403-44.017c-1.149,5.665-1.753,11.528-1.753,17.532
@@ -196,95 +280,234 @@
 		c-3.945,4.783-7.391,9.992-10.264,15.546l57.651,39.402L-293.376,83.199z"/>
 	<path d="M-293.5,39.735l43.177-40.898c-6.461-1.813-13.225-2.9-20.197-3.179l-23.907,22.645l-0.724,0.686l-19.627-13.415
 		c-5.2,2.727-10.092,5.958-14.612,9.632l34.963,23.896L-293.5,39.735z"/>
-</g></svg><span class="bee">Bee</span>Sky <span style="color:var(--yellow)">Cloud</span></div>
-  <div class="sub">Quản lý nhiều trại / xưởng từ xa</div>
-  <div class="spacer"></div>
-  <div class="meta">
-    <div>Agent tại trại tự đẩy số liệu lên · Lệnh từ xa đi xuống qua agent của trại.</div>
-    <div><a class="logout" href="/logout">Đăng xuất</a></div>
-  </div>
-  <label>Trại: <select id="site-filter"><option value="">Tất cả các trại</option></select></label>
-</header>
+</g></svg><div class="brand-text"><div class="brand-name"><span class="bee">Bee</span>Sky <span class="cloud-word">Cloud</span></div><div class="brand-sub">Quản lý nhiều trại / xưởng từ xa</div></div></div>
+    <button class="nav-item active" type="button" data-view="overview">Tổng quan</button>
+    <button class="nav-item" type="button" data-view="miners">Máy đào</button>
+    <button class="nav-item" type="button" data-view="heatmap">Bản đồ nhiệt</button>
+    <button class="nav-item" type="button" data-view="energy">Điện năng</button>
+    <button class="nav-item" type="button" data-view="repairs">Lịch sử sửa</button>
+    <button class="nav-item" type="button" data-view="events">Sự kiện</button>
+    <button class="nav-item" type="button" data-view="settings">Cài đặt</button>
+    <div class="sidebar-foot">Agent tại trại tự đẩy số liệu lên · Lệnh từ xa đi xuống qua agent của trại.<br>BeeSky Cloud v0.12</div>
+  </aside>
 
-<main>
-  <section class="cards">
-    <div class="card"><div class="label">Tổng số trại</div><div class="value" id="card-sites">–</div></div>
-    <div class="card"><div class="label">Tổng số máy</div><div class="value" id="card-total">–</div></div>
-    <div class="card"><div class="label">Tổng hashrate</div><div class="value" id="card-hashrate">–</div></div>
-    <div class="card" id="card-problems-wrap"><div class="label">Máy có vấn đề</div><div class="value" id="card-problems">–</div></div>
-  </section>
-
-  <h2>Tổng quan các trại <span class="accent">· Sites</span></h2>
-  <div class="sites" id="sites-grid">
-    <div class="empty">Đang tải…</div>
-  </div>
-
-  <h2>So sánh với pool <span class="accent">· Farm vs pool</span></h2>
-  <div class="events" id="pool-panel">
-    <div class="empty">Đang tải…</div>
-  </div>
-
-  <h2>Danh sách máy <span class="accent">· Miners</span></h2>
-  <div class="tablewrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Trại</th><th>IP</th><th>Model</th><th>Nguồn</th><th>Hashrate</th>
-          <th>Chip sống/tổng</th><th>Nhiệt độ max</th><th>Quạt (RPM)</th><th>Trạng thái</th>
-          <th>Thao tác</th>
-        </tr>
-      </thead>
-      <tbody id="miners-body">
-        <tr><td colspan="10" class="empty">Đang tải…</td></tr>
-      </tbody>
-    </table>
-  </div>
-
-  <h2>Bản đồ nhiệt <span class="accent">· Heat map</span></h2>
-  <div class="heatwrap" id="heatmap">
-    <div class="empty">Đang tải…</div>
-  </div>
-
-  <h2>Điện năng <span class="accent">· Energy</span></h2>
-  <div class="events" id="energy-panel">
-    <div class="empty">Đang tải…</div>
-  </div>
-
-  <h2>Sự kiện gần đây <span class="accent">· Events</span></h2>
-  <div class="events" id="events-list">
-    <div class="empty">Đang tải…</div>
-  </div>
-
-  <h2>Lệnh gần đây <span class="accent">· Remote actions</span></h2>
-  <div class="events" id="commands-list">
-    <div class="empty">Đang tải…</div>
-  </div>
-
-  <h2>Lịch sử sửa chữa <span class="accent">· Repair history</span></h2>
-  <div class="events">
-    <div class="repairs-head" id="repairs-title">Sửa chữa gần đây</div>
-    <div id="repairs-list">
-      <div class="empty">Đang tải…</div>
+  <div class="main-col">
+    <div class="topbar">
+      <div class="topbar-title" id="view-title">Tổng quan</div>
+      <div class="spacer"></div>
+      <span class="last-update">Cập nhật lần cuối: <span id="last-update">–</span></span>
+      <label class="site-select">Trại: <select id="site-filter"><option value="">Tất cả các trại</option></select></label>
+      <a class="logout" href="/logout">Đăng xuất</a>
     </div>
-    <form id="repair-form" class="repair-form" hidden>
-      <div class="rf-title">Thêm phiếu thủ công cho máy <b id="rf-miner"></b></div>
-      <input id="rf-title" type="text" placeholder="Tiêu đề (vd: Thay board 2)" required>
-      <input id="rf-detail" type="text" placeholder="Chi tiết (không bắt buộc)">
-      <input id="rf-cost" type="number" min="0" step="1000" placeholder="Chi phí (VNĐ)">
-      <input id="rf-tech" type="text" placeholder="Kỹ thuật viên">
-      <button type="submit" class="btn-action">Lưu phiếu</button>
-      <span class="rf-msg" id="rf-msg"></span>
-    </form>
-  </div>
-</main>
 
-<footer>BeeSky Cloud v0.9 — dữ liệu tự làm mới mỗi 10 giây · Agent tại trại quét &amp; đẩy lên, lệnh từ xa đi qua agent</footer>
+    <main>
+      <!-- TỔNG QUAN ---------------------------------------------------- -->
+      <section class="view active" id="view-overview">
+        <div class="cards">
+          <div class="card"><div class="label">Tổng số trại</div><div class="value" id="card-sites">–</div></div>
+          <div class="card"><div class="label">Tổng số máy</div><div class="value" id="card-total">–</div></div>
+          <div class="card"><div class="label">Tổng hashrate</div><div class="value" id="card-hashrate">–</div></div>
+          <div class="card" id="card-problems-wrap"><div class="label">Máy có vấn đề</div><div class="value" id="card-problems">–</div></div>
+        </div>
+
+        <div class="panel chart-panel">
+          <div class="panel-head">
+            <h3>Hashrate toàn trại <span class="accent">· Farm hashrate, 24 giờ</span></h3>
+            <div class="chart-meta" id="chart-meta"></div>
+          </div>
+          <div id="chart-wrap">
+            <div class="empty">Đang tải…</div>
+          </div>
+        </div>
+
+        <h2 class="view-heading">Tổng quan các trại <span class="accent">· Sites</span></h2>
+        <div class="sites" id="sites-grid">
+          <div class="empty">Đang tải…</div>
+        </div>
+
+        <h2 class="view-heading">So sánh với pool <span class="accent">· Farm vs pool</span></h2>
+        <div class="panel listbox" id="pool-panel">
+          <div class="empty">Đang tải…</div>
+        </div>
+
+        <div class="panel-head-row">
+          <h2 class="view-heading">Sự kiện gần đây <span class="accent">· Events</span></h2>
+          <button class="btn-link" id="events-all-btn" type="button">Xem tất cả</button>
+        </div>
+        <div class="panel listbox" id="events-recent">
+          <div class="empty">Đang tải…</div>
+        </div>
+      </section>
+
+      <!-- MÁY ĐÀO ------------------------------------------------------- -->
+      <section class="view" id="view-miners">
+        <h2 class="view-heading">Danh sách máy <span class="accent">· Miners</span></h2>
+        <div class="tablewrap panel">
+          <table>
+            <thead>
+              <tr>
+                <th>Trại</th><th>IP</th><th>Model</th><th>Nguồn</th><th>Hashrate</th>
+                <th>Chip sống/tổng</th><th>Nhiệt độ max</th><th>Quạt (RPM)</th><th>Trạng thái</th>
+                <th>Thao tác</th>
+              </tr>
+            </thead>
+            <tbody id="miners-body">
+              <tr><td colspan="10" class="empty">Đang tải…</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 class="view-heading">Lệnh gần đây <span class="accent">· Remote actions</span></h2>
+        <div class="panel listbox" id="commands-list">
+          <div class="empty">Đang tải…</div>
+        </div>
+      </section>
+
+      <!-- BẢN ĐỒ NHIỆT -------------------------------------------------- -->
+      <section class="view" id="view-heatmap">
+        <h2 class="view-heading">Bản đồ nhiệt <span class="accent">· Heat map</span></h2>
+        <div class="heatwrap panel" id="heatmap">
+          <div class="empty">Đang tải…</div>
+        </div>
+      </section>
+
+      <!-- ĐIỆN NĂNG ----------------------------------------------------- -->
+      <section class="view" id="view-energy">
+        <h2 class="view-heading">Điện năng <span class="accent">· Energy</span></h2>
+        <div class="panel listbox" id="energy-panel">
+          <div class="empty">Đang tải…</div>
+        </div>
+      </section>
+
+      <!-- LỊCH SỬ SỬA CHỮA ---------------------------------------------- -->
+      <section class="view" id="view-repairs">
+        <h2 class="view-heading">Lịch sử sửa chữa <span class="accent">· Repair history</span></h2>
+        <div class="panel listbox">
+          <div class="repairs-head" id="repairs-title">Sửa chữa gần đây</div>
+          <div id="repairs-list">
+            <div class="empty">Đang tải…</div>
+          </div>
+          <form id="repair-form" class="repair-form" hidden>
+            <div class="rf-title">Thêm phiếu thủ công cho máy <b id="rf-miner"></b></div>
+            <input id="rf-title" type="text" placeholder="Tiêu đề (vd: Thay board 2)" required>
+            <input id="rf-detail" type="text" placeholder="Chi tiết (không bắt buộc)">
+            <input id="rf-cost" type="number" min="0" step="1000" placeholder="Chi phí (VNĐ)">
+            <input id="rf-tech" type="text" placeholder="Kỹ thuật viên">
+            <button type="submit" class="btn-action">Lưu phiếu</button>
+            <span class="rf-msg" id="rf-msg"></span>
+          </form>
+        </div>
+        <p class="hint">Mở mục Máy đào rồi bấm <b>Lịch sử</b> ở một máy để xem riêng lịch sử của máy đó và thêm phiếu thủ công.</p>
+      </section>
+
+      <!-- SỰ KIỆN -------------------------------------------------------- -->
+      <section class="view" id="view-events">
+        <h2 class="view-heading">Sự kiện <span class="accent">· Events</span></h2>
+        <div class="panel listbox" id="events-list">
+          <div class="empty">Đang tải…</div>
+        </div>
+      </section>
+
+      <!-- CÀI ĐẶT -------------------------------------------------------- -->
+      <section class="view" id="view-settings">
+        <h2 class="view-heading">Cài đặt <span class="accent">· Settings</span></h2>
+
+        <div class="panel form-panel">
+          <h3>So sánh pool — cấu hình theo trại</h3>
+          <p class="hint">Khai báo API của pool để cloud đối chiếu hashrate của trại với số pool ghi nhận
+            (lệch kéo dài sẽ sinh sự kiện POOL_GAP). Adapter <b>generic</b> đọc một URL JSON bất kỳ,
+            lấy hashrate theo đường dẫn chấm — vd URL <code>https://pool.example.com/api/stats</code>,
+            đường dẫn <code>data.hashrate</code>. Preset <b>emcd</b> tự điền URL / đường dẫn mẫu của EMCD
+            khi để trống; hãy đối chiếu tài liệu API của EMCD rồi sửa lại cho đúng tài khoản của bạn.</p>
+          <form id="pool-form" class="form-grid">
+            <label class="f">Trại
+              <input id="pc-site" type="text" placeholder="Tên trại (vd: Xưởng 1)" required>
+            </label>
+            <label class="f">Adapter
+              <select id="pc-adapter">
+                <option value="generic">generic — JSON tuỳ ý</option>
+                <option value="emcd">emcd — preset EMCD</option>
+              </select>
+            </label>
+            <label class="f">URL API của pool
+              <input id="pc-url" type="text" placeholder="https://pool.example.com/api/stats">
+            </label>
+            <label class="f">Đường dẫn JSON (JSON path)
+              <input id="pc-path" type="text" placeholder="data.hashrate">
+            </label>
+            <label class="f">Đơn vị hashrate
+              <select id="pc-unit">
+                <option value="TH/s">TH/s</option>
+                <option value="GH/s">GH/s</option>
+                <option value="PH/s">PH/s</option>
+              </select>
+            </label>
+            <label class="f">Lọc worker (tuỳ chọn)
+              <input id="pc-worker" type="text" placeholder="Để trống = mọi worker">
+            </label>
+            <label class="f">Ngưỡng lệch báo động (%)
+              <input id="pc-gap" type="number" min="0" step="0.5" value="10">
+            </label>
+            <label class="f f-wide">Headers (JSON, tuỳ chọn)
+              <textarea id="pc-headers" rows="3" placeholder='{"Authorization": "Bearer …"}'></textarea>
+            </label>
+            <p class="hint f-wide">Giá trị headers là bí mật (API key của pool): cloud chỉ lưu để gọi pool,
+              <b>không bao giờ hiển thị lại</b> — phần “Cấu hình hiện tại” bên dưới chỉ liệt kê <i>tên</i> header
+              đã đặt. Để trống ô này khi lưu = giữ nguyên headers đã lưu trước đó; muốn thay thì nhập lại JSON mới.</p>
+            <div class="form-actions f-wide">
+              <button type="submit" class="btn-primary">Lưu cấu hình pool</button>
+              <span class="form-msg" id="pc-msg"></span>
+            </div>
+          </form>
+          <h3 class="sub-head">Cấu hình hiện tại</h3>
+          <div id="pool-config-list">
+            <div class="empty">Đang tải…</div>
+          </div>
+        </div>
+
+        <div class="panel form-panel">
+          <h3>Giá điện</h3>
+          <p class="hint">Dùng để ước tính chi phí trong mục Điện năng.</p>
+          <form id="price-form" class="form-grid">
+            <label class="f">Giá điện (VNĐ / kWh)
+              <input id="st-price" type="number" min="0" step="10" required>
+            </label>
+            <div class="form-actions">
+              <button type="submit" class="btn-primary">Lưu giá điện</button>
+              <span class="form-msg" id="st-msg"></span>
+            </div>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <footer>BeeSky Cloud v0.12 — dữ liệu tự làm mới mỗi 10 giây · Agent tại trại quét &amp; đẩy lên, lệnh từ xa đi qua agent</footer>
+  </div>
+</div>
 
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
 let selectedSite = "";
-let selectedMiner = null; // {site, ip} — drives the repair-history panel
+let selectedMiner = null; // {site, ip} — drives the repair-history view
+
+// -- view switching -------------------------------------------------------
+const VIEW_TITLES = {
+  overview: "Tổng quan", miners: "Máy đào", heatmap: "Bản đồ nhiệt",
+  energy: "Điện năng", repairs: "Lịch sử sửa chữa", events: "Sự kiện",
+  settings: "Cài đặt"
+};
+function switchView(name) {
+  document.querySelectorAll(".nav-item").forEach((b) =>
+    b.classList.toggle("active", b.getAttribute("data-view") === name));
+  document.querySelectorAll(".view").forEach((v) =>
+    v.classList.toggle("active", v.id === "view-" + name));
+  $("view-title").textContent = VIEW_TITLES[name] || name;
+  window.scrollTo(0, 0);
+}
+document.querySelectorAll(".nav-item").forEach((b) =>
+  b.addEventListener("click", () => switchView(b.getAttribute("data-view"))));
+$("events-all-btn").addEventListener("click", () => switchView("events"));
 
 // -- heat map (v0.8) ------------------------------------------------------
 // Records already carry max_temp_c, so tiles render purely client-side
@@ -366,6 +589,7 @@ async function refreshSites() {
     const r = await fetch("/api/sites");
     if (r.status === 401) { location.href = "/login"; return; }
     const data = await r.json();
+    if (data.generated_at) $("last-update").textContent = data.generated_at;
     const sites = data.sites || [];
     let totalMiners = 0, totalThs = 0, totalProblems = 0;
     sites.forEach((s) => {
@@ -410,6 +634,7 @@ async function refreshSites() {
       card.addEventListener("click", () => {
         selectedSite = card.getAttribute("data-site");
         $("site-filter").value = selectedSite;
+        $("pc-site").value = selectedSite;
         clearMinerSelection();
         refreshAll();
       });
@@ -454,21 +679,24 @@ async function refreshMiners() {
       ? rows.join("")
       : '<tr><td colspan="10" class="empty">Chưa có số liệu — agent tại trại chưa đẩy lên hoặc trại được chọn chưa có máy.</td></tr>';
     document.querySelectorAll(".btn-reboot").forEach((btn) => {
-      btn.addEventListener("click", () => sendReboot(btn));
+      btn.addEventListener("click", (ev) => { ev.stopPropagation(); sendReboot(btn); });
     });
     document.querySelectorAll(".btn-history").forEach((btn) => {
-      btn.addEventListener("click", () =>
-        selectMiner(btn.getAttribute("data-site"), btn.getAttribute("data-ip"), true));
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        selectMiner(btn.getAttribute("data-site"), btn.getAttribute("data-ip"));
+        switchView("repairs");
+      });
     });
     document.querySelectorAll("tr.miner-row").forEach((row) => {
       row.addEventListener("click", () =>
-        selectMiner(row.getAttribute("data-site"), row.getAttribute("data-ip"), false));
+        selectMiner(row.getAttribute("data-site"), row.getAttribute("data-ip")));
     });
     renderHeatmap(miners);
   } catch (e) { /* giữ nguyên dữ liệu cũ khi poll lỗi */ }
 }
 
-function selectMiner(site, ip, scroll) {
+function selectMiner(site, ip) {
   selectedMiner = { site: site || "", ip: ip };
   document.querySelectorAll("tr.miner-row").forEach((row) => {
     row.classList.toggle("selected",
@@ -479,10 +707,6 @@ function selectMiner(site, ip, scroll) {
   $("rf-miner").textContent = ip + (site ? " (" + site + ")" : "");
   $("rf-msg").textContent = "";
   refreshRepairs();
-  if (scroll) {
-    document.getElementById("repairs-title")
-      .scrollIntoView({ behavior: "smooth", block: "start" });
-  }
 }
 
 async function sendReboot(btn) {
@@ -517,21 +741,26 @@ const TYPE_LABEL = {
   POOL_GAP: "Lệch pool"
 };
 
+function eventHtml(ev) {
+  return '<div class="event">' +
+    '<span class="time">' + esc(ev.time || "") + "</span>" +
+    '<span class="sev ' + esc(ev.severity) + '">' + esc(SEV_LABEL[ev.severity] || ev.severity) + "</span>" +
+    '<span class="site">' + esc(ev.site || "") + "</span>" +
+    '<span class="who">' + esc(ev.ip) + " · " + esc(TYPE_LABEL[ev.type] || ev.type) + "</span>" +
+    '<span class="detail">' + esc(ev.detail) + "</span>" +
+    "</div>";
+}
+
 async function refreshEvents() {
   try {
-    const sep = selectedSite ? "&" : "?";
     const r = await fetch("/api/events?n=50" + (selectedSite ? "&site=" + encodeURIComponent(selectedSite) : ""));
     const data = await r.json();
     const events = data.events || [];
     $("events-list").innerHTML = events.length
-      ? events.map((ev) =>
-          '<div class="event">' +
-          '<span class="time">' + esc(ev.time || "") + "</span>" +
-          '<span class="sev ' + esc(ev.severity) + '">' + esc(SEV_LABEL[ev.severity] || ev.severity) + "</span>" +
-          '<span class="site">' + esc(ev.site || "") + "</span>" +
-          '<span class="who">' + esc(ev.ip) + " · " + esc(TYPE_LABEL[ev.type] || ev.type) + "</span>" +
-          '<span class="detail">' + esc(ev.detail) + "</span>" +
-          "</div>").join("")
+      ? events.map(eventHtml).join("")
+      : '<div class="empty">Chưa có sự kiện nào.</div>';
+    $("events-recent").innerHTML = events.length
+      ? events.slice(0, 8).map(eventHtml).join("")
       : '<div class="empty">Chưa có sự kiện nào.</div>';
   } catch (e) { /* giữ nguyên dữ liệu cũ khi poll lỗi */ }
 }
@@ -554,7 +783,7 @@ async function refreshCommands() {
           '<span class="who">' + esc(c.ip) + " · " + esc(CMD_TYPE_LABEL[c.type] || c.type) + "</span>" +
           (c.result ? '<span class="result">' + esc(c.result) + "</span>" : "") +
           "</div>").join("")
-      : '<div class="empty">Chưa có lệnh nào — bấm “Khởi động lại” ở bảng máy để gửi lệnh đầu tiên.</div>';
+      : '<div class="empty">Chưa có lệnh nào — bấm “Khởi động lại” ở mục Máy đào để gửi lệnh đầu tiên.</div>';
   } catch (e) { /* giữ nguyên dữ liệu cũ khi poll lỗi */ }
 }
 
@@ -666,7 +895,7 @@ async function refreshPool() {
       const cfg = await (await fetch("/api/pool-config?site=" + encodeURIComponent(selectedSite))).json();
       if (!(cfg.configs || []).length) {
         panel.innerHTML = '<div class="empty">Chưa cấu hình pool cho trại này — ' +
-          "thêm cấu hình qua API /api/pool-config để so sánh hashrate trại với pool.</div>";
+          "mở mục Cài đặt để khai báo API của pool cho trại.</div>";
         return;
       }
       panel.innerHTML = poolRowHtml(selectedSite, data.latest);
@@ -674,7 +903,7 @@ async function refreshPool() {
       const pools = data.pools || [];
       panel.innerHTML = pools.length
         ? pools.map((p) => poolRowHtml(p.site, p.latest)).join("")
-        : '<div class="empty">Chưa có trại nào cấu hình pool — thêm qua API /api/pool-config.</div>';
+        : '<div class="empty">Chưa có trại nào cấu hình pool — mở mục Cài đặt để khai báo API của pool.</div>';
     }
   } catch (e) { /* giữ nguyên dữ liệu cũ khi poll lỗi */ }
 }
@@ -714,8 +943,193 @@ async function refreshEnergy() {
   } catch (e) { /* giữ nguyên dữ liệu cũ khi poll lỗi */ }
 }
 
+// -- farm hashrate history chart (v0.12) ---------------------------------
+function fmtClock(ts) {
+  const d = new Date(ts * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  return p(d.getHours()) + ":" + p(d.getMinutes());
+}
+function drawChart(points) {
+  const wrap = $("chart-wrap"), meta = $("chart-meta");
+  let series;
+  if (selectedSite) {
+    series = points.map((p) => ({ ts: p.ts, ths: p.total_ths }));
+  } else {
+    // No site filter: the endpoint returns every site's rows — sum the
+    // per-minute buckets so the chart shows the whole fleet.
+    const buckets = new Map();
+    points.forEach((p) => {
+      const key = Math.floor(p.ts / 60);
+      const cur = buckets.get(key) || { ts: p.ts, ths: 0 };
+      cur.ths += p.total_ths;
+      cur.ts = Math.max(cur.ts, p.ts);
+      buckets.set(key, cur);
+    });
+    series = Array.from(buckets.values()).sort((a, b) => a.ts - b.ts);
+  }
+  if (series.length < 2) {
+    wrap.innerHTML = '<div class="empty">Chưa đủ dữ liệu — cần agent chạy thêm vài phút để vẽ biểu đồ hashrate.</div>';
+    meta.textContent = series.length
+      ? "Hiện tại: " + series[series.length - 1].ths.toFixed(2) + " TH/s"
+      : "";
+    return;
+  }
+  const W = 720, H = 200, PADL = 6, PADR = 6, PADT = 12, PADB = 6;
+  const t0 = series[0].ts, t1 = series[series.length - 1].ts;
+  let rawMn = Infinity, rawMx = -Infinity;
+  series.forEach((s) => {
+    rawMn = Math.min(rawMn, s.ths); rawMx = Math.max(rawMx, s.ths);
+  });
+  let mn = rawMn, mx = rawMx;
+  if (mx - mn < 1) { mx += 0.5; mn -= 0.5; }
+  const X = (ts) => PADL + (ts - t0) / Math.max(1, t1 - t0) * (W - PADL - PADR);
+  const Y = (v) => PADT + (mx - v) / (mx - mn) * (H - PADT - PADB);
+  const line = series.map((s, i) =>
+    (i ? "L" : "M") + X(s.ts).toFixed(1) + "," + Y(s.ths).toFixed(1)).join(" ");
+  const area = line + " L" + X(t1).toFixed(1) + "," + (H - PADB) +
+    " L" + X(t0).toFixed(1) + "," + (H - PADB) + " Z";
+  const last = series[series.length - 1];
+  wrap.innerHTML = '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" role="img" aria-label="Biểu đồ hashrate 24 giờ">' +
+    '<path d="' + area + '" fill="#F5D800" fill-opacity="0.12"/>' +
+    '<path d="' + line + '" fill="none" stroke="#F5D800" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>';
+  meta.textContent = "Thấp nhất " + rawMn.toFixed(2) + " · Cao nhất " + rawMx.toFixed(2) +
+    " · Hiện tại " + last.ths.toFixed(2) + " TH/s · " +
+    fmtClock(t0) + " → " + fmtClock(t1);
+}
+async function refreshHistory() {
+  try {
+    const r = await fetch("/api/history?hours=24" + (selectedSite ? "&site=" + encodeURIComponent(selectedSite) : ""));
+    if (r.status === 401) { location.href = "/login"; return; }
+    const data = await r.json();
+    drawChart(data.points || []);
+  } catch (e) { /* giữ nguyên biểu đồ cũ khi poll lỗi */ }
+}
+
+// -- settings (v0.12): pool configs + electricity price --------------------
+let priceLoaded = false;
+function cfgHtml(c) {
+  const headers = c.headers_set
+    ? "đã đặt: " + esc((c.header_names || []).join(", ") || "—")
+    : "chưa đặt";
+  return '<div class="cfgrow">' +
+    '<span class="site">' + esc(c.site) + "</span>" +
+    "<span>" + esc(c.adapter) + "</span>" +
+    '<span class="cfg-url">' + esc(c.url || "—") + "</span>" +
+    "<span>path: " + esc(c.json_path || "—") + "</span>" +
+    "<span>" + esc(c.unit || "") + "</span>" +
+    (c.worker_filter ? "<span>worker: " + esc(c.worker_filter) + "</span>" : "") +
+    "<span>ngưỡng lệch: " + c.notify_gap_pct + "%</span>" +
+    "<span>Headers " + headers + "</span>" +
+    "</div>";
+}
+async function refreshPoolConfigs() {
+  try {
+    const r = await fetch("/api/pool-config");
+    if (r.status === 401) { location.href = "/login"; return; }
+    const data = await r.json();
+    const configs = data.configs || [];
+    $("pool-config-list").innerHTML = configs.length
+      ? configs.map(cfgHtml).join("")
+      : '<div class="empty">Chưa có cấu hình pool nào — điền biểu mẫu phía trên để thêm.</div>';
+    if (!priceLoaded) {
+      const s = await (await fetch("/api/settings")).json();
+      if (s && s.electricity_price_vnd_kwh !== undefined) {
+        $("st-price").value = s.electricity_price_vnd_kwh;
+        priceLoaded = true;
+      }
+    }
+  } catch (e) { /* giữ nguyên khi poll lỗi */ }
+}
+
+$("pool-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const msg = $("pc-msg");
+  msg.classList.remove("err");
+  const site = $("pc-site").value.trim();
+  if (!site) { msg.textContent = "Chưa nhập tên trại."; msg.classList.add("err"); return; }
+  let gap = parseFloat($("pc-gap").value);
+  if (isNaN(gap) || gap < 0) gap = 10;
+  const payload = {
+    site: site,
+    adapter: $("pc-adapter").value,
+    url: $("pc-url").value.trim(),
+    json_path: $("pc-path").value.trim(),
+    unit: $("pc-unit").value,
+    worker_filter: $("pc-worker").value.trim() || null,
+    notify_gap_pct: gap
+  };
+  const headersRaw = $("pc-headers").value.trim();
+  if (headersRaw) {
+    let parsed;
+    try { parsed = JSON.parse(headersRaw); }
+    catch (e) {
+      msg.textContent = "Headers chưa phải JSON hợp lệ — chưa lưu gì.";
+      msg.classList.add("err");
+      return;
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      msg.textContent = "Headers phải là một đối tượng JSON — chưa lưu gì.";
+      msg.classList.add("err");
+      return;
+    }
+    payload.headers = parsed;
+  }
+  try {
+    const r = await fetch("/api/pool-config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (r.status === 401) { location.href = "/login"; return; }
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      msg.textContent = "Lỗi: " + (err.error || ("HTTP " + r.status));
+      msg.classList.add("err");
+      return;
+    }
+    $("pc-headers").value = ""; // secrets are never shown back — clear the box
+    msg.textContent = "Đã lưu cấu hình pool cho trại " + site + ".";
+    refreshPoolConfigs();
+    refreshPool();
+  } catch (e) {
+    msg.textContent = "Lỗi: " + e;
+    msg.classList.add("err");
+  }
+});
+
+$("price-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const msg = $("st-msg");
+  msg.classList.remove("err");
+  const price = parseFloat($("st-price").value);
+  if (isNaN(price) || price < 0) {
+    msg.textContent = "Giá điện chưa hợp lệ.";
+    msg.classList.add("err");
+    return;
+  }
+  try {
+    const r = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ electricity_price_vnd_kwh: price })
+    });
+    if (r.status === 401) { location.href = "/login"; return; }
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      msg.textContent = "Lỗi: " + (err.error || ("HTTP " + r.status));
+      msg.classList.add("err");
+      return;
+    }
+    msg.textContent = "Đã lưu giá điện " + fmtVnd(price) + "/kWh.";
+    refreshEnergy();
+  } catch (e) {
+    msg.textContent = "Lỗi: " + e;
+    msg.classList.add("err");
+  }
+});
+
 async function refreshAll() {
-  await Promise.all([refreshSites(), refreshMiners(), refreshEvents(), refreshCommands(), refreshRepairs(), refreshPool(), refreshEnergy()]);
+  await Promise.all([refreshSites(), refreshMiners(), refreshEvents(), refreshCommands(), refreshRepairs(), refreshPool(), refreshEnergy(), refreshHistory(), refreshPoolConfigs()]);
 }
 
 function clearMinerSelection() {
@@ -725,6 +1139,7 @@ function clearMinerSelection() {
 
 $("site-filter").addEventListener("change", () => {
   selectedSite = $("site-filter").value;
+  $("pc-site").value = selectedSite;
   clearMinerSelection();
   refreshAll();
 });

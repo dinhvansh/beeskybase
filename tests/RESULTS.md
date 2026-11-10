@@ -584,3 +584,86 @@ PASS: version bumped to 0.11.2 — package reports 0.11.2
 
 LOGO TEST PASSED
 ```
+
+---
+
+# v0.12 mock test — cloud dashboard redesign (sidebar, history chart, settings forms)
+
+`tests/mock_history_test.py` covers the redesign's backend and
+content wiring. Store level: `CloudStore.add_snapshot` samples
+the new `history_samples` table at most once per site per
+60 s (snapshots at +0 s/+10 s -> one row, +70 s -> a second),
+row totals mirror the snapshot (summed TH/s, miner/problem
+counts, max temp), rows filter per site, and samples older
+than 30 days are pruned on the write path. HTTP level (real
+`beesky cloud`, password set): `GET /api/history` is 401
+logged out; after login, ingests carrying explicit timestamps
+yield exactly the throttled points and the `?site=` filter
+works; the served dashboard carries the sidebar nav (Tổng
+quan / Máy đào / Bản đồ nhiệt / Điện năng / Lịch sử sửa / Sự
+kiện / Cài đặt), the seven view containers, the history chart
+container, the topbar (site filter, last-update, logout) and
+the Cài đặt forms (pool config -> POST /api/pool-config with
+header-secrecy notes, electricity price -> POST /api/settings,
+current configs rendered header-names only), while every
+pre-v0.12 dashboard marker asserted by the older suites (heat
+map + heatColor thresholds, pool/energy panel ids, POOL_GAP,
+commands panel, official logo SVG) is still present. The
+cloud dashboard itself was rebuilt as a fixed-sidebar layout
+(230 px, icon/top-bar collapse under 900 px) over a new token
+set (bg #0B0B0D, panels #15151A, borders #232329, status
+#34D399/#FBBF24/#FB923C/#F87171, accent #F5D800); the local
+web dashboard received the same token palette as a CSS-only
+polish (no layout or JS changes).
+
+Disclosure (same situation as the v0.11.2 block): a fresh
+full-chain regeneration (run_mock_test_v12.sh) was attempted
+three times. Every attempt regenerated v0.1–v0.10 green
+in-chain (156 PASS lines, 0 FAIL) and then stopped at a
+load-sensitive LEGACY assertion under this VM's current
+shared-host contention — twice the v0.11 firmware race-order
+assertion (kill logged at index 3, first.bmu at 5, while the
+companion 'kill landed inside the first-upload window'
+assertion passed and the unlock itself succeeded), once
+inside the v0.6 actions suite. Both suites pass standalone
+on a calm host (the firmware suite passed standalone on the
+first retry between attempts), and every dashboard-sensitive
+suite — v0.4 web, v0.5 cloud, v0.6 actions, v0.8 repairs,
+v0.9 energy/pool, v0.11.2 logo — was re-run standalone green
+against the redesigned dashboards during this session. No
+legacy test or firmware code was changed for this; the one
+test edit is the logo suite's version assertion, made
+version-relative (installer define == package version, the
+same fix the update suite got in v0.11) so it survives future
+bumps. RESULTS.md therefore keeps the ship-time evidence
+blocks for v0.1–v0.11.2 and appends this v0.12 block, exactly
+as v0.11.2 handled its flake.
+
+## Assertions
+
+```
+PASS: store: first snapshot writes one history sample
+PASS: store: sample totals mirror the snapshot
+PASS: store: snapshot 10 s later is throttled (still 1 row)
+PASS: store: snapshot +70 s writes the 2nd row
+PASS: store: per-site filter + all-sites view
+PASS: store: since_ts window is honoured
+PASS: store: samples older than 30 days are pruned on write
+PASS: cloud-add-agent prints a key once
+PASS: cloud server starts
+PASS: GET /api/history without login -> 401
+PASS: login with right password -> session
+PASS: GET /api/history with session -> 200, empty at first
+PASS: dashboard: sidebar nav with all seven views
+PASS: dashboard: settings forms (pool config + price) present
+PASS: dashboard: history chart container + topbar
+PASS: dashboard: legacy markers survive (heat/pool/energy/logo)
+PASS: ingest snapshot 1 accepted
+PASS: ingest snapshot 2 (+10 s) accepted
+PASS: history after +10 s: throttle keeps a single point
+PASS: ingest snapshot 3 (+70 s) accepted
+PASS: history after +70 s: second point appears, site filter ok
+PASS: history for an unknown site is empty
+
+HISTORY TEST PASSED
+```
