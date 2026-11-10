@@ -1,11 +1,15 @@
-# PyInstaller spec — builds the two single-file BeeSky executables:
+# PyInstaller spec — builds the three single-file BeeSky executables:
 #
-#   dist/beesky.exe      console CLI (entry.py — scan/watch/serve/
-#                        agent/cloud/gui subcommands)
-#   dist/beesky-gui.exe  windowed GUI (entry_gui.py pins argv to the
-#                        `gui` subcommand; console=False so a
-#                        double-click opens the BeeSky window, no
-#                        black console behind it)
+#   dist/beesky.exe       console CLI (entry.py — scan/watch/serve/
+#                         agent/cloud/gui subcommands)
+#   dist/beesky-gui.exe   windowed GUI (entry_gui.py pins argv to the
+#                         `gui` subcommand; console=False so a
+#                         double-click opens the BeeSky window, no
+#                         black console behind it)
+#   dist/beesky-agent.exe standalone farm agent (entry_agent.py ->
+#                         beesky.agent_app: no args opens the config
+#                         window, `run` runs the loop; console=True
+#                         so run logs stay visible — v0.14)
 #
 # PyInstaller does NOT cross-compile: this spec produces binaries for
 # whatever OS runs it. The Windows exes are built on a windows-latest
@@ -109,6 +113,48 @@ exe_gui = EXE(
     strip=False,
     upx=False,
     console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=ICON if os.path.exists(ICON) else None,
+)
+
+# --- standalone farm agent (v0.14) --------------------------------------
+# entry_agent.py dispatches on argv itself (no args -> config GUI),
+# so unlike the GUI build this is console=True: `beesky-agent run`
+# logs must be visible when the operator starts it by hand, and the
+# config-window mode simply shares the console. It bundles the same
+# datas as the GUI (dashboards are unused weight here, but the logo
+# assets under beesky/assets/ are what the config window loads).
+a_agent = Analysis(
+    [os.path.join(PROJECT_ROOT, "packaging", "entry_agent.py")],
+    pathex=[PROJECT_ROOT],
+    binaries=[],
+    datas=GUI_DATAS,
+    hiddenimports=TK_HIDDENIMPORTS,
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    noarchive=False,
+)
+
+pyz_agent = PYZ(a_agent.pure)
+
+exe_agent = EXE(
+    pyz_agent,
+    a_agent.scripts,
+    a_agent.binaries,
+    a_agent.datas,
+    [],
+    name="beesky-agent",
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

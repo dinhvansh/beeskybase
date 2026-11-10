@@ -744,3 +744,91 @@ PASS: dashboard: legacy markers survive (nav/heat/pool/logo)
 
 AGENTS UI TEST PASSED
 ```
+
+
+---
+
+# v0.14 mock test — standalone BeeSky Agent app
+
+`tests/mock_agent_app_test.py` covers the agent app.
+Config model (`beesky/agent_config.py`): save/load is
+lossless, parent dirs are created on first save, unknown
+keys and a non-dict `notify_config` are tolerated, and
+`default_config_path` resolves $BEESKY_AGENT_CONFIG first,
+then %APPDATA%\BeeSky\agent-config.json on Windows
+(simulated platform + fake APPDATA), then
+~/.beesky/agent-config.json. Packaging: the PyInstaller spec
+gains a third Analysis/EXE `beesky-agent` (console build,
+official icon, GUI datas for the config window's logo);
+`packaging/agent.iss` installs it as
+BeeSkyAgentSetup-<version>.exe with Start Menu/desktop
+shortcuts that open the config window; both installers'
+version defines match the package version; the Windows
+workflow builds agent.iss and ships beesky-agent.exe +
+BeeSkyAgentSetup-*.exe in the build artifact, the GitHub
+Release and the signed update-manifest file list — the
+updater assertion proves a signed manifest entry named
+beesky-agent.exe is matched by basename and applied (with
+.old backup), so the agent app self-updates through the
+v0.10 channel unchanged. End-to-end: against a real
+`beesky cloud` and tests/mock_dashd.py, the app is driven
+purely by a config file — `beesky-agent test` exits 0 with
+TEST OK and the snapshot is visible in /api/sites and
+/api/miners (VNish S19 Pro), `run --once` exits 0, and a
+config with a wrong key fails `test` with exit 1; off
+Windows, install-task prints systemd/cron guidance. The
+config GUI smoke runs under `xvfb-run`: window + five
+fields construct, the key entry masks/unmasks via the
+'Hiện key' toggle, Lưu cấu hình writes JSON that loads back
+identically, and the auto-start button is disabled off
+Windows.
+
+Flake disclosure (mirroring v0.11.2/v0.12/v0.13): the full-chain regeneration for v0.14 ran v0.1-v0.10 green in-chain (156 PASS, 0 FAIL), then stopped at the same load-sensitive v0.11 firmware race-order assertion under this VM's shared-host contention (kill logged at index 3, first.bmu at 5 — the identical indices the flake produced at v0.13); an earlier attempt the same session also stopped once at the v0.5 cloud suite's timing-sensitive waits under the same contention, then passed it in-chain on the next attempt. The firmware suite failed only that one assertion on two standalone runs and passed in full on the third. No firmware or legacy test code was changed for this. The v0.11, v0.11.2, v0.12 and v0.13 evidence blocks above are therefore the ship-time blocks, kept verbatim; the suites behind them were re-verified this session — v0.1-v0.10 in-chain as said, mock_firmware_test.py standalone (full pass on re-run), and mock_logo_test.py + mock_history_test.py + mock_agents_ui_test.py standalone green against the v0.14 tree.
+
+## Assertions
+
+```
+PASS: config: save creates parent dirs and returns the path
+PASS: config: save/load round-trip is lossless
+PASS: config: core fields survive (key/site/interval/notify)
+PASS: config: from_dict drops unknown keys, non-dict notify_config -> None
+PASS: config: missing_fields lists the empty required fields
+PASS: config path: $BEESKY_AGENT_CONFIG wins on any platform
+PASS: config path: Windows uses %APPDATA%\BeeSky
+PASS: config path: POSIX falls back to ~/.beesky
+PASS: spec: third Analysis targets entry_agent.py
+PASS: spec: agent exe is named beesky-agent
+PASS: spec: all three EXEs carry the official icon
+PASS: spec: agent exe is a console build (run logs visible)
+PASS: agent.iss: output is BeeSkyAgentSetup-<version>.exe
+PASS: agent.iss: installs beesky-agent.exe + icon + uninstall icon
+PASS: agent.iss: Start Menu shortcut launches the config window
+PASS: versions in sync: agent.iss == package == installer.iss
+PASS: workflow: builds the agent installer
+PASS: workflow: agent exe + agent setup in artifact AND release
+PASS: workflow: update manifest lists beesky-agent.exe + BeeSkyAgentSetup
+PASS: workflow: frozen agent exe smoke check present
+PASS: updater: manifest entry beesky-agent.exe matches by basename and applies
+PASS: updater: dummy beesky-agent.exe now holds the new bytes
+PASS: updater: previous agent exe kept as .old backup
+PASS: e2e: cloud-add-agent mints the key the config will carry
+PASS: e2e: cloud starts
+PASS: e2e: viewer login works
+PASS: e2e: config file on disk carries the documented fields
+PASS: agent app: `test` from a config file exits 0, TEST OK
+PASS: e2e: the test ingest landed — site shows 1 miner
+PASS: e2e: /api/miners shows the dashd S19 Pro from the config-driven agent
+PASS: agent app: `run --once` from the config exits 0
+PASS: agent app: `test` with a wrong key exits 1, TEST FAIL
+PASS: agent app: install-task off Windows prints the systemd/cron guidance instead of failing obscurely
+PASS: agent app: task command embeds exe + run + --config
+PASS: gui: config window constructs with all five fields
+PASS: gui: key entry starts masked
+PASS: gui: 'Hiện key' toggle unmasks the key entry
+PASS: gui: auto-start button disabled off Windows
+PASS: gui: 'Lưu cấu hình' accepts a complete form
+PASS: gui: save wrote the config JSON
+PASS: gui: saved JSON round-trips the form values
+
+AGENT APP TEST PASSED
+```

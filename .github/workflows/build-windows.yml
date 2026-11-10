@@ -114,7 +114,7 @@ jobs:
       - name: Install PyInstaller
         run: pip install pyinstaller
 
-      - name: Build exes (console CLI + windowed GUI, single file each)
+      - name: Build exes (console CLI + windowed GUI + agent app, single file each)
         run: pyinstaller packaging/beesky.spec --noconfirm
 
       - name: Smoke check (frozen exe)
@@ -124,6 +124,11 @@ jobs:
       # window opens — a safe headless smoke for the windowed build.
       - name: Smoke check (frozen GUI exe)
         run: .\dist\beesky-gui.exe --help
+
+      # `--help` prints the agent app's usage and exits before any
+      # window opens — same headless smoke trick as the GUI exe.
+      - name: Smoke check (frozen agent exe)
+        run: .\dist\beesky-agent.exe --help
 
       # Sign the exe BEFORE Inno Setup runs: the installer embeds
       # dist\beesky.exe, so it must already carry its signature.
@@ -177,7 +182,7 @@ jobs:
           }
           if (-not (Test-Path dist\beesky-gui.exe)) { exit 1 }
 
-      - name: Build installer (Inno Setup)
+      - name: Build installers (Inno Setup)
         shell: powershell
         run: |
           if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
@@ -186,6 +191,11 @@ jobs:
           $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
           if (-not $iscc) { $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" }
           & $iscc packaging\installer.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # The standalone agent installer (v0.14) — same dist dir,
+          # distinct OutputBaseFilename (BeeSkyAgentSetup-<ver>.exe),
+          # so the BeeSkySetup-* globs elsewhere never match it.
+          & $iscc packaging\agent.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # The signer needs one concrete path, but the installer name
@@ -262,12 +272,17 @@ jobs:
           BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
           PUBLISHED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           INSTALLER="$(basename "$(ls dist/BeeSkySetup-*.exe | head -n 1)")"
-          python - "$VER" "$BASE" "$PUBLISHED" "$INSTALLER" <<'PYEOF'
+          AGENT_INSTALLER="$(basename "$(ls dist/BeeSkyAgentSetup-*.exe | head -n 1)")"
+          python - "$VER" "$BASE" "$PUBLISHED" "$INSTALLER" "$AGENT_INSTALLER" <<'PYEOF'
           import hashlib, json, sys
           from pathlib import Path
-          version, base, published, installer = sys.argv[1:5]
+          version, base, published, installer, agent_installer = sys.argv[1:6]
           files = []
-          for name in ["beesky.exe", "beesky-gui.exe", installer]:
+          # beesky-agent.exe is listed so a running agent app matches
+          # the manifest entry by its own exe name and self-updates
+          # through this same signed channel (v0.14).
+          for name in ["beesky.exe", "beesky-gui.exe", "beesky-agent.exe",
+                       installer, agent_installer]:
               data = (Path("dist") / name).read_bytes()
               files.append({"name": name, "url": f"{base}/{name}",
                             "sha256": hashlib.sha256(data).hexdigest(),
@@ -290,14 +305,16 @@ jobs:
           rm -f "$KEY_FILE" "$RUNNER_TEMP/update-pub.pem"
           ls -l dist/update-manifest.json dist/update-manifest.sig
 
-      - name: Upload artifact (installer + bare exes)
+      - name: Upload artifact (installers + bare exes)
         uses: actions/upload-artifact@v4
         with:
           name: BeeSky-Windows
           path: |
             dist/BeeSkySetup-*.exe
+            dist/BeeSkyAgentSetup-*.exe
             dist/beesky.exe
             dist/beesky-gui.exe
+            dist/beesky-agent.exe
           if-no-files-found: error
 
       - name: Upload artifact (update manifest)
@@ -316,8 +333,10 @@ jobs:
         with:
           files: |
             dist/BeeSkySetup-*.exe
+            dist/BeeSkyAgentSetup-*.exe
             dist/beesky.exe
             dist/beesky-gui.exe
+            dist/beesky-agent.exe
           fail_on_unmatched_files: true
 
       - name: Attach update manifest to GitHub Release (tags, key configured)
