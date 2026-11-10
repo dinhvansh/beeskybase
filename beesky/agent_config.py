@@ -29,25 +29,119 @@ Where the file lives — :func:`default_config_path`:
   2. ``%APPDATA%\\BeeSky\\agent-config.json`` on Windows,
   3. ``~/.beesky/agent-config.json`` everywhere else.
 
-SECURITY NOTE: the agent key lives in this file in plain text — the
-file *is* the credential, exactly like the token files of the
-Pulse/EMCD agents this design follows. The cloud only stores a
-SHA-256 hash of the key and can revoke it at any time (cloud Cài đặt
-view / ``agent_by_key``), but anyone who can read this file can
-impersonate the agent until then. Keep it on the farm PC's own disk,
-readable only by the account that runs the agent.
+SECURITY NOTE: the agent key in this file *is* the credential (the
+cloud stores only a SHA-256 hash and can revoke it at any time —
+cloud Cài đặt view / ``agent_by_key``). Since v0.16 the file is
+hardened on a best-effort basis:
+
+* On **Windows** the key is stored DPAPI-protected
+  (``key_protected``, base64; the ``key`` field is written empty).
+  Protection uses ``CRYPTPROTECT_LOCAL_MACHINE`` on purpose: the
+  background agent runs as SYSTEM (see the Scheduled Task in
+  :mod:`beesky.agent_app`), and a per-user blob would be unreadable
+  to it. Machine scope means the blob can only be decrypted *on
+  this PC* — copying the file elsewhere yields nothing — but any
+  local administrator can still decrypt it. It protects against the
+  file leaking off the machine, not against someone who already
+  owns the machine.
+* Everywhere else the key stays plain text, but the file is
+  ``chmod 0600`` after every save (POSIX). On Windows an ``icacls``
+  pass additionally restricts the file to the current user +
+  SYSTEM. Both are best-effort: a failure never blocks saving.
+* If DPAPI is present but the protect call itself fails, saving
+  falls back to the plain-text key rather than losing the config.
+* A config written by an older version (plain-text ``key``) is
+  migrated in place on the next save; a ``key_protected`` blob that
+  cannot be decrypted (file copied from another PC) loads as an
+  empty key — re-issue the agent on the cloud and paste the new key.
 """
 
 from __future__ import annotations
 
+import base64
+import ctypes
 import json
 import os
+import subprocess
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 CONFIG_ENV_VAR = "BEESKY_AGENT_CONFIG"
 CONFIG_FILENAME = "agent-config.json"
+
+# CRYPTPROTECT_LOCAL_MACHINE — see the security note above.
+_CRYPTPROTECT_LOCAL_MACHINE = 0x04
+
+
+class _DataBlob(ctypes.Structure):
+    _fields_ = [("cbData", ctypes.c_ulong),
+                ("pbData", ctypes.POINTER(ctypes.c_char))]
+
+
+def _dpapi_available() -> bool:
+    """True when Windows DPAPI (crypt32) is callable from here.
+
+    Probed per call (cheap attribute walks); tests monkeypatch this
+    to force the protected / fallback branches off Windows.
+    """
+    if not sys.platform.startswith("win"):
+        return False
+    try:
+        return hasattr(ctypes, "windll") \
+            and hasattr(ctypes.windll, "crypt32") \
+            and hasattr(ctypes.windll, "kernel32")
+    except Exception:  # noqa: BLE001 — a probe must never raise
+        return False
+
+
+def _blob_from_bytes(data: bytes) -> tuple[_DataBlob, object]:
+    buffer = ctypes.create_string_buffer(data, len(data))
+    blob = _DataBlob(len(data),
+                     ctypes.cast(buffer, ctypes.POINTER(ctypes.c_char)))
+    return blob, buffer  # keep the buffer alive for the call
+
+
+def protect_key(plaintext: str) -> str:
+    """DPAPI-protect *plaintext*; returns base64 for the config file.
+
+    Raises OSError when DPAPI is unavailable or the call fails —
+    callers decide the fallback (save() degrades to plain text).
+    """
+    if not _dpapi_available():
+        raise OSError("DPAPI is not available on this platform")
+    in_blob, _buf = _blob_from_bytes(plaintext.encode("utf-8"))
+    out_blob = _DataBlob()
+    ok = ctypes.windll.crypt32.CryptProtectData(
+        ctypes.byref(in_blob), None, None, None, None,
+        _CRYPTPROTECT_LOCAL_MACHINE, ctypes.byref(out_blob))
+    if not ok:
+        raise ctypes.WinError()
+    try:
+        raw = ctypes.string_at(out_blob.pbData, out_blob.cbData)
+    finally:
+        ctypes.windll.kernel32.LocalFree(out_blob.pbData)
+    return base64.b64encode(raw).decode("ascii")
+
+
+def unprotect_key(blob_b64: str) -> str:
+    """Reverse :func:`protect_key`; raises OSError on any failure
+    (including a blob protected on a different machine)."""
+    if not _dpapi_available():
+        raise OSError("DPAPI is not available on this platform")
+    raw = base64.b64decode(blob_b64.encode("ascii"), validate=True)
+    in_blob, _buf = _blob_from_bytes(raw)
+    out_blob = _DataBlob()
+    ok = ctypes.windll.crypt32.CryptUnprotectData(
+        ctypes.byref(in_blob), None, None, None, None, 0,
+        ctypes.byref(out_blob))
+    if not ok:
+        raise ctypes.WinError()
+    try:
+        data = ctypes.string_at(out_blob.pbData, out_blob.cbData)
+    finally:
+        ctypes.windll.kernel32.LocalFree(out_blob.pbData)
+    return data.decode("utf-8")
 
 
 def default_config_path(env: dict | None = None,
@@ -82,6 +176,11 @@ class AgentConfig:
     target: str = ""
     cloud_url: str = ""
     key: str = ""
+    # DPAPI-protected form of `key` (base64, Windows — v0.16). The
+    # in-memory `key` is always the plain text; save() writes either
+    # `key` (plain) or `key_protected` (and an empty `key`), and
+    # from_dict() decrypts back into `key` transparently.
+    key_protected: str = ""
     site: str = ""
     interval: float = 30.0
     notify_config: dict | None = None
@@ -121,10 +220,18 @@ class AgentConfig:
         if cfg.notify_config is not None \
                 and not isinstance(cfg.notify_config, dict):
             cfg.notify_config = None
-        for name in ("target", "cloud_url", "key", "site",
-                     "user", "password"):
+        for name in ("target", "cloud_url", "key", "key_protected",
+                     "site", "user", "password"):
             value = getattr(cfg, name)
             setattr(cfg, name, "" if value is None else str(value))
+        if cfg.key_protected and not cfg.key:
+            try:
+                cfg.key = unprotect_key(cfg.key_protected)
+            except Exception:  # noqa: BLE001 — foreign/corrupt blob
+                # Documented behaviour (module docstring): a blob
+                # that cannot be decrypted on this machine loads as
+                # an empty key; the operator re-issues the agent.
+                cfg.key = ""
         return cfg
 
     def to_dict(self) -> dict:
@@ -160,16 +267,67 @@ class AgentConfig:
                 from exc
         return cls.from_dict(data)
 
+    def _disk_dict(self) -> dict:
+        """The dict actually written to disk (see the security note).
+
+        With DPAPI available the key is stored protected and the
+        plain ``key`` field is emptied; a protect failure degrades
+        to plain text rather than failing the save. Either way the
+        in-memory config keeps its plain-text key. This is also the
+        migration path: a plain-text config from an older version is
+        rewritten protected on its next save.
+        """
+        data = self.to_dict()
+        if self.key and _dpapi_available():
+            try:
+                data["key_protected"] = protect_key(self.key)
+                data["key"] = ""
+                return data
+            except Exception:  # noqa: BLE001 — degrade, don't lose it
+                pass
+        if self.key:
+            # Plain-text save (no DPAPI, or it just failed): a stale
+            # protected blob must not shadow the plain key on load.
+            data["key_protected"] = ""
+        # No plain key in memory (e.g. an undecryptable blob loaded
+        # on a foreign machine): keep whatever blob we carry.
+        return data
+
     def save(self, path: str | Path | None = None) -> Path:
         """Write the config as indented JSON; returns the path used.
 
         Creates the parent directory on first save (the config
-        window's "Lưu cấu hình" on a fresh PC).
+        window's "Lưu cấu hình" on a fresh PC), then tightens the
+        file's permissions best-effort (0600 on POSIX; an owner +
+        SYSTEM-only ACL via icacls on Windows) — the file carries
+        the agent key.
         """
         cfg_path = Path(path) if path is not None \
             else default_config_path()
         cfg_path.parent.mkdir(parents=True, exist_ok=True)
         cfg_path.write_text(
-            json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
+            json.dumps(self._disk_dict(), ensure_ascii=False, indent=2)
             + "\n", encoding="utf-8")
+        _tighten_permissions(cfg_path)
         return cfg_path
+
+
+def _tighten_permissions(cfg_path: Path) -> None:
+    """Best-effort owner-only permissions on the config file.
+
+    Never raises: the save already succeeded, and a locked-down
+    file must not come at the cost of a crashed config window.
+    """
+    try:
+        if sys.platform.startswith("win"):
+            user = os.environ.get("USERNAME", "")
+            grants = ["/grant:r", "SYSTEM:(F)"]
+            if user:
+                grants = ["/grant:r", f"{user}:(F)"] + grants
+            subprocess.run(
+                ["icacls", str(cfg_path), "/inheritance:r", *grants],
+                capture_output=True, timeout=15)
+        else:
+            os.chmod(cfg_path, 0o600)
+    except Exception:  # noqa: BLE001 — best effort by design
+        pass

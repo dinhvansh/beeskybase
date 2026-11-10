@@ -10,6 +10,13 @@
 #                         beesky.agent_app: no args opens the config
 #                         window, `run` runs the loop; console=True
 #                         so run logs stay visible — v0.14)
+#   dist/beesky-agentw.exe the agent's windowless twin (v0.16): SAME
+#                         Analysis/PYZ as beesky-agent.exe but
+#                         console=False — this is what the Scheduled
+#                         Task (SYSTEM, hidden) runs, so the
+#                         background agent never pops a console
+#                         window; output goes to agent.log instead
+#                         (see beesky.agent_app's background model)
 #
 # PyInstaller does NOT cross-compile: this spec produces binaries for
 # whatever OS runs it. The Windows exes are built on a windows-latest
@@ -155,6 +162,31 @@ exe_agent = EXE(
     strip=False,
     upx=False,
     console=True,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=ICON if os.path.exists(ICON) else None,
+)
+
+# --- standalone farm agent, WINDOWLESS twin (v0.16) ---------------------
+# Identical payload to exe_agent (same Analysis + PYZ), rebuilt as a
+# console=False executable. The frozen name is the switch: agent_app
+# detects "beesky-agentw" and treats even a bare launch as a
+# background run (log file + status file, never the config GUI).
+exe_agentw = EXE(
+    pyz_agent,
+    a_agent.scripts,
+    a_agent.binaries,
+    a_agent.datas,
+    [],
+    name="beesky-agentw",
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

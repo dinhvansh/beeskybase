@@ -914,3 +914,103 @@ PASS: main gui: max-temp stat shows the hottest miner
 
 THEME TEST PASSED
 ```
+
+---
+
+# v0.16 mock test — agent background service + install security
+
+`tests/mock_agent_bg_test.py` covers the v0.16 changes.
+BACKGROUND: the spec gains a windowless twin `beesky-agentw`
+(console=False, same Analysis as `beesky-agent`); a frozen
+agentw — or `run --background` — never opens the config GUI,
+routes all output through a redacting stream into `agent.log`
+next to the config (rotated at ~1 MB, one .old), and rewrites
+`agent-status.json` after EVERY cycle via the AgentService
+status hook (ok / miners / error / cloud_url / site, atomic
+temp+replace). `install-task` now registers the task from
+generated XML (`schtasks /Create /XML`): SYSTEM principal
+(S-1-5-18) at HighestAvailable, BootTrigger (PT30S delay) +
+LogonTrigger, Hidden=true, ExecutionTimeLimit PT0S,
+RestartOnFailure PT1M x5, battery-proof, action = the
+windowless exe with the config path baked in;
+`install-task --console` is the debugging escape hatch.
+SECURITY: on Windows the agent key is DPAPI-protected in the
+config (CRYPTPROTECT_LOCAL_MACHINE so the SYSTEM task can
+decrypt; `key` written empty, `key_protected` base64) —
+off Windows the file is chmod 0600 after every save (Windows
+also gets a best-effort owner+SYSTEM icacls); a protect
+failure degrades to plain text rather than losing the
+config, and legacy plain-text configs migrate on next save.
+The agent key is scrubbed from every failure print
+(`beesky.agent.redact`) and from the whole run stream; a
+non-local http:// cloud URL logs a one-time warning and
+shows the same hint in the config window (never a hard
+block). The window gains a 'Trạng thái chạy ngầm' card
+(status pill + last cycle detail + Xem log) fed by
+agent-status.json. All v0.14/v0.15 assertions run green
+inside the full chain above; the new suite adds:
+
+```
+invalid command name "128729226494656_poll_queue"
+    while executing
+"128729226494656_poll_queue"
+    ("after" script)
+invalid command name "128729226897024_poll_queue"
+    while executing
+"128729226897024_poll_queue"
+    ("after" script)
+PASS: dpapi: saved file contains NO plain-text key
+PASS: dpapi: key field emptied, key_protected present
+PASS: dpapi: load() transparently returns the plain key
+PASS: dpapi: a protect failure degrades to plain text (config never lost)
+PASS: posix: without DPAPI the key stays plain text
+PASS: posix: config file is chmod 0600 after save
+PASS: migration: legacy plain-text key still loads
+PASS: migration: next save rewrites the key protected
+PASS: dpapi: an undecryptable blob loads as an empty key
+PASS: redact: every occurrence of the secret is masked
+PASS: redact: empty secrets are a no-op
+PASS: log stream: the key never reaches agent.log
+PASS: task xml: SYSTEM principal (S-1-5-18)
+PASS: task xml: highest run level
+PASS: task xml: BootTrigger present
+PASS: task xml: boot delay PT30S
+PASS: task xml: LogonTrigger present
+PASS: task xml: task hidden
+PASS: task xml: no execution time limit
+PASS: task xml: restart on failure every minute
+PASS: task xml: restart count 5
+PASS: task xml: network not required
+PASS: task xml: never stops on batteries
+PASS: task xml: windowless exe is the action
+PASS: task xml: config path baked into the action
+PASS: task xml: --console escape hatch uses the console exe
+PASS: spec: windowless twin named beesky-agentw
+PASS: spec: agentw is a console=False build
+PASS: agent.iss: ships beesky-agentw.exe alongside the console exe
+PASS: workflow: agentw in artifact AND release file lists
+PASS: workflow: signed update manifest lists beesky-agentw.exe
+PASS: versions in sync at 0.16.0
+PASS: e2e: cloud mints the agent key
+PASS: e2e: cloud starts
+PASS: bg e2e: `run --once` exits 0 and reports the pass
+PASS: bg e2e: agent-status.json written, ok with 1 miner
+PASS: bg e2e: agent.log mirrors the run output
+PASS: bg e2e: agent.log does NOT contain the agent key
+PASS: bg e2e: localhost http cloud raises no warning
+PASS: bg e2e: --background prints nothing to stdout
+PASS: bg e2e: --background still writes status + log
+PASS: bg e2e: a wrong-key cycle survives and is recorded as ok=false with an error
+PASS: bg e2e: the failing log never contains the (wrong) key
+PASS: bg e2e: non-local http:// cloud warns about the unencrypted key (but is not blocked)
+PASS: bg e2e: the unreachable-cloud cycle is recorded ok=false, not a crash
+PASS: gui: status card starts at 'Chưa có dữ liệu'
+PASS: gui: 'Xem log' button exists
+PASS: gui: non-local http:// cloud shows the https hint
+PASS: gui: localhost http clears the hint
+PASS: gui: https clears the hint
+PASS: gui: an OK status renders 'Đang chạy tốt' + miner count
+PASS: gui: an error status renders 'Lỗi gần nhất' + the error
+
+AGENT BG TEST PASSED
+```

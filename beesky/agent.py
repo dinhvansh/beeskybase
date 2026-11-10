@@ -63,6 +63,24 @@ UPDATE_FIRST_CHECK_S = 60.0
 UPDATE_INTERVAL_S = 24 * 3600.0
 
 
+def redact(text: str, *secrets: str) -> str:
+    """Return *text* with every occurrence of each secret masked.
+
+    Log hygiene (v0.16): the agent key — and anything derived from
+    it, like an ``Authorization: Bearer <key>`` value — must never
+    reach a log file or console. Failure messages interpolate
+    exceptions whose text the agent does not control, so delivery /
+    poll failure prints route through here with the key, and the
+    agent app's background log writer redacts the whole stream as a
+    second line of defence.
+    """
+    out = text
+    for secret in secrets:
+        if secret:
+            out = out.replace(secret, "***")
+    return out
+
+
 def _post_json(url: str, payload: dict, key: str, timeout: float =
                POST_TIMEOUT_S) -> int:
     """POST *payload* with the agent key; return the HTTP status.
@@ -114,7 +132,8 @@ class AgentService:
     def __init__(self, scan_fn, cloud_url: str, key: str, site: str,
                  interval: float = 30.0, notify_config: dict | None = None,
                  creds: dict | None = None, auto_update: bool = False,
-                 update_url_base: str | None = None):
+                 update_url_base: str | None = None,
+                 status_hook=None):
         from .core.events import EventEngine
         from .core.notify import Notifier
 
@@ -138,6 +157,25 @@ class AgentService:
         self._last_update_check: float | None = None
         self._update_reported: str | None = None
         self._exit_for_update = False
+        # Per-cycle status sink (v0.16): called after every pass as
+        # hook(ok, miners, error) — the agent app writes
+        # agent-status.json through it. None = no reporting (the
+        # `beesky agent` command line behaves exactly as before).
+        self._status_hook = status_hook
+
+    def _fail(self, message: str) -> None:
+        """A failure line on stderr, with the agent key scrubbed."""
+        print(redact(message, self._key), file=sys.stderr)
+
+    def _emit_status(self, ok: bool, miners: int,
+                     error: str | None) -> None:
+        if self._status_hook is None:
+            return
+        try:
+            self._status_hook(ok, miners,
+                              redact(error, self._key) if error else None)
+        except Exception:  # noqa: BLE001 — reporting must not break
+            pass  # the monitoring loop it reports on
 
     # ------------------------------------------------------------------
     # cloud delivery
@@ -152,9 +190,9 @@ class AgentService:
                        {"site": self.site, "ts": time.time(),
                         "events": self._pending_events}, self._key)
         except Exception as exc:  # noqa: BLE001 — retried next pass
-            print(f"agent: cloud events POST failed ({exc}); "
-                  f"{len(self._pending_events)} event(s) kept for retry",
-                  file=sys.stderr)
+            self._fail(f"agent: cloud events POST failed ({exc}); "
+                       f"{len(self._pending_events)} event(s) kept "
+                       "for retry")
             return
         self._pending_events = []
 
@@ -166,8 +204,8 @@ class AgentService:
                         "miners": records}, self._key)
             return True
         except Exception as exc:  # noqa: BLE001 — next pass supersedes it
-            print(f"agent: cloud snapshot POST failed ({exc}); "
-                  "will retry with the next pass", file=sys.stderr)
+            self._fail(f"agent: cloud snapshot POST failed ({exc}); "
+                       "will retry with the next pass")
             return False
 
     # ------------------------------------------------------------------
@@ -182,8 +220,9 @@ class AgentService:
                 {"status": status, "result": result}, self._key)
             return True
         except Exception as exc:  # noqa: BLE001 — queued for next pass
-            print(f"agent: result POST for command #{command_id} failed "
-                  f"({exc}); queued for retry", file=sys.stderr)
+            self._fail(f"agent: result POST for command "
+                       f"#{command_id} failed ({exc}); queued "
+                       "for retry")
             return False
 
     def _deliver_results(self) -> None:
@@ -223,7 +262,7 @@ class AgentService:
                 if cand.ip == ip and cand.source:
                     return cand.source
         except Exception as exc:  # noqa: BLE001 — probing is best-effort
-            print(f"agent: probe of {ip} failed: {exc}", file=sys.stderr)
+            self._fail(f"agent: probe of {ip} failed: {exc}")
         return None
 
     def _run_commands(self, records: list[dict]) -> None:
@@ -235,7 +274,7 @@ class AgentService:
                 f"{self.cloud_url}/api/agent/commands"
                 f"?limit={COMMANDS_PER_PASS}", self._key)
         except Exception as exc:  # noqa: BLE001 — cloud outage != crash
-            print(f"agent: command poll failed ({exc})", file=sys.stderr)
+            self._fail(f"agent: command poll failed ({exc})")
             return
         commands = reply.get("commands")
         if not isinstance(commands, list):
@@ -287,7 +326,7 @@ class AgentService:
         try:
             res = updater.check(self.update_url_base)
         except Exception as exc:  # noqa: BLE001 — advisory only
-            print(f"agent: update check failed: {exc}", file=sys.stderr)
+            self._fail(f"agent: update check failed: {exc}")
             return
         if not res["ok"] or not res["update_available"]:
             return
@@ -323,7 +362,7 @@ class AgentService:
             verdict = updater.apply(self.update_url_base,
                                     relaunch=True, argv=argv)
         except Exception as exc:  # noqa: BLE001 — retry tomorrow
-            print(f"agent: auto-update failed: {exc}", file=sys.stderr)
+            self._fail(f"agent: auto-update failed: {exc}")
             return
         print(f"agent: auto-update: {verdict['message']}", flush=True)
         if verdict["ok"] and not verdict["up_to_date"]:
@@ -341,13 +380,14 @@ class AgentService:
         try:
             records = self._scan_fn()
         except Exception as exc:  # noqa: BLE001 — keep the loop alive
-            print(f"agent: scan failed: {exc}", file=sys.stderr)
+            self._fail(f"agent: scan failed: {exc}")
             self._deliver_results()  # results don't depend on the scan
+            self._emit_status(False, 0, f"scan failed: {exc}")
             return []
         present = {r["ip"]: r for r in records if not _is_error_record(r)}
         events = self.engine.observe_cycle(present)
 
-        self._deliver_snapshot(records)
+        delivered = self._deliver_snapshot(records)
         for event in events:
             print(f"EVENT {event['type']} [{event['severity']}] "
                   f"{event['ip']} {event['model']} — {event['detail']}",
@@ -358,7 +398,7 @@ class AgentService:
                                  for name, ok in results.items())
                 print(f"  notified (local): {sent}", flush=True)
             for error in self.notifier.pop_errors():
-                print(f"  notify error: {error}", file=sys.stderr)
+                self._fail(f"  notify error: {error}")
         self._pending_events.extend(events)
         if len(self._pending_events) > PENDING_CAP:
             del self._pending_events[: len(self._pending_events) - PENDING_CAP]
@@ -370,6 +410,11 @@ class AgentService:
         self._deliver_results()
         self._run_commands(records)
         self._maybe_update_check()
+        self._emit_status(
+            delivered, len(records),
+            None if delivered else
+            "cloud snapshot POST failed (see agent.log); "
+            "will retry with the next pass")
         return events
 
     def run(self, once: bool = False) -> None:

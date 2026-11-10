@@ -1,14 +1,18 @@
 ; BeeSky Agent Windows installer (Inno Setup 6)
 ;
-; The standalone farm agent (v0.14): ONE executable, installed
-; per-user like the main BeeSky installer (no admin rights needed):
+; The standalone farm agent (v0.14): TWO executables with the same
+; payload, installed per-user like the main BeeSky installer (no
+; admin rights needed):
 ;
 ;   beesky-agent.exe  double-click opens the config window
 ;                     (cloud URL + agent key + site + scan target);
-;                     `beesky-agent run` runs the agent loop, which
-;                     is what the "BeeSky Agent" Scheduled Task
-;                     (created from the config window) launches at
-;                     startup.
+;                     `beesky-agent run` runs the agent loop with a
+;                     visible console (handy for debugging).
+;   beesky-agentw.exe the windowless twin (v0.16) — this is what
+;                     the "BeeSky Agent" Scheduled Task (created
+;                     from the config window) launches at startup:
+;                     no console window ever, output to agent.log
+;                     next to the config file.
 ;
 ; Lands in %LocalAppData%\Programs\BeeSky Agent — a separate product
 ; from the main BeeSky install on purpose: a farm PC that only runs
@@ -25,7 +29,7 @@
 ; .github/workflows/build-windows.yml — never by hand)
 
 #define MyAppName "BeeSky Agent"
-#define MyAppVersion "0.15.2"
+#define MyAppVersion "0.16.0"
 #define MyAppPublisher "BeeSkyBase"
 #define MyAppExeName "beesky-agent.exe"
 
@@ -54,6 +58,7 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; \
 
 [Files]
 Source: "..\dist\beesky-agent.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\beesky-agentw.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "assets\beesky-logo.ico"; DestDir: "{app}"; DestName: "beesky.ico"; Flags: ignoreversion
 Source: "..\docs\agent-app.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion

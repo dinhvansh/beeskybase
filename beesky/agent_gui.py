@@ -15,11 +15,19 @@ itself via the Windows Scheduled Task (or any other launcher) with
 The key field is masked by default with a "Hiện key" toggle: the
 key is shown ONCE by the cloud when the agent is created and is
 stored only in this config file (see beesky/agent_config.py).
+
+Since v0.16 the window also shows a "Trạng thái chạy ngầm" card —
+the live state of the background agent, read from the
+agent-status.json the running agent rewrites after every cycle —
+and an unencrypted-http hint under the Cloud URL field.
 """
 
 from __future__ import annotations
 
+import os
 import queue
+import subprocess
+import sys
 import threading
 import time
 import tkinter as tk
@@ -29,8 +37,9 @@ from tkinter import ttk
 from . import __version__
 from . import gui as _gui_theme
 from . import ui_theme
-from .agent_app import install_task, remove_task, task_installed, \
-    test_ingest, _is_windows
+from .agent_app import insecure_cloud_warning, install_task, \
+    log_file_path, read_status, remove_task, status_file_path, \
+    task_installed, test_ingest, _is_windows
 from .agent_config import AgentConfig, default_config_path
 
 BG = ui_theme.BG
@@ -42,7 +51,8 @@ DIM = ui_theme.MUTED
 _KEY_NOTE = (
     "Agent key do cloud cấp và chỉ hiện MỘT lần lúc tạo agent "
     "(trang Cài đặt của cloud) — dán vào đây rồi Lưu cấu hình. "
-    "Key chỉ nằm trong file cấu hình này; mất key thì thu hồi "
+    "Key chỉ nằm trong file cấu hình này (trên Windows được "
+    "Windows mã hoá DPAPI ngay trong file); mất key thì thu hồi "
     "agent cũ trên cloud và tạo agent mới.")
 
 
@@ -129,6 +139,15 @@ class AgentConfigApp:
 
         cloud_entry = ttk.Entry(body, textvariable=self.cloud_var)
         ui_theme.labeled_field(body, 0, "Cloud URL:", cloud_entry)
+        # Dynamic http:// hint in the cloud field's hint slot (grid
+        # row 2 — see ui_theme.labeled_field's row math).
+        self.cloud_hint_var = tk.StringVar()
+        ttk.Label(body, textvariable=self.cloud_hint_var,
+                  style="Card.Hint.TLabel", wraplength=560,
+                  justify="left").grid(row=2, column=0, columnspan=99,
+                                       sticky="w", pady=(4, 0))
+        self.cloud_var.trace_add("write",
+                                 lambda *_a: self._refresh_cloud_hint())
 
         key_box = ttk.Frame(body, style="Card.TFrame")
         self.key_entry = ttk.Entry(key_box, textvariable=self.key_var,
@@ -170,6 +189,27 @@ class AgentConfigApp:
                                interval_entry)
         interval_entry.grid_configure(sticky="w")
 
+        # -- card 3: background run status (v0.16) ---------------------
+        bg = ui_theme.card(main, title="Trạng thái chạy ngầm")
+        bg.pack(fill="x", pady=(12, 0))
+        bg_row = ttk.Frame(bg, style="Card.TFrame")
+        bg_row.pack(fill="x")
+        self.bg_pill = ui_theme.status_pill(
+            bg_row, text="Chưa có dữ liệu", state="dim")
+        self.bg_pill.pack(side="left")
+        self.view_log_button = ttk.Button(
+            bg_row, text="Xem log", style="Ghost.TButton",
+            command=self._open_log)
+        self.view_log_button.pack(side="right")
+        self.bg_status_var = tk.StringVar(
+            value="Agent chưa chạy vòng nào — trạng thái sẽ hiện "
+                  "ở đây sau vòng quét đầu tiên.")
+        ttk.Label(bg, textvariable=self.bg_status_var,
+                  style="Card.Hint.TLabel", wraplength=600,
+                  justify="left").pack(anchor="w", pady=(8, 0))
+        self._bg_status_mtime: float | None = None
+        self.refresh_bg_status()
+
         # -- actions + status pill ---------------------------------------
         actions = ttk.Frame(main)
         actions.pack(fill="x", pady=(14, 0))
@@ -205,6 +245,63 @@ class AgentConfigApp:
     def _toggle_key_visibility(self) -> None:
         self.key_entry.configure(show="" if self.show_key_var.get()
                                  else "*")
+
+    def _refresh_cloud_hint(self) -> None:
+        probe = AgentConfig(cloud_url=self.cloud_var.get().strip())
+        warning = insecure_cloud_warning(probe)
+        self.cloud_hint_var.set(f"⚠ {warning}" if warning else "")
+
+    # -- background run status ------------------------------------------
+
+    def refresh_bg_status(self) -> None:
+        """Paint the status card from agent-status.json (if any)."""
+        data = read_status(self.config_path)
+        if not data:
+            ui_theme.set_pill(self.bg_pill, "dim", "Chưa có dữ liệu")
+            self.bg_status_var.set(
+                "Agent chưa chạy vòng nào — trạng thái sẽ hiện ở "
+                "đây sau vòng quét đầu tiên.")
+            return
+        when = data.get("time") or "?"
+        if data.get("ok"):
+            ui_theme.set_pill(self.bg_pill, "ok", "Đang chạy tốt")
+            self.bg_status_var.set(
+                f"Vòng gần nhất OK lúc {when} — "
+                f"{data.get('miners', 0)} máy · "
+                f"trại {data.get('site', '')} · "
+                f"cloud {data.get('cloud_url', '')}")
+        else:
+            ui_theme.set_pill(self.bg_pill, "bad", "Lỗi gần nhất")
+            self.bg_status_var.set(
+                f"Lỗi lúc {when}: "
+                f"{data.get('error') or 'không rõ nguyên nhân'}")
+
+    def _maybe_refresh_bg_status(self) -> None:
+        """Re-read the status file only when it actually changed."""
+        try:
+            mtime = os.stat(
+                status_file_path(self.config_path)).st_mtime
+        except OSError:
+            mtime = None
+        if mtime != self._bg_status_mtime:
+            self._bg_status_mtime = mtime
+            self.refresh_bg_status()
+
+    def _open_log(self) -> None:
+        path = log_file_path(self.config_path)
+        if not path.exists():
+            self.status_var.set(
+                f"Chưa có file log tại {path} — agent chưa chạy.")
+            return
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(str(path))  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(path)])
+            else:
+                subprocess.Popen(["xdg-open", str(path)])
+        except OSError as exc:
+            self.status_var.set(f"Không mở được log: {exc}")
 
     # -- config <-> fields -------------------------------------------------
 
@@ -301,6 +398,7 @@ class AgentConfigApp:
         threading.Thread(target=worker, daemon=True).start()
 
     def _poll_queue(self) -> None:
+        self._maybe_refresh_bg_status()
         try:
             while True:
                 kind, payload = self._queue.get_nowait()

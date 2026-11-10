@@ -114,7 +114,7 @@ jobs:
       - name: Install PyInstaller
         run: pip install pyinstaller
 
-      - name: Build exes (console CLI + windowed GUI + agent app, single file each)
+      - name: Build exes (console CLI + windowed GUI + agent app + windowless agent twin, single file each)
         run: pyinstaller packaging/beesky.spec --noconfirm
 
       - name: Smoke check (frozen exe)
@@ -129,6 +129,18 @@ jobs:
       # window opens — same headless smoke trick as the GUI exe.
       - name: Smoke check (frozen agent exe)
         run: .\dist\beesky-agent.exe --help
+
+      # The windowless twin has no console to print help to, but
+      # beesky.agent_app.main() substitutes safe streams when they
+      # are None (windowed frozen exe), so `--help` still walks the
+      # early-exit path and returns 0 without opening a window —
+      # Start-Process -Wait makes the exit code observable for a
+      # GUI-subsystem binary.
+      - name: Smoke check (frozen agent windowless exe)
+        shell: powershell
+        run: |
+          $p = Start-Process .\dist\beesky-agentw.exe -ArgumentList "--help" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { exit $p.ExitCode }
 
       # Sign the exe BEFORE Inno Setup runs: the installer embeds
       # dist\beesky.exe, so it must already carry its signature.
@@ -280,8 +292,12 @@ jobs:
           files = []
           # beesky-agent.exe is listed so a running agent app matches
           # the manifest entry by its own exe name and self-updates
-          # through this same signed channel (v0.14).
+          # through this same signed channel (v0.14). The windowless
+          # twin beesky-agentw.exe joined the list in v0.16 — the
+          # background agent (the one the Scheduled Task runs) is
+          # exactly the process that must be able to self-update.
           for name in ["beesky.exe", "beesky-gui.exe", "beesky-agent.exe",
+                       "beesky-agentw.exe",
                        installer, agent_installer]:
               data = (Path("dist") / name).read_bytes()
               files.append({"name": name, "url": f"{base}/{name}",
@@ -315,6 +331,7 @@ jobs:
             dist/beesky.exe
             dist/beesky-gui.exe
             dist/beesky-agent.exe
+            dist/beesky-agentw.exe
           if-no-files-found: error
 
       - name: Upload artifact (update manifest)
@@ -337,6 +354,7 @@ jobs:
             dist/beesky.exe
             dist/beesky-gui.exe
             dist/beesky-agent.exe
+            dist/beesky-agentw.exe
           fail_on_unmatched_files: true
 
       - name: Attach update manifest to GitHub Release (tags, key configured)
