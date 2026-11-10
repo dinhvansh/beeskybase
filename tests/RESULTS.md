@@ -146,9 +146,9 @@ PASS: miner back: BACK_ONLINE printed + webhook received
 PASS: logfile channel recorded all three events
 
 Captured webhook payloads:
-{"ts": 1794272009.7145858, "time": "2026-11-10 00:53:29", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
-{"ts": 1794272010.2462223, "time": "2026-11-10 00:53:30", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "OFFLINE", "severity": "critical", "detail": "miner went offline / unreachable", "data": {"last_seen": 1794272010.007666}}
-{"ts": 1794272010.8841584, "time": "2026-11-10 00:53:30", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "BACK_ONLINE", "severity": "info", "detail": "miner is back online", "data": {}}
+{"ts": 1794272700.585619, "time": "2026-11-10 01:05:00", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
+{"ts": 1794272701.142727, "time": "2026-11-10 01:05:01", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "OFFLINE", "severity": "critical", "detail": "miner went offline / unreachable", "data": {"last_seen": 1794272700.8870063}}
+{"ts": 1794272701.8054109, "time": "2026-11-10 01:05:01", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "BACK_ONLINE", "severity": "info", "detail": "miner is back online", "data": {}}
 
 WATCH TEST PASSED
 ```
@@ -178,7 +178,7 @@ PASS: hashrate drop phase: /api/events gains HASHRATE_DROP
 PASS: drop event: severity major, drop_pct ~= 40
 
 Captured drop event:
-{"ts": 1794272016.010348, "time": "2026-11-10 00:53:36", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
+{"ts": 1794272706.907265, "time": "2026-11-10 01:05:06", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
 
 WEB TEST PASSED
 ```
@@ -219,7 +219,7 @@ PASS: hashrate drop: HASHRATE_DROP arrives at the cloud
 PASS: drop event: severity major, drop_pct ~= 40, site tag
 
 Captured cloud event:
-{"ts": 1794272023.4689753, "time": "2026-11-10 00:53:43", "site": "Xưởng 1", "agent_id": 1, "ip": "127.0.0.1", "model": "Antminer S19 Pro", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
+{"ts": 1794272714.3738256, "time": "2026-11-10 01:05:14", "site": "Xưởng 1", "agent_id": 1, "ip": "127.0.0.1", "model": "Antminer S19 Pro", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
 PASS: /api/miners?site= shows ~66 TH/s, record annotated with site
 
 CLOUD TEST PASSED
@@ -265,7 +265,7 @@ PASS: site 2 command finishes
 PASS: dashd reboot: status done, result from /system/reboot
 
 Captured dashd reboot command:
-{"id": 1, "agent_id": 2, "site": "Xưởng 2", "ip": "127.0.0.1", "type": "reboot", "payload": {}, "status": "done", "result": "dashd accepted reboot (system reboots in 3s)", "created_at": "2026-11-10 00:53:45", "created_ts": 1794272025.1712887, "claimed_at": "2026-11-10 00:53:45", "finished_at": "2026-11-10 00:53:45"}
+{"id": 1, "agent_id": 2, "site": "Xưởng 2", "ip": "127.0.0.1", "type": "reboot", "payload": {}, "status": "done", "result": "dashd accepted reboot (system reboots in 3s)", "created_at": "2026-11-10 01:05:16", "created_ts": 1794272716.1127403, "claimed_at": "2026-11-10 01:05:16", "finished_at": "2026-11-10 01:05:16"}
 PASS: dashd mock recorded exactly one POST /system/reboot
 PASS: dashd switch_pool {pool_id: 1} finishes done
 PASS: dashd mock activated pool slot 1
@@ -275,7 +275,7 @@ PASS: site 1 agent reports its cgminer miner
 PASS: cgminer reboot finishes done
 
 Captured cgminer reboot command:
-{"id": 4, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "type": "reboot", "payload": {}, "status": "done", "result": "cgminer accepted the privileged 'restart' command", "created_at": "2026-11-10 00:53:48", "created_ts": 1794272028.0076456, "claimed_at": "2026-11-10 00:53:48", "finished_at": "2026-11-10 00:53:48"}
+{"id": 4, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "type": "reboot", "payload": {}, "status": "done", "result": "cgminer accepted the privileged 'restart' command", "created_at": "2026-11-10 01:05:18", "created_ts": 1794272718.952201, "claimed_at": "2026-11-10 01:05:19", "finished_at": "2026-11-10 01:05:19"}
 PASS: cgminer mock recorded the restart RPC
 PASS: cgminer reboot on a read-only API -> failed
 PASS: failure result carries the miner's 'Access denied'
@@ -346,12 +346,12 @@ PASS: CHIPS_LOST also lands in repair history as auto_event
 PASS: auto row: site/ip keyed, no cost/technician
 
 Captured auto repair row:
-{"id": 1, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "mac_or_serial": null, "created_at": "2026-11-10 00:53:59", "created_ts": 1794272039.7815306, "kind": "auto_event", "title": "CHIPS_LOST", "detail": "lost 3 chip(s) (342 -> 339 alive)", "cost_vnd": null, "technician": null}
+{"id": 1, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "mac_or_serial": null, "created_at": "2026-11-10 01:05:30", "created_ts": 1794272730.6463869, "kind": "auto_event", "title": "CHIPS_LOST", "detail": "lost 3 chip(s) (342 -> 339 alive)", "cost_vnd": null, "technician": null}
 PASS: POST /api/repairs (logged in) -> 201 manual row
 PASS: manual row listed with cost_vnd + technician
 
 Captured manual repair row:
-{"id": 2, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "mac_or_serial": null, "created_at": "2026-11-10 00:54:00", "created_ts": 1794272040.1849163, "kind": "manual", "title": "Thay board 2", "detail": "Board 2 chết 3 chip — đã thay board, test lại đạt", "cost_vnd": 1500000, "technician": "Tuấn"}
+{"id": 2, "agent_id": 1, "site": "Xưởng 1", "ip": "127.0.0.1", "mac_or_serial": null, "created_at": "2026-11-10 01:05:31", "created_ts": 1794272731.0474641, "kind": "manual", "title": "Thay board 2", "detail": "Board 2 chết 3 chip — đã thay board, test lại đạt", "cost_vnd": 1500000, "technician": "Tuấn"}
 PASS: POST /api/repairs with blank title -> 400
 
 REPAIRS TEST PASSED
@@ -412,7 +412,7 @@ PASS: no POOL_GAP while the gap stays ~5%
 PASS: pool at 40% of farm -> POOL_GAP (major) in the event feed
 
 Captured POOL_GAP event:
-{"ts": 1794272044.0416892, "time": "2026-11-10 00:54:04", "site": "Xưởng 1", "agent_id": 1, "ip": null, "model": null, "type": "POOL_GAP", "severity": "major", "detail": "pool reports 43.65 TH/s vs farm 109.13 TH/s — gap 60.0% exceeds 10% for 2 consecutive checks", "data": {"pool_ths": 43.65, "farm_ths": 109.13, "gap_pct": 60.0, "threshold_pct": 10.0}}
+{"ts": 1794272734.9326997, "time": "2026-11-10 01:05:34", "site": "Xưởng 1", "agent_id": 1, "ip": null, "model": null, "type": "POOL_GAP", "severity": "major", "detail": "pool reports 43.65 TH/s vs farm 109.13 TH/s — gap 60.0% exceeds 10% for 2 consecutive checks", "data": {"pool_ths": 43.65, "farm_ths": 109.13, "gap_pct": 60.0, "threshold_pct": 10.0}}
 PASS: latest sample shows the ~60% gap
 PASS: energy accumulates > 0 kWh for the dashd miner
 
@@ -436,7 +436,7 @@ the updater under test is pointed at that public key via
 its module variables, and a 127.0.0.1 HTTP server plays
 the GitHub release. Assertions: the pure-Python RSA verify
 accepts the genuine signature and rejects a one-byte
-tamper; check() reports 0.11.0 > the running version;
+tamper; check() reports the next minor version > the running one;
 a tampered served manifest is refused whole; a signed
 manifest pinning a wrong file hash still cannot install
 (SHA-256 gate); the happy-path apply replaces a dummy
@@ -454,10 +454,10 @@ PASS: updater: channel enabled with a compiled-in key
 PASS: verify: valid RSA signature over the manifest verifies
 PASS: verify: one flipped manifest byte fails verification
 PASS: verify: truncated signature fails verification
-PASS: check: signed manifest accepted (ok + signature_ok) — {"current": "0.10.0", "latest": "0.11.0", "update_available": true}
+PASS: check: signed manifest accepted (ok + signature_ok) — {"current": "0.11.0", "latest": "0.12.0", "update_available": true}
 PASS: check: newer version reported as update available
 PASS: check: tampered manifest refused end-to-end
-PASS: apply: newer signed release installs onto the dummy — updated beesky to BeeSky 0.11.0 (previous file kept as beesky.old) — restart to run it
+PASS: apply: newer signed release installs onto the dummy — updated beesky to BeeSky 0.12.0 (previous file kept as beesky.old) — restart to run it
 PASS: apply: dummy now holds the new binary bytes
 PASS: apply: previous file kept as beesky.old backup
 PASS: apply: executable bit preserved on the new file
@@ -473,4 +473,63 @@ PASS: cli: `update --check` reports the unconfigured channel — self-update not
 PASS: cli: bare `update` refuses cleanly (exit 2) when unconfigured
 
 UPDATE TEST PASSED
+```
+
+---
+
+# v0.11 mock test — firmware identify / install / gated unlock
+
+`tests/mock_firmware_test.py` is fully hermetic: a digest-auth
+stock miner mock on 127.0.0.5 (upgrade.cgi records every upload's
+sha256; its update_first.bmu handler blocks until the race-kill
+marker file exists, mimicking the signature-verification window;
+patch_success.cgi answers 200 only after both .bmu uploads AND
+the marker), the dashd mock on 127.0.0.6 implementing the
+api-doc's `POST /api/v1/firmware/update`, and a fake `ssh`
+shim on PATH that logs into the same ordered event log, answers
+compile_time and creates the marker on the kill command.
+Assertions: identify verdicts for stock+SSH ("stock cũ / đã mở
+SSH"), stock without an ssh binary ("không rõ"), and VNish;
+stock and dashd installs deliver the exact file bytes; unlock
+refuses with ZERO requests reaching the mock when the
+--experimental-unlock flag, the BEESKY_ALLOW_UNLOCK=1 env, the
+typed-IP confirmation, or the payload files are missing; with
+all gates open the sequence lands in order — miner_type.cgi
+identify, update_first.bmu upload, the SSH kill of the openssl
+verify process (inside the first upload's window),
+update_second.bmu upload, patch_success marker.
+
+## Assertions
+
+```
+PASS: identify stock: exit 0
+PASS: identify stock: miner_type.cgi read
+PASS: identify stock: compile_time via ssh shim
+PASS: identify stock: verdict stock cũ / đã mở SSH
+PASS: identify no-ssh: verdict không rõ + note
+PASS: identify vnish: verdict cài firmware qua API được — Kết luận:     VNish/dashd — cài firmware qua API được
+PASS: install stock: exit 0 — ch: 127.0.0.5 — nguồn stock
+OK: stock firmware accepted the upload (POST /cgi-bin/upgrade.cgi -> 200); the miner verifies and reboots on its own schedule
+bỏ qua bước chờ máy lên lại (--wait-minutes 0)
+PASS: install stock: mock received the exact bytes (sha256)
+PASS: install dashd: exit 0 — c85f8c4
+Đích: 127.0.0.6 — nguồn vnish, model Antminer S19 Pro
+OK: dashd accepted the firmware (POST /api/v1/firmware/update -> 200, system reboots in 3s)
+bỏ qua bước chờ máy lên lại (--wait-minutes 0)
+PASS: install dashd: /firmware/update got the exact bytes — {"filename": "fw-image.tar.gz", "sha256": "b806c4c72bb6ba1fac3c47ab787581d2ffa9abe14bcab74ae960736eec85f8c4"}
+PASS: unlock refused (no flag): exit != 0 — fw unlock: TỪ CHỐI — thiếu cờ --experimental-unlock. Đây là tính năng THỬ NGHIỆM theo recipe khôi phục từ HashCore Toolkit; đọc docs/firmware.md trước.
+PASS: unlock refused (no flag): ZERO requests hit the mock — log lines 17 -> 17
+PASS: unlock refused (no env): exit != 0 — fw unlock: TỪ CHỐI — chưa đặt biến môi trường BEESKY_ALLOW_UNLOCK=1.
+PASS: unlock refused (no env): ZERO requests hit the mock — log lines 17 -> 17
+PASS: unlock refused (wrong typed IP): exit != 0 — Đã huỷ — IP gõ vào không khớp.
+PASS: unlock refused (wrong typed IP): ZERO requests hit the mock — log lines 17 -> 17
+PASS: unlock refused (missing payload): clear error, no requests
+PASS: unlock full: exit 0 + success banner — cond: update_second.bmu accepted (HTTP 200)
+  [OK] marker: /cgi-bin/patch_success.cgi -> 200 (patch marker present)
+  [OK] cleanup: đã dọn /nvdata/update.log và /tmp/tmpfw; việc khôi phục access files (/etc/passwd, /etc/sudoers.dist, /config/passwd) thuộc về payload theo recipe gốc
+UNLOCK THÀNH CÔNG
+PASS: unlock order: identify -> first.bmu -> kill -> second.bmu -> patch marker — indices ident=0 first=4 kill=5 second=8 marker=11
+PASS: unlock race: kill landed inside the first-upload window
+
+FIRMWARE TEST PASSED
 ```

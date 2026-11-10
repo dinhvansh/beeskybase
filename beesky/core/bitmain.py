@@ -34,6 +34,7 @@ import urllib.error
 import urllib.request
 
 from . import report
+from .multipart import build_multipart_body
 
 DEFAULT_PORT = 80
 
@@ -209,6 +210,72 @@ class BitmainClient:
             return json.loads(body.decode("utf-8", errors="replace"))
         except json.JSONDecodeError as exc:
             raise BitmainError(f"GET {path} -> non-JSON reply") from exc
+
+    def _raw_send(self, method: str, url: str, uri: str, body=None,
+                  extra_headers: dict | None = None, signed: bool = False):
+        headers = {"User-Agent": "BeeSky"}
+        if extra_headers:
+            headers.update(extra_headers)
+        if signed:
+            auth_header = self.auth.header(method, uri)
+            if auth_header:
+                headers["Authorization"] = auth_header
+        request = urllib.request.Request(url, headers=headers, data=body,
+                                         method=method)
+        try:
+            with _OPENER.open(request, timeout=self.timeout) as resp:
+                return resp.status, resp.headers, resp.read()
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.headers, exc.read() if exc.fp else b""
+        except (urllib.error.URLError, OSError) as exc:
+            raise BitmainError(f"cannot reach {url} ({exc})") from exc
+
+    def _authed_send(self, method: str, path: str, body=None,
+                     extra_headers: dict | None = None):
+        """Digest-auth send: sign at once when the challenge is already
+        known (the usual case — a status GET preceded us), otherwise learn
+        it from the 401 and retry signed, like get_json does."""
+        url = f"http://{self.host}:{self.port}{path}"
+        status, headers, resp_body = self._raw_send(
+            method, url, path, body, extra_headers,
+            signed=self.auth.challenge is not None)
+        if status == 401:
+            challenge = headers.get("WWW-Authenticate", "")
+            if "digest" not in challenge.lower():
+                raise BitmainError(
+                    f"{method} {path} -> HTTP 401 (no digest challenge)")
+            self.auth.learn(challenge)
+            status, headers, resp_body = self._raw_send(
+                method, url, path, body, extra_headers, signed=True)
+        return status, headers, resp_body
+
+    def get_text(self, path: str) -> str:
+        """GET one path with digest auth; return the raw body as text.
+
+        For the plain-text CGIs (``/cgi-bin/miner_type.cgi``,
+        ``/cgi-bin/patch_success.cgi``) whose replies are not JSON.
+        """
+        status, _headers, body = self._authed_send("GET", path)
+        if status != 200:
+            raise BitmainError(f"GET {path} -> HTTP {status}")
+        return body.decode("utf-8", errors="replace")
+
+    def post_multipart(self, path: str, field: str, filename: str,
+                       data: bytes, extra_fields: dict | None = None,
+                       boundary: str | None = None):
+        """Multipart-upload one file with digest auth; return (status, body).
+
+        Used for ``/cgi-bin/upgrade.cgi`` — the stock firmware-install
+        endpoint (and the .bmu uploads of the unlock sequence). The file
+        field name on the stock upgrade form is ``file``.
+        """
+        fields = [(field, filename, data, "application/octet-stream")]
+        for key, value in (extra_fields or {}).items():
+            fields.append((key, None, str(value).encode("utf-8"), None))
+        body, content_type = build_multipart_body(fields, boundary=boundary)
+        status, _headers, resp_body = self._authed_send(
+            "POST", path, body, {"Content-Type": content_type})
+        return status, resp_body
 
     def get_status_code(self, path: str) -> int:
         """GET one path with digest auth; return just the HTTP status.

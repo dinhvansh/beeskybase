@@ -122,15 +122,22 @@ def main() -> int:
         check("updater: channel enabled with a compiled-in key",
               updater.updates_enabled())
 
-        new_bytes = b"BeeSky fake 0.11.0 binary\n" * 64
-        old_bytes = b"BeeSky fake 0.10.0 binary (the dummy)\n"
+        # The "newer release" fixture is derived from the running
+        # version (minor + 1) so this suite survives version bumps —
+        # it previously hardcoded 0.11.0 and broke when BeeSky itself
+        # reached 0.11.0 (v0.11 regression fix).
+        _v = [int(p) for p in beesky.__version__.split(".")[:3]]
+        newer = f"{_v[0]}.{_v[1] + 1}.0"
+        new_bytes = f"BeeSky fake {newer} binary\n".encode() * 64
+        old_bytes = (f"BeeSky fake {beesky.__version__} binary "
+                     "(the dummy)\n").encode()
 
         # --- release A: newer version, honest hash
         dir_a = tmp / "rel-a"
         dir_a.mkdir()
         server_a, base_a = _serve(dir_a)
         servers.append(server_a)
-        manifest_a = _write_release(dir_a, base_a, "0.11.0", "beesky",
+        manifest_a = _write_release(dir_a, base_a, newer, "beesky",
                                     new_bytes, None, key_file)
         sig_a = (dir_a / "update-manifest.sig").read_bytes()
 
@@ -149,7 +156,7 @@ def main() -> int:
                   {k: res[k] for k in ("current", "latest",
                                        "update_available")}))
         check("check: newer version reported as update available",
-              res["latest"] == "0.11.0" and res["update_available"]
+              res["latest"] == newer and res["update_available"]
               and res["current"] == beesky.__version__)
 
         # tamper the SERVED manifest: the whole check must refuse
@@ -183,7 +190,7 @@ def main() -> int:
         server_b, base_b = _serve(dir_b)
         servers.append(server_b)
         wrong_sha = hashlib.sha256(b"some other bytes entirely").hexdigest()
-        _write_release(dir_b, base_b, "0.11.0", "beesky", new_bytes,
+        _write_release(dir_b, base_b, newer, "beesky", new_bytes,
                        wrong_sha, key_file)
         # entry selection is by basename: the target is named "beesky"
         target_b = farm / "beesky"

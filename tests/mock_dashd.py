@@ -14,7 +14,9 @@ Payloads are shaped after the firmware's own OpenAPI document
 Remote actions (v0.6) follow the same api-doc: the write endpoints
 ``POST /api/v1/system/reboot`` and ``POST /api/v1/mining/switch-pool``,
 plus ``GET|POST /api/v1/settings`` and ``POST /api/v1/unlock``, are
-implemented with the doc's auth shape — an ``x-api-key`` header equal
+implemented — and so is ``POST /api/v1/firmware/update`` (v0.11,
+multipart, records filename + sha256 of the uploaded file). All of
+them use the doc's auth shape — an ``x-api-key`` header equal
 to ``mock-api-key`` or a bearer JWT ``mock-jwt`` (minted by /unlock
 for password ``mock-pw``); ``GET /settings`` accepts the API key
 only, like the doc says. Every action hit is recorded to the JSON
@@ -23,8 +25,10 @@ state file named by the BEESKY_MOCK_DASHD_STATE env var (when set).
 Run directly to serve forever:  python3 tests/mock_dashd.py [host] [port]
 """
 
+import hashlib
 import json
 import os
+import re
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -45,7 +49,24 @@ _POOLS = [
      "pass": "x", "use_tls": False},
 ]
 _ACTION_STATE = {"reboots": [], "switch_pools": [], "settings_posts": [],
-                 "unlocks": 0, "active_pool": 0}
+                 "unlocks": 0, "active_pool": 0, "firmware_updates": []}
+
+
+def _parse_multipart(headers, body: bytes):
+    """Crude multipart reader: (filename, file_bytes) of the file part."""
+    match = re.search(r"boundary=([^;]+)", headers.get("Content-Type", ""))
+    if not match:
+        return None, b""
+    boundary = match.group(1).strip().strip('"').encode()
+    for part in body.split(b"--" + boundary):
+        if b"filename=" not in part:
+            continue
+        name_match = re.search(rb'filename="([^"]*)"', part)
+        _head, _, rest = part.partition(b"\r\n\r\n")
+        if rest.endswith(b"\r\n"):
+            rest = rest[:-2]
+        return (name_match.group(1).decode() if name_match else None), rest
+    return None, b""
 
 
 def _record_state() -> None:
@@ -288,7 +309,29 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._send_json(200, payload_fn())
 
+    def _firmware_update(self):
+        # POST /api/v1/firmware/update (api-doc): multipart file upload,
+        # bearer/apikey auth, 200 -> RebootAfter {"after": N}. The raw
+        # body is NOT JSON, so it bypasses _read_body entirely.
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        raw = self.rfile.read(length) if length > 0 else b""
+        if not self._authed():
+            self._send_json(401, {"err": "unauthorized"})
+            return
+        filename, content = _parse_multipart(self.headers, raw)
+        _ACTION_STATE["firmware_updates"].append(
+            {"filename": filename,
+             "sha256": hashlib.sha256(content).hexdigest()})
+        _record_state()
+        self._send_json(200, {"after": 3})
+
     def do_POST(self):
+        if self.path == "/api/v1/firmware/update":
+            self._firmware_update()
+            return
         body = self._read_body()
         if self.path == "/api/v1/unlock":
             if body.get("pw") == UNLOCK_PASSWORD:

@@ -45,6 +45,7 @@ import urllib.error
 import urllib.request
 
 from . import report
+from .multipart import build_multipart_body
 
 API_BASE = "/api/v1"
 
@@ -144,6 +145,54 @@ class DashdClient:
             except DashdError:
                 pass  # the POST below will surface the real error (401)
         return self._request("POST", path, payload)
+
+    def post_multipart(self, path: str, field: str, filename: str,
+                       data: bytes, extra_fields: dict | None = None,
+                       password: str | None = None):
+        """Multipart-upload one file (firmware update); return parsed JSON.
+
+        Implements the doc's ``POST /api/v1/firmware/update`` shape:
+        multipart/form-data with a ``file`` part (binary, required) plus
+        optional plain fields such as ``keep_settings``. Auth is the
+        doc's bearer JWT / ``x-api-key`` pair — with only a *password* a
+        JWT is minted via /unlock first, exactly like post_json.
+        """
+        if not self.token and not self.api_key and password:
+            try:
+                self.unlock(password)
+            except DashdError:
+                pass  # the POST below will surface the real error (401)
+        fields = [(field, filename, data, "application/octet-stream")]
+        for key, value in (extra_fields or {}).items():
+            fields.append((key, None, str(value).encode("utf-8"), None))
+        body, content_type = build_multipart_body(fields)
+        url = f"http://{self.host}:{self.port}{API_BASE}{path}"
+        headers = self._headers()
+        headers["Content-Type"] = content_type
+        request = urllib.request.Request(url, headers=headers, data=body,
+                                         method="POST")
+        try:
+            with _OPENER.open(request, timeout=self.timeout) as resp:
+                raw = resp.read()
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                parsed = json.loads(exc.read().decode("utf-8", "replace"))
+                if isinstance(parsed, dict) and parsed.get("err"):
+                    detail = f" ({parsed['err']})"
+            except Exception:  # noqa: BLE001 — body is best-effort context
+                pass
+            raise DashdError(f"POST {path} -> HTTP {exc.code}{detail}") \
+                from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise DashdError(f"cannot reach {url} ({exc})") from exc
+        if not raw.strip():
+            return {}
+        try:
+            parsed = json.loads(raw.decode("utf-8", errors="replace"))
+        except json.JSONDecodeError:
+            return {}  # the 200 status was the answer; body is decoration
+        return parsed if isinstance(parsed, dict) else {}
 
     # -- endpoints -----------------------------------------------------------
     def summary(self) -> dict:

@@ -28,6 +28,16 @@
     python -m beesky update [--check] [--url-base URL]
                                    [--force-file PATH] [--relaunch]
                                    (signed self-update, docs/updating.md)
+
+    python -m beesky fw identify <ip> [--ssh-user root]
+                                   [--ssh-password-env VAR] [--ssh-key F]
+    python -m beesky fw install <ip> <firmware-file> [--yes]
+                                   [--wait-minutes 5] (VNish API or stock CGI)
+    python -m beesky fw unlock <ip> --payload-dir DIR --experimental-unlock
+                                   [--race-delay-ms 0]
+                                   (THỬ NGHIỆM — also needs env
+                                    BEESKY_ALLOW_UNLOCK=1 + typed IP
+                                    confirmation; docs/firmware.md)
 """
 
 from __future__ import annotations
@@ -44,13 +54,14 @@ from . import __version__
 from .agent import AgentService
 from .cloud.server import run_cloud_server
 from .cloud.store import CloudStore
+from .core import firmware as firmware_mod
 from .core import notify as notify_mod
 from .core import report
 from .core import updater
 from .core.bitmain import BitmainClient, BitmainError
 from .core.cgminer import CgminerClient, CgminerError
 from .core.dashd import DashdClient, DashdError
-from .core.discover import Candidate, discover
+from .core.discover import Candidate, discover, probe_host
 from .core.events import EventEngine
 from .web.server import MonitorService, run_server
 
@@ -338,6 +349,131 @@ def cmd_cloud_add_agent(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# fw — firmware identify / install / unlock (v0.11, docs/firmware.md)
+# ---------------------------------------------------------------------------
+
+def _fw_ssh(args: argparse.Namespace) -> firmware_mod.SshRunner:
+    """Build the SshRunner from the fw flags (creds only from flags/env)."""
+    password = None
+    if args.ssh_password_env:
+        password = os.environ.get(args.ssh_password_env)
+    return firmware_mod.SshRunner(
+        args.ip, user=args.ssh_user, password=password,
+        port=args.ssh_port, key_file=args.ssh_key)
+
+
+def _confirm_ip(ip: str, action: str) -> bool:
+    """Typed confirmation: the operator must retype the target IP."""
+    try:
+        typed = input(f"Gõ lại đúng IP đích ({ip}) để xác nhận {action}: ")
+    except EOFError:
+        typed = ""
+    return typed.strip() == ip
+
+
+def cmd_fw_identify(args: argparse.Namespace) -> int:
+    info = firmware_mod.identify(
+        args.ip, http_port=args.http_port, cgminer_port=args.cgminer_port,
+        user=args.user, password=args.password, api_key=args.api_key,
+        token=args.token, ssh=_fw_ssh(args), timeout=args.timeout)
+    print(f"IP:           {info['ip']}")
+    print(f"Nguồn (probe): {info['source'] or '—'}")
+    print(f"Model:        {info['model'] or '—'}")
+    if info["miner_type"]:
+        print(f"miner_type.cgi: {info['miner_type']}")
+    if info["compile_time"]:
+        print(f"compile_time (SSH): {info['compile_time']}")
+    print(f"SSH:          {info['ssh']}")
+    for note in info["notes"]:
+        print(f"  ghi chú: {note}")
+    print(f"Kết luận:     {info['verdict']}")
+    return 0 if info["source"] else 1
+
+
+def cmd_fw_install(args: argparse.Namespace) -> int:
+    fw_path = Path(args.file)
+    if not fw_path.is_file():
+        print(f"fw install: không thấy file firmware: {fw_path}",
+              file=sys.stderr)
+        return 2
+    size, sha256 = firmware_mod.file_info(fw_path)
+    print(f"Firmware: {fw_path} — {size} bytes, sha256 {sha256}")
+
+    cand = probe_host(args.ip, timeout=args.timeout,
+                      http_port=args.http_port,
+                      cgminer_port=args.cgminer_port,
+                      username=args.user, password=args.password,
+                      api_key=args.api_key, token=args.token)
+    if cand is None or cand.source not in ("vnish", "stock"):
+        found = cand.source if cand else "không có phản hồi"
+        print(f"fw install: {args.ip} không phải đích cài firmware được "
+              f"(probe: {found}) — chỉ cài được cho máy VNish/dashd "
+              "(qua API) hoặc stock Bitmain (qua upgrade.cgi)",
+              file=sys.stderr)
+        return 1
+    print(f"Đích: {args.ip} — nguồn {cand.source}"
+          + (f", model {cand.model}" if cand.model else ""))
+    if not args.yes:
+        if not _confirm_ip(args.ip, "cài firmware"):
+            print("Đã huỷ — IP gõ vào không khớp.", file=sys.stderr)
+            return 2
+    if cand.source == "vnish":
+        ok, message = firmware_mod.install_dashd(
+            args.ip, fw_path, http_port=args.http_port,
+            api_key=args.api_key, token=args.token,
+            dashd_password=args.dashd_password,
+            keep_settings=args.keep_settings)
+    else:
+        ok, message = firmware_mod.install_stock(
+            args.ip, fw_path, http_port=args.http_port,
+            user=args.user, password=args.password)
+    print(("OK: " if ok else "THẤT BẠI: ") + message)
+    if not ok:
+        return 1
+    firmware_mod.wait_back(
+        args.ip, minutes=args.wait_minutes, http_port=args.http_port,
+        cgminer_port=args.cgminer_port, user=args.user,
+        password=args.password, api_key=args.api_key, token=args.token)
+    return 0
+
+
+def cmd_fw_unlock(args: argparse.Namespace) -> int:
+    # HARD GATES — all checked before ANY network I/O (docs/firmware.md).
+    if not args.experimental_unlock:
+        print("fw unlock: TỪ CHỐI — thiếu cờ --experimental-unlock. "
+              "Đây là tính năng THỬ NGHIỆM theo recipe khôi phục từ "
+              "HashCore Toolkit; đọc docs/firmware.md trước.",
+              file=sys.stderr)
+        return 2
+    if os.environ.get("BEESKY_ALLOW_UNLOCK") != "1":
+        print("fw unlock: TỪ CHỐI — chưa đặt biến môi trường "
+              "BEESKY_ALLOW_UNLOCK=1.", file=sys.stderr)
+        return 2
+    first, second = firmware_mod.payload_paths(args.payload_dir)
+    missing = [p.name for p in (first, second) if not p.is_file()]
+    if missing:
+        print(f"fw unlock: TỪ CHỐI — thiếu file payload trong "
+              f"{args.payload_dir}: {', '.join(missing)}. BeeSky không "
+              "kèm sẵn file .bmu (chúng nằm trong gói firmware) — xem "
+              "docs/firmware.md.", file=sys.stderr)
+        return 2
+    print("fw unlock — THỬ NGHIỆM: nạp update_first.bmu + đua kill "
+          "tiến trình kiểm chữ ký + update_second.bmu lên máy stock "
+          "đang khoá. Hãy thử boot SD trước; hỏng thì khôi phục bằng "
+          "firmware gốc / SD.")
+    if not _confirm_ip(args.ip, "unlock THỬ NGHIỆM"):
+        print("Đã huỷ — IP gõ vào không khớp.", file=sys.stderr)
+        return 2
+    ok, _stages = firmware_mod.unlock(
+        args.ip, args.payload_dir, http_port=args.http_port,
+        user=args.user, password=args.password, ssh=_fw_ssh(args),
+        race_delay_ms=args.race_delay_ms)
+    print("UNLOCK THÀNH CÔNG" if ok else
+          "UNLOCK CHƯA THÀNH CÔNG — xem stage FAIL ở trên")
+    return 0 if ok else 1
+
+
+# ---------------------------------------------------------------------------
 # argument parsing
 # ---------------------------------------------------------------------------
 
@@ -360,6 +496,37 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
                         help="HTTP port for dashd/stock adapters (default 80)")
     parser.add_argument("--cgminer-port", type=int, default=4028,
                         help="cgminer RPC port (default 4028)")
+
+
+def _add_fw_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("ip", help="miner IP address (single host)")
+    parser.add_argument("--timeout", type=float, default=3.0,
+                        help="per-probe timeout in seconds (default 3)")
+    parser.add_argument("--user", default="root",
+                        help="stock-firmware web username (default root)")
+    parser.add_argument("--password", default="root",
+                        help="stock-firmware web password (default root)")
+    parser.add_argument("--api-key", metavar="KEY",
+                        help="dashd (VNish) x-api-key header, if required")
+    parser.add_argument("--token", metavar="JWT",
+                        help="dashd (VNish) bearer token, if required")
+    parser.add_argument("--dashd-password", metavar="PW",
+                        help="dashd web password — exchanged for a JWT "
+                             "via /unlock when no --api-key/--token given")
+    parser.add_argument("--http-port", type=int, default=80,
+                        help="HTTP port of the miner web API (default 80)")
+    parser.add_argument("--cgminer-port", type=int, default=4028,
+                        help="cgminer RPC port (default 4028)")
+    parser.add_argument("--ssh-user", default="root",
+                        help="SSH username (default root)")
+    parser.add_argument("--ssh-password-env", metavar="VAR",
+                        help="environment variable holding the SSH "
+                             "password (needs sshpass on this machine); "
+                             "the password itself is never a CLI value")
+    parser.add_argument("--ssh-port", type=int, default=22,
+                        help="SSH port (default 22)")
+    parser.add_argument("--ssh-key", metavar="FILE",
+                        help="SSH private key file for key auth")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -480,6 +647,52 @@ def main(argv: list[str] | None = None) -> int:
                              "same command line (the agent's "
                              "--auto-update path)")
     update.set_defaults(func=cmd_update)
+
+    fw = sub.add_parser(
+        "fw", help="firmware: identify / install / unlock THỬ NGHIỆM "
+                   "(v0.11, docs/firmware.md)")
+    fw_sub = fw.add_subparsers(dest="fw_command", required=True)
+
+    fw_identify = fw_sub.add_parser(
+        "identify", help="what firmware is this miner running?")
+    _add_fw_args(fw_identify)
+    fw_identify.set_defaults(func=cmd_fw_identify)
+
+    fw_install = fw_sub.add_parser(
+        "install", help="install a firmware file (VNish API / stock CGI)")
+    _add_fw_args(fw_install)
+    fw_install.add_argument("file", help="local firmware file to upload")
+    fw_install.add_argument("--yes", action="store_true",
+                            help="skip the typed-IP confirmation")
+    fw_install.add_argument("--wait-minutes", type=float, default=5,
+                            help="poll up to this long for the miner to "
+                                 "come back after install (default 5; "
+                                 "0 = don't wait)")
+    fw_install.add_argument("--keep-settings", choices=("true", "false"),
+                            help="dashd only: keep_settings form field "
+                                 "of /firmware/update")
+    fw_install.set_defaults(func=cmd_fw_install)
+
+    fw_unlock = fw_sub.add_parser(
+        "unlock", help="THỬ NGHIỆM / EXPERIMENTAL: unlock a locked stock "
+                       "miner with the recovered .bmu race recipe — "
+                       "hard-gated, see docs/firmware.md")
+    _add_fw_args(fw_unlock)
+    fw_unlock.add_argument("--payload-dir", required=True, metavar="DIR",
+                           help="directory holding update_first.bmu and "
+                                "update_second.bmu (owner-supplied; "
+                                "BeeSky ships none)")
+    fw_unlock.add_argument("--experimental-unlock", action="store_true",
+                           help="gate 1 of 3: acknowledge this is the "
+                                "experimental unlock (also needs env "
+                                "BEESKY_ALLOW_UNLOCK=1 and typing the "
+                                "target IP)")
+    fw_unlock.add_argument("--race-delay-ms", type=int, default=0,
+                           help="delay before the first signature-check "
+                                "kill shot (default 0; no timing value "
+                                "was recovered — first real run is a "
+                                "calibration)")
+    fw_unlock.set_defaults(func=cmd_fw_unlock)
 
     args = parser.parse_args(argv)
     return args.func(args)
