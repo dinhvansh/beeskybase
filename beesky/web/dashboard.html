@@ -240,6 +240,29 @@ function fmtThs(v) {
   if (v === null || v === undefined) return "–";
   return v.toFixed(2) + " TH/s";
 }
+// Native-rate display (v0.20): records carry rate_value + rate_unit;
+// pre-v0.20 records fall back to their ths as TH/s. Totals group per
+// unit — a mixed fleet never sums unlike quantities together.
+function rateOf(m) {
+  if (m.rate_value !== null && m.rate_value !== undefined && m.rate_unit)
+    return [m.rate_value, m.rate_unit];
+  if (m.ths !== null && m.ths !== undefined) return [m.ths, "TH/s"];
+  return null;
+}
+function fmtRate(m) {
+  const r = rateOf(m);
+  return r ? r[0].toFixed(2) + " " + r[1] : "–";
+}
+function fmtRate0(m) {
+  const r = rateOf(m);
+  return r ? r[0].toFixed(0) + " " + r[1] : "–";
+}
+const RATE_UNIT_ORDER = ["TH/s", "GH/s", "MH/s", "ksol/s", "sol/s"];
+function fmtTotalsHtml(groups) {
+  const keys = RATE_UNIT_ORDER.filter((u) => groups.has(u));
+  if (!keys.length) return null;
+  return keys.map((u) => groups.get(u).toFixed(2) + " <small>" + u + "</small>").join(" · ");
+}
 function esc(s) {
   return String(s === null || s === undefined ? "" : s)
     .replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -276,7 +299,7 @@ function heatTile(m) {
   const lastOctet = String(m.ip || "?").split(".").pop();
   const temp = (m.max_temp_c === null || m.max_temp_c === undefined)
     ? "–" : m.max_temp_c.toFixed(0) + " °C";
-  const ths = (m.ths === null || m.ths === undefined) ? "–" : m.ths.toFixed(0) + " TH/s";
+  const ths = fmtRate0(m);
   const tip = (m.ip || "") + " · " + (m.model || "") + " · " +
     (offline ? "Mất kết nối" : (m.status === "OK" ? "OK" : "Cần kiểm tra")) +
     (problems ? " · " + problems + " vấn đề" : "");
@@ -314,9 +337,13 @@ async function refreshMiners() {
     const r = await fetch("/api/miners");
     const data = await r.json();
     const miners = data.miners || [];
-    let totalThs = 0, problems = 0, maxTemp = null;
+    const totalGroups = new Map();
+    let problems = 0, maxTemp = null;
     const rows = miners.map((m) => {
-      if (m.online && m.ths !== null && m.ths !== undefined) totalThs += m.ths;
+      if (m.online) {
+        const r = rateOf(m);
+        if (r) totalGroups.set(r[1], (totalGroups.get(r[1]) || 0) + r[0]);
+      }
       if (m.status !== "OK") problems += 1;
       if (m.max_temp_c !== null && m.max_temp_c !== undefined) {
         maxTemp = maxTemp === null ? m.max_temp_c : Math.max(maxTemp, m.max_temp_c);
@@ -335,7 +362,7 @@ async function refreshMiners() {
         "<td>" + esc(m.ip) + "</td>" +
         "<td>" + esc(m.model) + "</td>" +
         "<td>" + esc(m.source || "–") + "</td>" +
-        "<td>" + fmtThs(m.ths) + "</td>" +
+        "<td>" + fmtRate(m) + "</td>" +
         "<td>" + chips + "</td>" +
         "<td>" + temp + "</td>" +
         "<td>" + esc(fans) + "</td>" +
@@ -346,7 +373,8 @@ async function refreshMiners() {
       : '<tr><td colspan="8" class="empty">Chưa phát hiện máy nào — kiểm tra lại mục tiêu quét.</td></tr>';
     renderHeatmap(miners);
     $("card-total").textContent = miners.length;
-    $("card-hashrate").innerHTML = miners.length ? totalThs.toFixed(2) + " <small>TH/s</small>" : "–";
+    $("card-hashrate").innerHTML = miners.length
+      ? (fmtTotalsHtml(totalGroups) || "0.00 <small>TH/s</small>") : "–";
     $("card-problems").textContent = miners.length ? problems : "–";
     $("card-problems-wrap").classList.toggle("alert", problems > 0);
     $("card-temp").innerHTML = maxTemp === null ? "–" : maxTemp.toFixed(0) + " <small>°C</small>";

@@ -58,6 +58,26 @@ def severity_rank(severity: str) -> int:
     return SEVERITIES.index(severity)
 
 
+def _rate_value(record: dict):
+    """(value, unit) of the record's rate for drop tracking (v0.20).
+
+    The drop check is a ratio against the miner's OWN rolling
+    baseline, so it stays unit-safe as long as one miner is tracked
+    in one consistent series: the record's native rate when it
+    carries one (L9 in MH/s, Z15 in ksol/s), else the historical
+    ``ths`` series with its ``ghs_av`` fallback. Event payloads keep
+    the legacy ``baseline_ths`` / ``current_ths`` key names — for
+    non-SHA256 miners they carry the tracked native-scale values.
+    """
+    value = record.get("rate_value")
+    if value is not None:
+        return float(value), str(record.get("rate_unit") or "TH/s")
+    cur = record.get("ths")
+    if cur is None and record.get("ghs_av") is not None:
+        cur = record["ghs_av"] / 1000.0
+    return (float(cur) if cur is not None else None), "TH/s"
+
+
 def _step_severity(value: float, steps) -> str:
     """Map a deviation onto the 3-step scale (below step 1 = info)."""
     if value >= steps[2]:
@@ -199,7 +219,7 @@ class EventEngine:
             if st is None:
                 st = self._new_miner_state(record, now)
                 self._miners[ip] = st
-                self._push(st["hr_hist"], record.get("ths"))
+                self._push(st["hr_hist"], _rate_value(record)[0])
                 self._push(st["temp_hist"], record.get("max_temp_c"))
                 continue
 
@@ -225,9 +245,7 @@ class EventEngine:
     # ------------------------------------------------------------------
 
     def _check_hashrate(self, st: dict, record: dict, now: float) -> list[dict]:
-        cur = record.get("ths")
-        if cur is None and record.get("ghs_av") is not None:
-            cur = record["ghs_av"] / 1000.0
+        cur, unit = _rate_value(record)
         baseline = self._baseline(st["hr_hist"])
         fired: list[dict] = []
         drop_pct = None
@@ -240,7 +258,7 @@ class EventEngine:
             fired.append(_event(
                 now, record, "HASHRATE_DROP", severity,
                 f"hashrate dropped {drop_pct:.1f}% vs baseline "
-                f"({baseline:.2f} -> {cur:.2f} TH/s)",
+                f"({baseline:.2f} -> {cur:.2f} {unit})",
                 {"baseline_ths": round(baseline, 2),
                  "current_ths": round(float(cur), 2),
                  "drop_pct": round(drop_pct, 1)}))

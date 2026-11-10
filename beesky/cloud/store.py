@@ -56,6 +56,8 @@ import sqlite3
 import threading
 import time
 
+from ..core import report as _core_report
+
 SNAPSHOT_HISTORY = 100
 EVENT_HISTORY = 5000
 COMMAND_HISTORY = 5000
@@ -358,9 +360,10 @@ class CloudStore:
         At most one row per site per HISTORY_SAMPLE_INTERVAL_S: agents
         typically push every few seconds, and a minute of resolution
         is plenty for a 24 h farm chart. Totals mirror sites_summary:
-        summed TH/s over records that carry it, problem = status not
-        OK. Rows older than HISTORY_RETENTION_S are pruned here, on
-        the write path, so no background job is needed.
+        summed TH/s equivalents over records that carry one (v0.20 —
+        sol-rate records excluded), problem = status not OK. Rows
+        older than HISTORY_RETENTION_S are pruned here, on the write
+        path, so no background job is needed.
         """
         agent = self._db.execute(
             "SELECT site FROM agents WHERE id = ?",
@@ -374,8 +377,12 @@ class CloudStore:
         if last is not None \
                 and ts - float(last) < HISTORY_SAMPLE_INTERVAL_S:
             return
-        ths_values = [m["ths"] for m in miners
-                      if isinstance(m, dict) and m.get("ths") is not None]
+        # v0.20: the history total is the H/s-family TH/s sum only —
+        # a sol-rate record (Equihash) has no TH/s equivalent and no
+        # longer pollutes the series with its raw sol number.
+        ths_values = [v for m in miners if isinstance(m, dict)
+                      for v in [_core_report.ths_equivalent(m)]
+                      if v is not None]
         temp_values = [m["max_temp_c"] for m in miners
                        if isinstance(m, dict)
                        and m.get("max_temp_c") is not None]
@@ -891,15 +898,23 @@ class CloudStore:
         return [r["site"] for r in rows]
 
     def farm_ths(self, site: str) -> float | None:
-        """Farm-side TH/s for *site*: sum over its latest snapshot."""
+        """Farm-side TH/s for *site*: sum over its latest snapshot.
+
+        v0.20: only H/s-family rates count, at their true TH/s
+        equivalent (report.ths_equivalent). A sol-rate record has no
+        TH/s equivalent — a site whose snapshot holds only Equihash
+        miners returns None and the pool poller skips it, instead of
+        comparing the pool against a meaningless raw sol sum.
+        """
         agent = self.agent_by_site(site)
         if agent is None:
             return None
         snap = self.latest_snapshot(agent["id"])
         if not snap:
             return None
-        values = [m["ths"] for m in snap[1]
-                  if isinstance(m, dict) and m.get("ths") is not None]
+        values = [v for m in snap[1] if isinstance(m, dict)
+                  for v in [_core_report.ths_equivalent(m)]
+                  if v is not None]
         return round(sum(values), 4) if values else None
 
     def record_pool_sample(self, site: str, ts: float, pool_ths: float,
@@ -1057,8 +1072,12 @@ class CloudStore:
                 continue  # revoked agents leave the fleet views (v0.13)
             snap = self.latest_snapshot(agent["id"])
             miners = snap[1] if snap else []
-            ths_values = [m["ths"] for m in miners
-                          if m.get("ths") is not None]
+            # v0.20: total_ths is the H/s-family TH/s sum (identical
+            # for TH/s and pre-v0.20 records); rate_totals carries the
+            # per-unit grouped totals the dashboard renders.
+            ths_values = [v for m in miners
+                          for v in [_core_report.ths_equivalent(m)]
+                          if v is not None]
             temp_values = [m["max_temp_c"] for m in miners
                            if m.get("max_temp_c") is not None]
             interval = agent.get("interval_s") or 30.0
@@ -1080,6 +1099,10 @@ class CloudStore:
                 "problem_count": sum(1 for m in miners
                                      if m.get("status") != "OK"),
                 "total_ths": round(sum(ths_values), 2),
+                "rate_totals": [
+                    {"unit": unit, "value": round(value, 2)}
+                    for value, unit in
+                    _core_report.fleet_rate_totals(miners)],
                 "max_temp": (max(temp_values) if temp_values else None),
             })
         return sites

@@ -14,6 +14,70 @@ from pathlib import Path
 TEMP_LIMIT_C = 85        # flag any chain at or above this temperature
 NO_HASH_ELAPSED_S = 300  # hashrate 0 only counts as a problem after 5 min up
 
+# --------------------------------------------------------------------------
+# native rate units (v0.20)
+#
+# The cgminer SUMMARY names its rate fields after the unit the value is
+# in ("GHS av", "MHS av", ...), and non-SHA256 fleets report in their
+# own quantity entirely: Bitmain's fleet displays quote Scrypt miners
+# in MH/s and Equihash miners in ksol/s. Until v0.20 every record was
+# squeezed into a TH/s number, so an Antminer L9 rendered as "0.01" in
+# a TH/s column and a Z15's sol rate was summed into fleet totals as
+# if it were TH/s. Records now also carry the rate in its NATIVE unit
+# (``rate_value`` / ``rate_unit``); the legacy ``ghs_*`` / ``ths``
+# fields are computed exactly as before.
+# --------------------------------------------------------------------------
+
+RATE_UNIT_ORDER = ("TH/s", "GH/s", "MH/s", "ksol/s", "sol/s")
+HASH_UNITS = ("TH/s", "GH/s", "MH/s")  # sol/s is a different quantity
+
+# Bitmain model families whose rate is not a SHA256 hashrate. The Z
+# series is Equihash (sol/s); the L series is Scrypt (MH/s display).
+_EQUIHASH_MODEL = re.compile(r"\bZ\d{1,2}\b", re.IGNORECASE)
+_SCRYPT_MODEL = re.compile(r"\bL\d{1,2}\b", re.IGNORECASE)
+
+
+def _field_main(summary: dict, key_5s: str, key_av: str):
+    """The main rate of a unit field pair: 5s figure preferred, else av."""
+    value = _num(summary.get(key_5s))
+    return value if value is not None else _num(summary.get(key_av))
+
+
+def _native_rate(summary: dict, model) -> tuple:
+    """(value, unit) of the miner's rate in its native unit.
+
+    Returns (None, None) when the summary carries no rate field.
+    Conventions pinned by the owner's fleet photos (BTC Tools as the
+    ground truth: Antminer L9 -> "14.54 MH/s", Antminer Z15 ->
+    "1101 ksol/s"):
+
+      * explicit "KSol/s .." / "Sol/s .." fields are the sol rate;
+      * a Z-series model's GHS fields carry its sol rate in sol/s, so
+        the GHS value / 1000 is the rate in ksol/s;
+      * an L-series model's MHS fields are its Scrypt rate — the
+        fleet display is the MHS value / 1000, labelled MH/s;
+      * otherwise the field's own family: GHS -> value / 1000 in TH/s,
+        MHS -> value / 1000 in MH/s (the historical display scale).
+    """
+    ksol = _field_main(summary, "KSol/s 5s", "KSol/s av")
+    if ksol is not None:
+        return ksol, "ksol/s"
+    sol = _field_main(summary, "Sol/s 5s", "Sol/s av")
+    if sol is not None:
+        return (sol / 1000.0, "ksol/s") if sol >= 1000 else (sol, "sol/s")
+    ghs = _field_main(summary, "GHS 5s", "GHS av")
+    mhs = _field_main(summary, "MHS 5s", "MHS av")
+    model = str(model or "")
+    if ghs is not None and _EQUIHASH_MODEL.search(model):
+        return ghs / 1000.0, "ksol/s"
+    if mhs is not None and _SCRYPT_MODEL.search(model):
+        return mhs / 1000.0, "MH/s"
+    if ghs is not None:
+        return ghs / 1000.0, "TH/s"
+    if mhs is not None:
+        return mhs / 1000.0, "MH/s"
+    return None, None
+
 
 # --------------------------------------------------------------------------
 # small tolerant helpers (firmware JSON types are notoriously inconsistent)
@@ -78,7 +142,7 @@ def _fan_speeds(stats: dict) -> list[int]:
 
 def _finalise_record(ip: str, model: str, elapsed_s: int, gh_5s, gh_av,
                      chains: list[dict], fans: list[int], source: str,
-                     power_w=None) -> dict:
+                     power_w=None, rate_value=None, rate_unit=None) -> dict:
     """Apply the problem rules and assemble a status record.
 
     Shared by every vendor adapter. *chains* entries must carry ``index``,
@@ -86,9 +150,15 @@ def _finalise_record(ip: str, model: str, elapsed_s: int, gh_5s, gh_av,
     the vendor API only reports counts) and ``temp_c``. *power_w* is the
     miner's wall power draw in watts when the source reports one (v0.9 —
     VNish dashd ``power_consumption``, some cgminer stats), else ``None``;
-    the cloud integrates it into energy reports.
+    the cloud integrates it into energy reports. *rate_value* / *rate_unit*
+    carry the rate in its native unit (v0.20); when the caller does not
+    supply them they are derived from the GH/s main rate as TH/s, which
+    is exactly the historical ``ths`` semantics (HTTP adapters report
+    in TH/s already).
     """
     gh_main = gh_5s if gh_5s is not None else gh_av
+    if rate_unit is None and gh_main is not None:
+        rate_value, rate_unit = gh_main / 1000.0, "TH/s"
     for chain in chains:
         chain["chips_missing"] = chain["chips_total"] - chain["chips_alive"]
     temps = [c["temp_c"] for c in chains if c["temp_c"] is not None]
@@ -132,6 +202,8 @@ def _finalise_record(ip: str, model: str, elapsed_s: int, gh_5s, gh_av,
         "ghs_5s": gh_5s,
         "ghs_av": gh_av,
         "ths": (gh_main / 1000.0) if gh_main is not None else None,
+        "rate_value": rate_value,
+        "rate_unit": rate_unit,
         "power_w": float(power_w) if power_w is not None else None,
         "chains": chains,
         "fans_rpm": fans,
@@ -171,6 +243,7 @@ def build_record(ip: str, summary: dict, stats: dict, source: str = "cgminer") -
     gh_av = _num(summary.get("GHS av"))
     if gh_av is None and _num(summary.get("MHS av")) is not None:
         gh_av = _num(summary.get("MHS av")) / 1000.0
+    rate_value, rate_unit = _native_rate(summary, model)
 
     # --- per-chain data from chain_acs strings ('o' = alive chip) ---------
     chains: list[dict] = []
@@ -193,7 +266,8 @@ def build_record(ip: str, summary: dict, stats: dict, source: str = "cgminer") -
 
     return _finalise_record(ip, model, elapsed, gh_5s, gh_av,
                             chains, _fan_speeds(stats), source,
-                            power_w=_power_w(summary, stats))
+                            power_w=_power_w(summary, stats),
+                            rate_value=rate_value, rate_unit=rate_unit)
 
 
 def build_record_from_boards(ip: str, *, model: str = "Unknown", elapsed_s: int = 0,
@@ -224,12 +298,93 @@ def error_record(ip: str, message: str, source: str = "cgminer") -> dict:
     """Status record for a candidate that stopped answering its API."""
     return {
         "ip": ip, "model": "Unknown", "source": source, "elapsed_s": 0,
-        "ghs_5s": None, "ghs_av": None, "ths": None, "power_w": None,
+        "ghs_5s": None, "ghs_av": None, "ths": None,
+        "rate_value": None, "rate_unit": None, "power_w": None,
         "chains": [], "fans_rpm": [], "chips_alive": 0, "chips_total": 0,
         "max_temp_c": None,
         "problems": [{"code": "FETCH_ERROR", "detail": message}],
         "status": "CHECK",
     }
+
+
+# --------------------------------------------------------------------------
+# rate access for display + aggregation (v0.20)
+# --------------------------------------------------------------------------
+
+def record_rate(record) -> tuple | None:
+    """(value, unit) of a record's rate in its native unit, or None.
+
+    Pre-v0.20 records (old agents, stored snapshots) carry no rate
+    fields; their ``ths`` IS a TH/s rate and is reported as such.
+    """
+    if not isinstance(record, dict):
+        return None
+    value, unit = record.get("rate_value"), record.get("rate_unit")
+    if value is not None and unit:
+        return float(value), str(unit)
+    ths = record.get("ths")
+    if ths is not None:
+        return float(ths), "TH/s"
+    return None
+
+
+def format_rate(record) -> str:
+    """One record's rate as displayed: "14.54 MH/s", "-" when unknown."""
+    rate = record_rate(record)
+    return f"{rate[0]:.2f} {rate[1]}" if rate else "-"
+
+
+def fleet_rate_totals(records) -> list[tuple]:
+    """[(value, unit)] — rates summed per native unit, canonical order.
+
+    Aggregation NEVER mixes units: a mixed SHA256 + Scrypt + Equihash
+    fleet yields one total per unit instead of a single meaningless
+    number (the pre-v0.20 fleet total did exactly that).
+    """
+    sums: dict[str, float] = {}
+    for record in records or []:
+        rate = record_rate(record)
+        if rate is not None:
+            sums[rate[1]] = sums.get(rate[1], 0.0) + rate[0]
+    return [(sums[unit], unit) for unit in RATE_UNIT_ORDER if unit in sums]
+
+
+def format_rate_totals(records) -> str:
+    """Grouped fleet total: "102.90 TH/s · 14.54 MH/s · 1,101.00 ksol/s".
+
+    A single-unit fleet renders exactly as the historical total did
+    ("110.13 TH/s"); several units join with thousands separators.
+    """
+    groups = fleet_rate_totals(records)
+    if not groups:
+        return "-"
+    if len(groups) == 1:
+        value, unit = groups[0]
+        return f"{value:.2f} {unit}"
+    return " · ".join(f"{value:,.2f} {unit}" for value, unit in groups)
+
+
+def ths_equivalent(record):
+    """The record's rate as a true TH/s figure, or None.
+
+    Only H/s-family rates convert: the native display value of an
+    MH/s record is its MHS field / 1000, so its TH/s equivalent is
+    that value / 1000 again (MHS / 1e6 — identical to the record's
+    ``ths`` whenever both exist). A sol rate is a different physical
+    quantity: it returns None and must never be summed into a
+    hashrate total (pool comparison, farm history).
+    """
+    rate = record_rate(record)
+    if rate is None:
+        return None
+    value, unit = rate
+    if unit == "TH/s":
+        return value
+    if unit == "GH/s":
+        return value / 1000.0
+    if unit == "MH/s":
+        return value / 1000.0
+    return None
 
 
 # --------------------------------------------------------------------------
@@ -288,8 +443,9 @@ def make_ticket(record: dict) -> str:
         f"IP: {record['ip']}",
         f"Model: {record['model']}",
     ]
-    if record.get("ths") is not None:
-        lines.append(f"Hashrate: {record['ths']:.2f} TH/s")
+    rate = record_rate(record)
+    if rate is not None:
+        lines.append(f"Hashrate: {rate[0]:.2f} {rate[1]}")
     lines.append(f"Thời gian đã chạy: {record['elapsed_s']} giây")
     lines.append(f"Tổng chip sống: {record['chips_alive']}/{record['chips_total']}")
     lines.append("")

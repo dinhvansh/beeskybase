@@ -105,7 +105,7 @@ def row_values(record: dict) -> tuple[str, ...]:
         record["ip"],
         str(record.get("model") or "Unknown"),
         SOURCE_LABEL.get(record.get("source"), str(record.get("source", "-"))),
-        _fmt(record.get("ths")),
+        report.format_rate(record),
         chips,
         _fmt(record.get("max_temp_c"), "{:.0f}"),
         fans,
@@ -327,9 +327,9 @@ class BeeSkyApp:
         columns = ("ip", "model", "source", "ths", "chips", "temp", "fans",
                    "status")
         headings = {"ip": "IP", "model": "Model", "source": "Nguồn",
-                    "ths": "Hashrate (TH/s)", "chips": "Chip",
+                    "ths": "Hashrate", "chips": "Chip",
                     "temp": "Nhiệt độ", "fans": "Quạt", "status": "Trạng thái"}
-        widths = {"ip": 110, "model": 160, "source": 100, "ths": 110,
+        widths = {"ip": 110, "model": 150, "source": 95, "ths": 135,
                   "chips": 70, "temp": 70, "fans": 150, "status": 90}
         self.tree = ttk.Treeview(table_frame, columns=columns, height=7,
                                  show="headings", selectmode="browse")
@@ -472,9 +472,16 @@ class BeeSkyApp:
     def _update_stats(self, records: list[dict], bad: int) -> None:
         """Refresh the four stat cards from the latest scan."""
         self.stat_total_var.set(str(len(records)))
-        total_ths = sum(r["ths"] for r in records
-                        if r.get("ths") is not None)
-        self.stat_ths_var.set(f"{total_ths:.2f}")
+        # v0.20: the total groups by native unit — a mixed fleet shows
+        # one figure per unit instead of a meaningless mixed sum. A
+        # single TH/s group keeps the historical bare-number rendering.
+        groups = report.fleet_rate_totals(records)
+        if not groups:
+            self.stat_ths_var.set("0.00")
+        elif len(groups) == 1 and groups[0][1] == "TH/s":
+            self.stat_ths_var.set(f"{groups[0][0]:.2f}")
+        else:
+            self.stat_ths_var.set(report.format_rate_totals(records))
         self.stat_problem_var.set(str(bad))
         self._problem_value_label.configure(
             fg=ui_theme.BAD if bad else ui_theme.TEXT)
@@ -518,7 +525,7 @@ class BeeSkyApp:
         lines = [
             f"{record['ip']} — {record.get('model') or 'Unknown'} "
             f"({SOURCE_LABEL.get(record.get('source'), record.get('source'))})",
-            f"Hashrate: {_fmt(record.get('ths'))} TH/s | "
+            f"Hashrate: {report.format_rate(record)} | "
             f"Chip: {record.get('chips_alive', 0)}/{record.get('chips_total', 0)} | "
             f"Nhiệt độ cao nhất: {_fmt(record.get('max_temp_c'), '{:.0f}')} °C | "
             f"Quạt: {'/'.join(str(f) for f in record.get('fans_rpm') or []) or '-'} RPM",

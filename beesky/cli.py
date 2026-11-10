@@ -104,15 +104,14 @@ def _scan_records(args: argparse.Namespace) -> list[dict]:
 
 
 def _print_table(records: list[dict]) -> None:
-    headers = ["IP", "Model", "Source", "TH/s", "Chips", "MaxTemp", "Fans", "Status"]
+    headers = ["IP", "Model", "Source", "Hashrate", "Chips", "MaxTemp", "Fans", "Status"]
     rows: list[list[str]] = []
     for rec in records:
-        ths = f"{rec['ths']:.2f}" if rec["ths"] is not None else "-"
         chips = f"{rec['chips_alive']}/{rec['chips_total']}" if rec["chips_total"] else "-"
         temp = f"{rec['max_temp_c']:.0f}" if rec["max_temp_c"] is not None else "-"
         fans = "/".join(str(f) for f in rec["fans_rpm"]) or "-"
         rows.append([rec["ip"], str(rec["model"]), str(rec.get("source", "-")),
-                     ths, chips, temp, fans, rec["status"]])
+                     report.format_rate(rec), chips, temp, fans, rec["status"]])
     widths = [max(len(headers[i]), *(len(r[i]) for r in rows)) if rows else len(headers[i])
               for i in range(len(headers))]
     fmt = " | ".join(f"{{:<{w}}}" for w in widths)

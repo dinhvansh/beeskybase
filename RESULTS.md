@@ -245,3 +245,102 @@ empty-scan phase (127.0.0.2: selection "-", placeholder intact) and asserts sele
 first row, detail = first miner, geometry = the fitted formula centred and fully on
 screen. Chain (tests/run_mock_test_v19_7.sh): GUI, theme, rounded, glass, agent-app,
 agent-bg, targets all green (236 PASS lines).
+
+## v0.20.0 — unit-correct hashrate for L9/Z15 fleets + diagnosis calibration
+Field evidence (owner's photos, same 63-miner fleet, same laptop): BTC Tools reports the
+Antminer L9 at 14.54 MH/s RT (avg 16.1) and the Antminer Z15 at ~1101 ksol/s RT; BeeSky
+v0.19.7 (source "cgminer RPC") showed the L9 row as "0.01" in its TH/s column, a fleet
+total of 12153.83, chip count 330/369 for the L9, and 51 of 63 machines flagged CHECK.
+
+WHERE THE UNIT ASSUMPTION LIVED. beesky/core/report.py::build_record read the cgminer
+SUMMARY's "GHS 5s"/"GHS av" (fallback "MHS av"/1000) into GH/s, and _finalise_record set
+ths = gh/1000 — every rate was squeezed into TH/s regardless of what the field actually
+measured, and every surface then summed record["ths"] blindly (GUI stat card, both
+dashboards' total cards, cloud sites_summary/farm_ths/history sampler). The cgminer field
+NAME encodes the unit family, but for two fleet models the fields lie by omission: an
+L9's bmminer reports the Scrypt rate in the MHS pair (MHS av = 14540 for a 14.54 MH/s
+machine; its GHS av twin, 14.54, is the same figure ÷1000 and meaningless), while a Z15
+reports its sol rate in raw sol/s inside the GHS fields (GHS av ≈ 1,101,000 for a
+1101 ksol/s machine — the only reading under which the photo's garbage fleet total
+decomposes: ~11 Z15s × ~1101 ≈ 12153.83).
+
+THE FIX. Records now carry rate_value + rate_unit (native unit) next to the untouched
+legacy fields. _native_rate(summary, model) resolves them in order: (1) explicit
+"KSol/s 5s/av" → ksol/s, "Sol/s 5s/av" → ksol/s if ≥1000 else sol/s; (2) Z-series model
+(regex \bZ\d{1,2}\b) + GHS fields → value = GHS_main/1000, unit ksol/s; (3) L-series
+model + MHS pair present → value = MHS_main/1000, unit MH/s (fires only when BOTH GHS
+and MHS exist, so an MHS-only reply keeps the pre-existing gh fallback and is labelled
+by rule 4); (4) field family: GHS → TH/s (gh/1000), MHS-only → MH/s (mhs/1000); 5s
+preferred over av, mirroring ths. Legacy fields (ths, ghs_5s, ghs_av) are computed
+byte-identically — the S19 record is pinned field-by-field against tests/mock_scan.json.
+Displays render the native value+unit: GUI table + detail pane, CLI table (header
+"TH/s" → "Hashrate"), both dashboards' miner tables and heat tiles, repair tickets.
+Fleet totals aggregate ONLY within a unit (report.fleet_rate_totals /
+format_rate_totals, canonical order TH/s · GH/s · MH/s · ksol/s · sol/s, thousands
+separators on grouped figures): a single TH/s group renders exactly as before (the
+desktop stat card keeps its bare number; a single non-TH/s group shows value+unit;
+mixed shows the grouped string). Records without rate fields (old agents, stored
+snapshots) read back as (ths, "TH/s") everywhere via report.record_rate.
+
+DIAGNOSIS AUDIT — THE L9's 330/369. "369" is NOT from a BeeSky model table: BeeSky has
+no model/chip table anywhere (grep-verified). build_record counts the machine's OWN
+stats reply: chips_total = Σ len(chain_acsN), alive = count of 'o'. 369 = 3 chains ×
+123 chars from the L9's own cgminer stats; 330 = its 'o' count. The CHECK flag is
+MISSING_CHIPS ×3 (13 dead positions per chain) — the machine reporting fewer live
+chips than its own chain strings claim. NO diagnosis rule was changed: that
+self-contradiction is a genuine finding BY DESIGN and stays flagged. Two honest
+caveats: (a) the flagged L9 simultaneously reported its full rated hashrate, which is
+inconsistent with 39/369 truly dead chips under SHA256 acs semantics; (b) whether
+bmminer's chain_acs maps 1 char = 1 ASIC chip on Scrypt/Equihash firmware is NOT
+verifiable from here (see open questions) — the counts may be an enumeration artifact
+of a different per-board layout. The other rules are unit-safe as-is: NO_HASHRATE is a
+zero check, OVER_TEMP is absolute °C. The 51/63 CHECK count cannot be decomposed from
+the photo alone; BTC Tools' all-"success" is weak counter-evidence (it does no chip
+diagnosis), and per-machine photos would be needed to attribute the rest.
+
+EVENTS. HASHRATE_DROP was verified unit-safe in structure (a drop % against the
+miner's OWN rolling baseline) but tracked the ths series and hard-coded "TH/s" in its
+prose; it now tracks the native rate series (legacy ths fallback for old records) and
+names the native unit; payload keys (baseline_ths/current_ths) are unchanged — for
+non-SHA256 miners they carry the tracked native-scale values. Transition note: an
+agent upgrading mid-watch mixes scales in one 12-sample window for a non-SHA miner,
+which can fire at most one spurious drop/gain cycle until the window flushes.
+
+CLOUD / ENERGY. Energy math was audited end to end: _integrate_energy integrates
+power_w samples only and never consumed the mixed total — unchanged. The surfaces that
+DID consume it are fixed: farm_ths, the history sampler and sites_summary.total_ths
+now sum report.ths_equivalent() (H/s family only: TH/s → v, GH/s → v/1000,
+MH/s-display → v/1000; sol units → excluded). An Equihash-only site now yields
+farm_ths = None and the pool poller skips it instead of comparing the pool against a
+raw sol sum; sites_summary gains grouped rate_totals, which the cloud dashboard
+renders (per-site line + fleet card). History rows written BEFORE this fix keep their
+poisoned totals (stored data is not rewritten); new samples are clean.
+
+TESTS. New suite tests/mock_units_test.py (50 assertions): L9 fixtures (av-only →
+"14.54 MH/s"; 5s+av → 5s wins; MHS-only → fallback intact) with the photo's stats
+(330/369, MISSING_CHIPS ×3, CHECK), Z15 fixtures (→ "1101.00 ksol/s", healthy → OK),
+explicit Sol/s/KSol/s conventions, S19 regression vs mock_scan.json, grouped totals,
+GUI row values, CLI table, tickets, cloud-store aggregations (mixed site total_ths
+102.91 + 3 rate groups; Z15-only site farm_ths None; legacy snapshot unchanged), and
+event drops in native units. Chain note: the nested historical chain halted mid-run
+repeatedly in this sandbox (different server suite each attempt, no FAIL echoed — the
+v0.17/v0.19 pattern), so the release evidence in tests/RESULTS.md is a standalone
+sweep: all 18 suites green at the v0.20.0 code (493 PASS lines across the sweep),
+with the known v0.11 firmware `unlock order` timing flake disclosed there (fired
+repeatedly, reproduced identically on the pristine v0.19.7 tree via git-stash
+control; passed standalone under nice and inside a nice'd v11 script run). No test
+expectation was weakened. Version pins: __init__ + both .iss + mock_agent_bg_test
+0.19.7 → 0.20.0.
+
+OPEN QUESTIONS FOR A LIVE-FLEET CHECK (kept, not guessed): (1) chain_acs semantics on
+Scrypt/Equihash bmminer — capture ONE L9's raw cgminer stats reply and its web-UI
+chip counts and compare against BeeSky's 330/369 before trusting MISSING_CHIPS on
+these models; if acs proves not to be 1 char = 1 chip there, the follow-up fix is to
+suppress chip counting for non-SHA256 models. (2) The Z15 GHS-field = raw sol/s
+reading rests on the fleet-total decomposition + BTC Tools' display, not a raw
+capture — capture one Z15 SUMMARY reply to confirm the field set (and whether real
+"Sol/s"/"KSol/s" fields exist, which rule (1) already prefers). (3) Equihash/Scrypt
+models behind the dashd API are out of scope (that catalogue is SHA256; the boards
+path takes TH/s inputs by contract). (4) A pre-v0.20 AGENT at a mixed site still
+sends ths-only records for its L9/Z15 miners — those display as TH/s (legacy
+fallback) until the agent is upgraded to v0.20.0.

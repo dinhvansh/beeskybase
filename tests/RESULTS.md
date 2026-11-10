@@ -1909,3 +1909,279 @@ PASS: cli: `gui --target X` hands X through unchanged
 
 TARGETS TEST PASSED
 ```
+
+---
+
+# v0.20.0 mock test — unit-correct hashrate (L9/Z15) + diagnosis calibration
+
+Field evidence (owner's photos, one 63-miner fleet): BTC
+Tools reports the Antminer L9 at 14.54 MH/s and the Z15 at
+~1101 ksol/s; BeeSky v0.19.7 showed the L9 row as 0.01 in a
+TH/s column and a mixed fleet total of 12153.83, because
+build_record squeezed every rate into TH/s (GHS/1000) and
+every surface summed that field blindly.
+
+v0.20.0 (core/report.py, gui.py, cli.py, core/events.py,
+cloud/store.py, both dashboards):
+
+  * Records carry rate_value + rate_unit (native unit).
+    _native_rate resolves them from the SUMMARY field
+    family + model: explicit KSol/s / Sol/s fields win;
+    Z-series + GHS fields -> ksol/s (the GHS field carries
+    raw sol/s); L-series with an MHS pair -> MH/s (the true
+    Scrypt rate; the GHS twin is the same figure / 1000);
+    otherwise the historical TH/s / MH/s fallbacks. Legacy
+    fields (ths, ghs_5s, ghs_av) are computed exactly as
+    before — the S19 record is pinned field-by-field
+    against tests/mock_scan.json in the new suite.
+  * Displays show the native value+unit: GUI table/detail,
+    CLI table (header TH/s -> Hashrate), both dashboards'
+    tables + heat tiles, repair tickets. Fleet totals group
+    per unit (fleet_rate_totals / format_rate_totals): a
+    single TH/s group renders exactly as before.
+  * Diagnosis: NO rule changed. The audit (root RESULTS.md)
+    shows the L9's 369 is the sum of the machine's OWN
+    chain_acs lengths — BeeSky has no model/chip table —
+    so MISSING_CHIPS on a self-reporting gap stays, by
+    design; what remains open is whether bmminer's acs
+    chars map 1:1 to chips on Scrypt/Equihash firmware.
+  * Events: HASHRATE_DROP now tracks the native rate (a
+    per-miner ratio — unit-safe, verified); the detail
+    names the native unit; payload keys unchanged.
+  * Cloud: farm_ths / history totals / sites_summary
+    total_ths now sum TH/s EQUIVALENTS (H/s family only;
+    sol rates excluded — an Equihash-only site yields
+    farm_ths None and the pool poller skips it);
+    sites_summary gains grouped rate_totals. Energy math
+    was audited: it integrates power_w only and never
+    consumed the mixed total.
+
+Evidence method (this release): the nested historical
+chain halted mid-run repeatedly in this sandbox (a
+different server suite each attempt, no FAIL assertion
+echoed — cf. the v0.17 / v0.19 halts), so every suite was
+run STANDALONE at the v0.20.0 code; the historical blocks
+above are the committed evidence of their own releases.
+Standalone results beyond the six suites quoted in full
+below:
+
+  mock_actions_test: 29 PASS / 0 FAIL (standalone)
+  mock_repairs_test: 19 PASS / 0 FAIL (standalone; see flake note)
+  mock_agents_ui_test: 30 PASS / 0 FAIL (standalone)
+  mock_logo_test: 17 PASS / 0 FAIL (standalone)
+  mock_targets_test: 35 PASS / 0 FAIL (standalone)
+  mock_rounded_test: 33 PASS / 0 FAIL (standalone)
+  mock_glass_test: 30 PASS / 0 FAIL (standalone)
+  mock_agent_app_test: 41 PASS / 0 FAIL (standalone)
+  mock_agent_bg_test: 52 PASS / 0 FAIL (standalone)
+  mock_theme_test: 34 PASS / 0 FAIL (standalone)
+  mock_gui_test: 11 PASS / 0 FAIL (standalone)
+  mock_firmware_test: 20 PASS / 0 FAIL (standalone, nice, attempt 4)
+
+Flake disclosure: mock_firmware_test's timing-sensitive
+`unlock order` assertion fired repeatedly today
+(kill logged 1-2 lines before first.bmu), INCLUDING on
+the pristine v0.19.7 tree (git-stash control, identical
+signature) — it is not a v0.20 regression (no firmware
+code changed). It passed standalone under nice -n -10
+(indices first=4 < kill=5), inside a nice'd
+run_mock_test_v11.sh run (exit 0), and in this sweep's
+own retry loop (attempt 4). One scripted-sweep run of
+mock_repairs_test also flaked 3 assertions under load
+(15 PASS / 3 FAIL); the suite passed 19/0 standalone
+immediately before and after — the same server-timing
+contention as the chain halts above.
+
+Changed test expectations: none weakened. New suite
+mock_units_test.py (50 assertions); mock_agent_bg_test
+release pin 0.19.7 -> 0.20.0 (plus __init__ and both
+.iss). The six primary v0.20 suites in full:
+
+```
+PASS: s19 regression: field model unchanged
+PASS: s19 regression: field source unchanged
+PASS: s19 regression: field elapsed_s unchanged
+PASS: s19 regression: field ghs_5s unchanged
+PASS: s19 regression: field ghs_av unchanged
+PASS: s19 regression: field ths unchanged
+PASS: s19 regression: field chips_alive unchanged
+PASS: s19 regression: field chips_total unchanged
+PASS: s19 regression: field max_temp_c unchanged
+PASS: s19 regression: field fans_rpm unchanged
+PASS: s19 regression: field status unchanged
+PASS: s19 regression: field problems unchanged
+PASS: s19: native rate is its TH/s rate
+PASS: s19: format_rate renders the historical string
+PASS: s19: ths_equivalent == ths
+PASS: l9: display rate is 14.54 MH/s (BTC Tools ground truth)
+PASS: l9: format_rate
+PASS: l9: legacy ths field untouched (0.01454)
+PASS: l9: ths_equivalent == ths (H/s family converts)
+PASS: l9: chips are the machine's own acs counts (330/369)
+PASS: l9: max temp 60, fans as reported
+PASS: l9: flagged CHECK by MISSING_CHIPS x3 (self-report, by design)
+PASS: l9 (5s+av): native rate follows the MHS 5s figure
+PASS: l9 (MHS only): gh_av fallback intact, display 14.54 MH/s
+PASS: z15: display rate is 1101.00 ksol/s (BTC Tools ground truth)
+PASS: z15: format_rate
+PASS: z15: healthy per its own report (OK, no problems)
+PASS: z15: sol rate has NO TH/s equivalent
+PASS: z15 (5s+av): native rate follows the 5s figure
+PASS: sol fields: KSol/s av wins over the GHS fields
+PASS: sol fields: sub-1000 Sol/s stays in sol/s
+PASS: unknown model (MHS only): MH/s display from the field family
+PASS: legacy record: rate reads back as TH/s
+PASS: error record: no rate anywhere
+PASS: totals: grouped per unit, canonical order, never mixed
+PASS: totals: grouped rendering matches the fleet example shape
+PASS: totals: single-unit fleet renders as before
+PASS: totals: empty fleet renders '-'
+PASS: gui rows: native value+unit per row
+PASS: cli table: Hashrate header + native units in rows
+PASS: tickets: hashrate line carries the native unit
+PASS: store: rate_totals groups the mixed snapshot per unit
+PASS: store: total_ths is the H/s-family sum only (102.91)
+PASS: store: farm_ths counts S19 + L9 equivalent, excludes the Z15
+PASS: store: history sample carries the same H/s-family total
+PASS: store: Equihash-only site has no farm_ths (poller skips it)
+PASS: store: Equihash-only site totals: 0 TH/s + its ksol/s group
+PASS: store: pre-v0.20 snapshot aggregates exactly as before
+PASS: events: L9 rate halved -> HASHRATE_DROP in native units
+PASS: events: S19 drop keeps the historical TH/s wording + payload
+
+UNITS TEST PASSED
+```
+
+```
+PASS: healthy passes: no events while baseline builds
+PASS: healthy passes: no notifications sent
+PASS: hashrate drop pass: HASHRATE_DROP printed
+PASS: webhook received exactly one HASHRATE_DROP
+PASS: drop payload shape (ip/model/type/severity/detail/data)
+PASS: drop payload: drop_pct ~= 40
+PASS: drop payload: baseline 110 -> current 66 TH/s
+PASS: telegram sendMessage captured for the drop
+PASS: still dropped: anti-flap, no duplicate HASHRATE_DROP
+PASS: miner killed: OFFLINE printed + webhook received
+PASS: OFFLINE payload: severity critical, model kept
+PASS: telegram captured for OFFLINE
+PASS: still down: anti-flap, no duplicate OFFLINE
+PASS: miner back: BACK_ONLINE printed + webhook received
+PASS: logfile channel recorded all three events
+
+Captured webhook payloads:
+{"ts": 1794321301.963904, "time": "2026-11-10 14:35:01", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
+{"ts": 1794321302.4287527, "time": "2026-11-10 14:35:02", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "OFFLINE", "severity": "critical", "detail": "miner went offline / unreachable", "data": {"last_seen": 1794321302.2262704}}
+{"ts": 1794321302.9924846, "time": "2026-11-10 14:35:02", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "BACK_ONLINE", "severity": "info", "detail": "miner is back online", "data": {}}
+
+WATCH TEST PASSED
+```
+
+```
+PASS: store: first snapshot writes one history sample
+PASS: store: sample totals mirror the snapshot
+PASS: store: snapshot 10 s later is throttled (still 1 row)
+PASS: store: snapshot +70 s writes the 2nd row
+PASS: store: per-site filter + all-sites view
+PASS: store: since_ts window is honoured
+PASS: store: samples older than 30 days are pruned on write
+PASS: cloud-add-agent prints a key once
+PASS: cloud server starts
+PASS: GET /api/history without login -> 401
+PASS: login with right password -> session
+PASS: GET /api/history with session -> 200, empty at first
+PASS: dashboard: sidebar nav with all seven views
+PASS: dashboard: settings forms (pool config + price) present
+PASS: dashboard: history chart container + topbar
+PASS: dashboard: legacy markers survive (heat/pool/energy/logo)
+PASS: ingest snapshot 1 accepted
+PASS: ingest snapshot 2 (+10 s) accepted
+PASS: history after +10 s: throttle keeps a single point
+PASS: ingest snapshot 3 (+70 s) accepted
+PASS: history after +70 s: second point appears, site filter ok
+PASS: history for an unknown site is empty
+
+HISTORY TEST PASSED
+```
+
+```
+PASS: store: config view lists header NAMES, never values
+PASS: store: re-POST without headers keeps the stored secrets
+PASS: store: gap fires on 2nd consecutive breach, deduped 1/hour
+PASS: store: samples back under threshold never fire
+PASS: store: energy integrates power_w across snapshots (0.06 kWh)
+PASS: store: dt capped at 3x interval (adds 3600 W x 90 s = 0.09)
+PASS: adapter: dot path + GH/s -> TH/s conversion
+PASS: adapter: worker_filter sums only matching workers (60)
+PASS: cloud-add-agent prints a key once
+PASS: cloud starts and serves /login
+PASS: GET /api/pool-config without login -> 401
+PASS: GET /api/pool without login -> 401
+PASS: GET /api/energy without login -> 401
+PASS: GET /api/settings without login -> 401
+PASS: POST /api/pool-config without login -> 401
+PASS: POST /api/settings without login -> 401
+PASS: login with right password -> session
+PASS: GET /api/settings: default price 2000 VND/kWh
+PASS: cloud dashboard: pool + energy panels present
+PASS: /api/sites shows the site after agent push
+PASS: farm hashrate from dashd snapshot (~109.13 TH/s)
+PASS: miner record carries power_w from dashd power_consumption
+PASS: POST /api/pool-config -> 201, view has names not values
+PASS: GET /api/pool-config never echoes the secret header
+PASS: poller samples pool vs farm (gap ~5%, under threshold)
+PASS: poller sent the configured secret header to the pool
+PASS: no POOL_GAP while the gap stays ~5%
+PASS: pool at 40% of farm -> POOL_GAP (major) in the event feed
+
+Captured POOL_GAP event:
+{"ts": 1794321308.0636783, "time": "2026-11-10 14:35:08", "site": "Xưởng 1", "agent_id": 1, "ip": null, "model": null, "type": "POOL_GAP", "severity": "major", "detail": "pool reports 43.65 TH/s vs farm 109.13 TH/s — gap 60.0% exceeds 10% for 2 consecutive checks", "data": {"pool_ths": 43.65, "farm_ths": 109.13, "gap_pct": 60.0, "threshold_pct": 10.0}}
+PASS: latest sample shows the ~60% gap
+PASS: energy accumulates > 0 kWh for the dashd miner
+
+Captured energy report (excerpt):
+{"today": {"day": "2026-11-10", "kwh": 0.0027, "est_cost_vnd": 5}, "per_day": [{"day": "2026-11-10", "kwh": 0.0027, "est_cost_vnd": 5}], "per_miner": [{"site": "Xưởng 1", "ip": "127.0.0.1", "kwh": 0.0027, "est_cost_vnd": 5}]}
+PASS: POST /api/settings sets the electricity price
+PASS: energy estimates now use 3000 VND/kWh
+
+ENERGY/POOL TEST PASSED
+```
+
+```
+PASS: cloud-add-agent prints a key once
+PASS: cloud starts and serves /login
+PASS: ingest with a wrong agent key -> 401
+PASS: ingest with no agent key -> 401
+PASS: viewer /api/sites without login -> 401
+PASS: login with wrong password -> 401
+PASS: still locked out after wrong password
+PASS: login with right password -> session (200 after redirect)
+PASS: /api/sites works with the session cookie; site registered
+PASS: GET / serves the cloud dashboard (brand #F5D800)
+PASS: /api/sites shows the site after agent push
+PASS: site summary: ~110 TH/s, 1 OK / 0 problems, online
+PASS: hashrate drop: HASHRATE_DROP arrives at the cloud
+PASS: drop event: severity major, drop_pct ~= 40, site tag
+
+Captured cloud event:
+{"ts": 1794321315.8885224, "time": "2026-11-10 14:35:15", "site": "Xưởng 1", "agent_id": 1, "ip": "127.0.0.1", "model": "Antminer S19 Pro", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
+PASS: /api/miners?site= shows ~66 TH/s, record annotated with site
+
+CLOUD TEST PASSED
+```
+
+```
+PASS: GET / returns the dashboard
+PASS: dashboard carries the BeeSky brand (name + #F5D800)
+PASS: GET /api/miners lists the mock miner
+PASS: miner record: S19 Pro, ~110 TH/s, 342/342 chips, OK
+PASS: GET /api/status counts sane (1 miner, target, interval)
+PASS: POST /api/scan -> 202 {ok: true}
+PASS: hashrate drop phase: /api/events gains HASHRATE_DROP
+PASS: drop event: severity major, drop_pct ~= 40
+
+Captured drop event:
+{"ts": 1794321320.5782955, "time": "2026-11-10 14:35:20", "ip": "127.0.0.1", "model": "Antminer S19 Pro", "source": "cgminer", "type": "HASHRATE_DROP", "severity": "major", "detail": "hashrate dropped 40.0% vs baseline (110.00 -> 66.00 TH/s)", "data": {"baseline_ths": 110.0, "current_ths": 66.0, "drop_pct": 40.0}}
+
+WEB TEST PASSED
+```

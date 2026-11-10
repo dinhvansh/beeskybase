@@ -689,7 +689,7 @@ function heatTile(m) {
   const lastOctet = String(m.ip || "?").split(".").pop();
   const temp = (m.max_temp_c === null || m.max_temp_c === undefined)
     ? "–" : m.max_temp_c.toFixed(0) + " °C";
-  const ths = (m.ths === null || m.ths === undefined) ? "–" : m.ths.toFixed(0) + " TH/s";
+  const ths = fmtRate0(m);
   const tip = (m.ip || "") + " · " + (m.model || "") + " · " +
     (offline ? "Mất kết nối" : (m.status === "OK" ? "OK" : "Cần kiểm tra")) +
     (problems ? " · " + problems + " vấn đề" : "");
@@ -725,6 +725,38 @@ function fmtThs(v) {
   if (v === null || v === undefined) return "–";
   return v.toFixed(2) + " TH/s";
 }
+// Native-rate display (v0.20): records carry rate_value + rate_unit;
+// pre-v0.20 records fall back to their ths as TH/s. Totals group per
+// unit — a mixed fleet never sums unlike quantities together.
+function rateOf(m) {
+  if (m.rate_value !== null && m.rate_value !== undefined && m.rate_unit)
+    return [m.rate_value, m.rate_unit];
+  if (m.ths !== null && m.ths !== undefined) return [m.ths, "TH/s"];
+  return null;
+}
+function fmtRate(m) {
+  const r = rateOf(m);
+  return r ? r[0].toFixed(2) + " " + r[1] : "–";
+}
+function fmtRate0(m) {
+  const r = rateOf(m);
+  return r ? r[0].toFixed(0) + " " + r[1] : "–";
+}
+const RATE_UNIT_ORDER = ["TH/s", "GH/s", "MH/s", "ksol/s", "sol/s"];
+function fmtTotalsHtml(groups) {
+  const keys = RATE_UNIT_ORDER.filter((u) => groups.has(u));
+  if (!keys.length) return null;
+  return keys.map((u) => groups.get(u).toFixed(2) + " <small>" + u + "</small>").join(" · ");
+}
+function fmtSiteRates(s) {
+  if (Array.isArray(s.rate_totals) && s.rate_totals.length) {
+    if (s.rate_totals.length === 1)
+      return s.rate_totals[0].value.toFixed(2) + " " + s.rate_totals[0].unit;
+    return s.rate_totals.map((g) => g.value.toLocaleString("en-US",
+      { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " " + g.unit).join(" · ");
+  }
+  return (s.total_ths || 0).toFixed(2) + " TH/s";
+}
 function esc(s) {
   return String(s === null || s === undefined ? "" : s)
     .replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -740,14 +772,22 @@ async function refreshSites() {
     const data = await r.json();
     if (data.generated_at) $("last-update").textContent = data.generated_at;
     const sites = data.sites || [];
-    let totalMiners = 0, totalThs = 0, totalProblems = 0;
+    let totalMiners = 0, totalProblems = 0;
+    const totalGroups = new Map();
     sites.forEach((s) => {
-      totalMiners += s.miner_count; totalThs += s.total_ths || 0;
+      totalMiners += s.miner_count;
       totalProblems += s.problem_count;
+      if (Array.isArray(s.rate_totals) && s.rate_totals.length) {
+        s.rate_totals.forEach((g) => totalGroups.set(
+          g.unit, (totalGroups.get(g.unit) || 0) + g.value));
+      } else if (s.total_ths) {
+        totalGroups.set("TH/s", (totalGroups.get("TH/s") || 0) + s.total_ths);
+      }
     });
     $("card-sites").textContent = sites.length;
     $("card-total").textContent = totalMiners;
-    $("card-hashrate").innerHTML = totalThs.toFixed(2) + " <small>TH/s</small>";
+    $("card-hashrate").innerHTML =
+      fmtTotalsHtml(totalGroups) || "0.00 <small>TH/s</small>";
     $("card-problems").textContent = totalProblems;
     $("card-problems-wrap").classList.toggle("alert", totalProblems > 0);
 
@@ -773,7 +813,7 @@ async function refreshSites() {
           '<div class="stats">' +
           (s.online ? "Đang trực tuyến" : "Mất tín hiệu") +
           " · Báo cáo cuối: " + esc(s.last_seen || "chưa có") + "<br>" +
-          "Số máy: <b>" + s.miner_count + "</b> · Hashrate: <b>" + (s.total_ths || 0).toFixed(2) + " TH/s</b><br>" +
+          "Số máy: <b>" + s.miner_count + "</b> · Hashrate: <b>" + fmtSiteRates(s) + "</b><br>" +
           'Máy có vấn đề: ' + (s.problem_count
             ? '<span class="prob">' + s.problem_count + "</span>" : "<b>0</b>") +
           " · Nhiệt độ cao nhất: <b>" + (s.max_temp === null || s.max_temp === undefined ? "–" : s.max_temp.toFixed(0) + " °C") + "</b>" +
@@ -814,7 +854,7 @@ async function refreshMiners() {
         "<td>" + esc(m.ip) + "</td>" +
         "<td>" + esc(m.model) + "</td>" +
         "<td>" + esc(m.source || "–") + "</td>" +
-        "<td>" + fmtThs(m.ths) + "</td>" +
+        "<td>" + fmtRate(m) + "</td>" +
         "<td>" + chips + "</td>" +
         "<td>" + temp + "</td>" +
         "<td>" + esc(fans) + "</td>" +
