@@ -530,6 +530,14 @@ def _add_fw_args(parser: argparse.ArgumentParser) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows consoles default to a legacy code page (cp1252/cp437) that
+    # cannot encode Vietnamese text — help screens and repair tickets would
+    # crash with UnicodeEncodeError. Force UTF-8 output where supported.
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     parser = argparse.ArgumentParser(
         prog="beesky", description="BeeSky — ASIC miner LAN scanner & repair diagnostics")
     sub = parser.add_subparsers(dest="command", required=True)
