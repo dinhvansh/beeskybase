@@ -1,0 +1,5 @@
+# Stage 1: intentionally minimal. The template's flutter_lints package is
+# NOT used so the project resolves with zero hosted dependencies (see
+# pubspec.yaml), and no extra strictness flags are enabled — default
+# `flutter analyze` (type errors, unused imports) is the CI gate.
+# Revisit when the app grows past stage 1.

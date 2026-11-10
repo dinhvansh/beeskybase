@@ -1,10 +1,16 @@
 """BeeSky command-line interface.
 
-    python -m beesky scan <target> [--json out.json] [--tickets dir/]
+    python -m beesky scan <target> [--json [out.json]] [--tickets dir/]
                                    [--timeout 1.5] [--workers 64]
                                    [--user root] [--password root]
                                    [--api-key KEY] [--token JWT]
                                    [--http-port 80] [--cgminer-port 4028]
+                                   (--json with no FILE prints one JSON
+                                    document to stdout — the Flutter
+                                    shell's sidecar bridge, v0.21)
+
+    python -m beesky sysinfo [--json]  (version + auto-detected default
+                                        scan target; --json for machines)
 
     python -m beesky watch <target> [--interval 30] [--notify config.json]
                                     [--state state.json] [--once]
@@ -61,7 +67,8 @@ from .core import updater
 from .core.bitmain import BitmainClient, BitmainError
 from .core.cgminer import CgminerClient, CgminerError
 from .core.dashd import DashdClient, DashdError
-from .core.discover import Candidate, discover, probe_host
+from .core.discover import (Candidate, default_scan_target, discover,
+                            parse_targets, probe_host)
 from .core.events import EventEngine
 from .web.server import MonitorService, run_server
 
@@ -121,24 +128,81 @@ def _print_table(records: list[dict]) -> None:
         print(fmt.format(*row))
 
 
+def _jsonable(value):
+    """Coerce a value into plain JSON-safe data for the bridge.
+
+    Records are plain dicts already (the cloud/agent path ships them
+    as JSON), but the bridge must never crash on an exotic leaf an
+    adapter might grow tomorrow: tuples/sets become lists, dict keys
+    strings, anything else falls back to its repr-free str().
+    """
+    if isinstance(value, dict):
+        return {str(k): _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(v) for v in value]
+    if isinstance(value, (set, frozenset)):
+        return [_jsonable(v) for v in sorted(value, key=repr)]
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
 def cmd_scan(args: argparse.Namespace) -> int:
+    # --json with no FILE ("-" sentinel from argparse) selects the
+    # sidecar bridge mode (v0.21): stdout carries ONE JSON document
+    # and nothing else — the Flutter shell parses it. All human
+    # output is suppressed or moved to stderr in that mode.
+    bridge = getattr(args, "json", None) == "-"
+    started = time.monotonic()
     records = _scan_records(args)
+    elapsed = time.monotonic() - started
 
-    if not records:
-        print("No miners found.")
+    if bridge:
+        try:
+            scanned = len(parse_targets(args.target))
+        except ValueError:
+            scanned = len(records)
+        payload = {
+            "records": [_jsonable(r) for r in records],
+            "scanned": scanned,
+            "found": len(records),
+            "elapsed_s": round(elapsed, 3),
+        }
+        print(json.dumps(payload, ensure_ascii=False))
     else:
-        _print_table(records)
-        bad = sum(1 for r in records if r["status"] != "OK")
-        print(f"\nFound {len(records)} miner(s), {bad} need(s) checking.")
-
-    if args.json:
-        Path(args.json).write_text(
-            json.dumps(records, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"JSON written to {args.json}")
+        if not records:
+            print("No miners found.")
+        else:
+            _print_table(records)
+            bad = sum(1 for r in records if r["status"] != "OK")
+            print(f"\nFound {len(records)} miner(s), {bad} need(s) checking.")
+        if args.json:
+            Path(args.json).write_text(
+                json.dumps(records, indent=2, ensure_ascii=False),
+                encoding="utf-8")
+            print(f"JSON written to {args.json}")
     if args.tickets:
         written = report.write_tickets(records, args.tickets)
         for path in written:
-            print(f"Ticket written to {path}")
+            print(f"Ticket written to {path}",
+                  file=sys.stderr if bridge else sys.stdout)
+    return 0
+
+
+def cmd_sysinfo(args: argparse.Namespace) -> int:
+    """Version + auto-detected default target (Flutter handshake).
+
+    The Flutter app cannot reimplement the subnet detection, so the
+    sidecar answers it here: `beesky sysinfo --json` ->
+    {"version": ..., "default_target": ...}.
+    """
+    info = {"version": __version__,
+            "default_target": default_scan_target()}
+    if args.json:
+        print(json.dumps(info, ensure_ascii=False))
+    else:
+        print(f"BeeSky {info['version']}")
+        print(f"Default scan target: {info['default_target']}")
     return 0
 
 
@@ -544,10 +608,20 @@ def main(argv: list[str] | None = None) -> int:
 
     scan = sub.add_parser("scan", help="scan a target for miners and report health")
     _add_common_args(scan)
-    scan.add_argument("--json", metavar="FILE", help="write status records as JSON")
+    scan.add_argument("--json", nargs="?", const="-", metavar="FILE",
+                      help="write status records as JSON to FILE; with no "
+                           "FILE, print ONE JSON document to stdout "
+                           "(sidecar bridge mode for the Flutter shell)")
     scan.add_argument("--tickets", metavar="DIR",
                       help="write one repair ticket per problem miner into DIR")
     scan.set_defaults(func=cmd_scan)
+
+    sysinfo = sub.add_parser(
+        "sysinfo", help="print version + auto-detected default scan "
+                        "target (Flutter shell handshake)")
+    sysinfo.add_argument("--json", action="store_true",
+                         help="print as one JSON document")
+    sysinfo.set_defaults(func=cmd_sysinfo)
 
     watch = sub.add_parser(
         "watch", help="watch a target, emit events and send notifications")

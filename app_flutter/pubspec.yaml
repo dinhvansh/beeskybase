@@ -1,0 +1,26 @@
+name: beesky_app
+description: "BeeSky — Giám sát & chẩn đoán máy đào ASIC (bản Flutter, stage 1)."
+publish_to: "none"
+# Mirror of the Python package version (0.21.0) + first Flutter build.
+version: 0.21.0+1
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+
+# Stage 1 rule: ZERO third-party packages. The app only uses dart:core /
+# dart:io / dart:convert plus the Flutter SDK, so `pub get` never needs to
+# fetch a hosted dependency beyond the SDK itself.
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+  assets:
+    # The owner's official logo (packaging/assets/beesky-logo-512.png),
+    # copied — never redrawn.
+    - assets/beesky-logo.png

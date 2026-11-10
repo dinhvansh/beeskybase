@@ -2185,3 +2185,115 @@ Captured drop event:
 
 WEB TEST PASSED
 ```
+
+---
+
+# v0.21.0 — Flutter main app (stage 1) + scan/sysinfo JSON bridge
+
+The owner chose the full Flutter rewrite of the desktop
+apps (the Tk UI compared unfavourably with the HashCore
+Toolkit's Flutter UI). Stage 1: the Python core stays the
+only engine; a new Flutter shell (app_flutter/) drives the
+beesky CLI exe as a sidecar. The Tk apps are untouched and
+keep shipping as the fallback.
+
+Bridge (beesky/cli.py):
+
+  * `scan --json` with no value (or `-`) is bridge mode:
+    stdout is exactly ONE JSON document
+    {"records": [...], "scanned": N, "found": M,
+    "elapsed_s": X}; ticket notes go to stderr there.
+    `--json FILE` keeps its legacy behaviour byte-for-
+    byte. Records are the very dicts the agent/cloud path
+    serialises (wire key `problems`; native rate_value /
+    rate_unit since v0.20) — no second schema. A bridge-
+    only _jsonable() sanitiser coerces tuples/sets/other
+    non-JSON values rather than touching the record
+    builders.
+  * `sysinfo --json`: {"version": ..., "default_target":
+    default_scan_target()} so the shell pre-fills the
+    target without reimplementing subnet detection.
+  * Release pins bumped to 0.21.0 (__init__, both .iss,
+    mock_agent_bg_test).
+
+(a) VERIFIED LOCALLY (this sandbox):
+
+  * mock_bridge_test — 24 assertions: stdout purity (the
+    whole stdout json.loads), envelope keys, scanned=254
+    for a /24, L9 14.54 MH/s + Z15 1101 ksol/s intact,
+    sanitiser coercions, --json does not swallow the next
+    flag, bridge+--tickets keeps stdout pure, legacy file
+    mode unchanged, sysinfo stubbed + live, and an end-to-
+    end subprocess scan against mock_dashd. Full output:
+
+```
+PASS: bridge: exit 0
+PASS: bridge: stdout is ONE pure JSON document
+PASS: bridge: envelope keys
+PASS: bridge: scanned = /24 host count
+PASS: bridge: found = record count
+PASS: bridge: elapsed_s is a non-negative number
+PASS: bridge: record keys survive (ip/model/rate/problems)
+PASS: bridge: L9 native rate intact (14.54 MH/s)
+PASS: bridge: Z15 native rate intact (1101 ksol/s)
+PASS: bridge: sanitiser coerces tuple/set leaves
+PASS: bridge: --json does not swallow the next flag
+PASS: bridge: empty scan still a valid document
+PASS: bridge+tickets: exit 0
+PASS: bridge+tickets: stdout still ONE JSON document
+PASS: bridge+tickets: ticket files written for problem miners
+PASS: legacy: exit 0 + human note on stdout
+PASS: legacy: file holds the bare records list
+PASS: sysinfo: version is the running version
+PASS: sysinfo: default_target comes from the helper
+PASS: sysinfo: unstubbed target parses
+PASS: e2e: subprocess stdout is ONE JSON document
+PASS: e2e: found the mock miner
+PASS: e2e: record is the sick S19 Pro via VNish
+PASS: e2e: problems + native rate attached
+
+BRIDGE TEST PASSED
+```
+
+  * Regression spot-checks at the v0.21.0 code:
+
+    mock_units_test: 50 PASS / 0 FAIL (standalone)
+    mock_cloud_test: 15 PASS / 0 FAIL (standalone)
+    mock_web_test: 8 PASS / 0 FAIL (standalone)
+    mock_agent_bg_test: 52 PASS / 0 FAIL (standalone)
+
+  * Flutter SDK 3.47.9 (Dart 3.13.7) was fetched and runs
+    on this VM; every Dart source (lib/ + test/) passes
+    the SDK's own parser/formatter (dart format: 7 files,
+    no parse errors), and the windows/ scaffold was
+    rendered from that SDK's flutter-create templates.
+
+(b) VERIFIED ONLY BY CI (.github/workflows/
+build-flutter.yml — sibling workflow, independent job, so
+the Tk release assets publish regardless):
+
+  * flutter pub get / test / build windows --release on
+    a real Windows runner, and the release asset
+    BeeSkyFlutter-<tag>-win64.zip. Local `flutter create`
+    /`pub get` could NOT run in this sandbox: the Flutter
+    tool's own package update stalls/fails through the
+    sandbox's authenticated egress proxy (curl to pub.dev
+    succeeds; the Dart pub client does not complete), so
+    `flutter analyze` and `flutter test` are likewise
+    CI-verified, not locally verified. The Dart widget/
+    unit tests are written against the same mock fleet as
+    the Python bridge test.
+
+(c) KNOWINGLY NOT YET WIRED (stage 1):
+
+  * No Flutter installer yet — the CI zip is the runner
+    folder; beesky.exe must sit beside beesky_app.exe.
+  * Export tickets shells `scan --tickets` (a second
+    scan pass — there is no records->tickets verb; TODO
+    marked in sidecar.dart). Open-web shells `serve` +
+    the OS browser opener (TODO: url_launcher).
+  * The Flutter app covers scan/stats/table/detail/
+    tickets/web for ONE local pass; heat map, cloud views
+    and the Agent app are later stages. Self-update
+    signing stays inert (owner key setup outstanding,
+    as since v0.10).

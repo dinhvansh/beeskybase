@@ -1,0 +1,74 @@
+# BeeSky Flutter app — Windows build (programme stage 1, v0.21).
+#
+# The Flutter shell (app_flutter/) drives the Python sidecar exe; it
+# ships as its OWN release asset, BeeSkyFlutter-<version>-win64.zip,
+# next to — never instead of — the Tk installer assets produced by
+# build-windows.yml. This workflow is deliberately a SEPARATE file
+# with a single independent job (no `needs:` on anything): if the
+# Flutter build breaks, the Python release still publishes exactly
+# as before, and the failure is visible here on its own. The Tk
+# apps remain the supported fallback until the Flutter shell proves
+# itself at the farm.
+#
+# The zip holds the Flutter runner folder only (beesky_app.exe +
+# flutter_windows.dll + data/). At runtime the shell looks for the
+# Python sidecar beesky.exe NEXT TO beesky_app.exe — drop the
+# beesky.exe from the same release beside it (see
+# app_flutter/README.md).
+#
+# Runs:
+#   * on every tag v* (same trigger as the installer workflow)
+#   * manually (Actions tab -> "Build Flutter app" -> Run workflow)
+
+name: Build Flutter app
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # attach the zip to the Release on tags
+
+jobs:
+  build-flutter-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build Windows release
+        working-directory: app_flutter
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+          flutter build windows --release
+
+      - name: Zip the runner folder
+        shell: pwsh
+        run: |
+          $name = "BeeSkyFlutter-${{ github.ref_name }}-win64"
+          Compress-Archive `
+            -Path "app_flutter/build/windows/x64/runner/Release/*" `
+            -DestinationPath "$name.zip"
+          Write-Host "packed $name.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BeeSky-Flutter-Windows
+          path: BeeSkyFlutter-*.zip
+          if-no-files-found: error
+
+      - name: Attach to GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: BeeSkyFlutter-*.zip
+          fail_on_unmatched_files: true
