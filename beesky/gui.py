@@ -216,7 +216,7 @@ class BeeSkyApp:
                   style="Sub.TLabel").pack(side="right")
 
         # -- toolbar card -------------------------------------------------
-        toolbar = ui_theme.card(main, title="Mục tiêu quét", pad=12)
+        toolbar = ui_theme.card(main, title="Mục tiêu quét", pad=18)
         toolbar.grid(row=1, column=0, sticky="ew", pady=(14, 0))
         target_row = ttk.Frame(toolbar, style="Card.TFrame")
         target_row.pack(fill="x")

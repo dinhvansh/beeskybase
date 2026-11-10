@@ -182,3 +182,8 @@ spilling edge to edge. Root padding 16→22, section gaps 12→14, table card pa
 well now keeps 6px external padding with the brighter GLASS_BORDER hairline — a clear glass
 rim frames the well on all four sides. Fans column widened 130→150 (was clipping RPM values
 with the scrollbar hidden), Model 170→160 to compensate. GUI/theme/glass/agent-bg green.
+
+## v0.19.3 — toolbar breathing room
+Owner spotted the last toolbar button ("Quét lại") crowding the scan card's rounded frame.
+The toolbar card's inner padding goes 12 → 18, so every control — first entry and last
+button alike — now sits a clear 18px inside the frame on all sides. GUI/agent-bg green.
