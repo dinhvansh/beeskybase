@@ -479,7 +479,8 @@ def cmd_fw_unlock(args: argparse.Namespace) -> int:
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("target",
-                        help="IP, CIDR (192.168.1.0/24) or range (192.168.1.10-192.168.1.60)")
+                        help="IP, CIDR (192.168.1.0/24) or range (192.168.1.10-192.168.1.60); "
+                             "comma-separated mixes scan several ranges at once")
     parser.add_argument("--timeout", type=float, default=1.5,
                         help="per-probe timeout in seconds (default 1.5)")
     parser.add_argument("--workers", type=int, default=64,
@@ -628,9 +629,10 @@ def main(argv: list[str] | None = None) -> int:
 
     gui = sub.add_parser(
         "gui", help="open the desktop GUI (windowed scanner)")
-    gui.add_argument("--target", default="192.168.1.0/24",
-                     help="target pre-filled in the window "
-                          "(default 192.168.1.0/24)")
+    gui.add_argument("--target", default=None,
+                     help="target pre-filled in the window (default: "
+                          "this machine's own subnet, auto-detected; "
+                          "fallback 192.168.1.0/24)")
     gui.add_argument("--smoke", metavar="TARGET",
                      help="headless self-check: scan TARGET once, print "
                           "the GUI rows, exit (used by tests)")

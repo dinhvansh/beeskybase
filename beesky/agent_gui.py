@@ -42,6 +42,7 @@ from .agent_app import insecure_cloud_warning, install_task, \
     log_file_path, read_status, remove_task, status_file_path, \
     task_installed, test_ingest, _is_windows
 from .agent_config import AgentConfig, default_config_path
+from .core.discover import default_scan_target
 
 BG = ui_theme.BG
 PANEL = ui_theme.PANEL
@@ -185,7 +186,8 @@ class AgentConfigApp:
                                     textvariable=self.target_var,
                                     backdrop=ui_theme.PANEL_GLASS)
         ui_theme.labeled_field(sbody, 0, "Dải IP quét:", target_entry,
-                               hint="vd 192.168.1.10-192.168.1.60")
+                               hint="vd 192.168.1.10-192.168.1.60 — nhiều "
+                                    "dải cách nhau bằng dấu phẩy")
 
         interval_entry = RoundedEntry(sbody,
                                       textvariable=self.interval_var,
@@ -314,6 +316,9 @@ class AgentConfigApp:
 
     def _load_into_fields(self) -> None:
         if not self.config_path.exists():
+            # First run (v0.19.6): pre-fill the scan target with
+            # this machine's own subnet instead of leaving it blank.
+            self.target_var.set(default_scan_target())
             return
         try:
             cfg = AgentConfig.load(self.config_path)

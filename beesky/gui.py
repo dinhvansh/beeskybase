@@ -33,6 +33,7 @@ from tkinter import filedialog, ttk
 from . import __version__
 from . import ui_theme
 from .core import report
+from .core.discover import default_scan_target
 from .rounded import RoundedButton, RoundedCard, RoundedEntry
 
 BG = ui_theme.BG
@@ -50,6 +51,9 @@ SOURCE_LABEL = {
 }
 
 WEB_PORT = 8787
+
+DETAIL_PLACEHOLDER = ("Chọn một máy trong bảng để xem chi tiết "
+                      "và danh sách vấn đề.")
 
 
 def _asset_path(name: str) -> Path | None:
@@ -112,7 +116,12 @@ def row_values(record: dict) -> tuple[str, ...]:
 class BeeSkyApp:
     """The main window. All scan work happens off the UI thread."""
 
-    def __init__(self, root: tk.Tk, default_target: str = "192.168.1.0/24"):
+    def __init__(self, root: tk.Tk, default_target: str | None = None):
+        # No explicit target -> pre-fill with this machine's own
+        # subnet (v0.19.6; the hard-coded 192.168.1.0/24 found zero
+        # miners on any other network).
+        if default_target is None:
+            default_target = default_scan_target()
         self.root = root
         self.records: list[dict] = []
         self._queue: queue.Queue = queue.Queue()
@@ -127,9 +136,31 @@ class BeeSkyApp:
         self._load_logo_image()
         self._set_window_icon()
         self._build_widgets(default_target)
-        ui_theme.center_window(root, width=1120, height=880,
-                               minsize=(940, 720))
+        self._fit_window()
         self.root.after(100, self._poll_queue)
+
+    def _fit_window(self) -> None:
+        """Size the window to the screen, capped at 1120x880 (v0.19.7).
+
+        First-run field report: the fixed 1120x880 window was taller
+        than the usable screen on the owner's laptop (Windows
+        scaling), so the bottom sank under the taskbar and the
+        flexible table row collapsed to about one visible row. Cap
+        the start size at screen − 32 wide / − 72 high (the 72
+        leaves room for the taskbar) and centre what's left; on a
+        large screen this is exactly the old 1120x880, centred. The
+        min size tracks the cap so it can never fight it on a small
+        screen; otherwise it stays the v0.15.2 (940, 720) under
+        which the detail pane keeps its full height.
+        """
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        width = min(1120, max(0, screen_w - 32))
+        height = min(880, max(0, screen_h - 72))
+        x = max(0, (screen_w - width) // 2)
+        y = max(0, (screen_h - height) // 2)
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
+        self.root.minsize(min(940, width), min(720, height))
 
     # -- brand icon ------------------------------------------------------
 
@@ -332,8 +363,7 @@ class BeeSkyApp:
                               font=(self._family, ui_theme.BODY_SIZE),
                               wrap="word", padx=10, pady=8)
         self.detail.pack(fill="x")
-        self.detail.insert("end", "Chọn một máy trong bảng để xem chi tiết "
-                                  "và danh sách vấn đề.")
+        self.detail.insert("end", DETAIL_PLACEHOLDER)
         self.detail.configure(state="disabled")
 
         # -- footer status bar --------------------------------------------------
@@ -373,6 +403,7 @@ class BeeSkyApp:
                 kind, payload = self._queue.get_nowait()
                 if kind == "records":
                     self.show_records(payload)
+                    self._land_on_first(payload)
                 else:
                     self.status_var.set(f"Lỗi khi quét: {payload}")
                     self._finish_scan()
@@ -413,6 +444,31 @@ class BeeSkyApp:
             if records else "Quét xong: không tìm thấy máy nào.")
         self._finish_scan()
 
+    def _land_on_first(self, records: list[dict]) -> None:
+        """After a scan, land on the first miner (v0.19.7).
+
+        Field report: the scan filled the table but nothing was
+        selected, so the detail pane kept its placeholder and the
+        owner concluded details could not be viewed at all. Select
+        + focus the first row, scroll it into view and fill the
+        pane through the same _on_select path a click uses. The
+        rows were just rebuilt by show_records, so the selection
+        can never point at a dead row from a previous scan. An
+        empty result restores the placeholder instead of leaving
+        a previous scan's detail on screen. This lives in the
+        scan-completion path on purpose: show_records is also
+        called directly (tests) where no landing is wanted.
+        """
+        children = self.tree.get_children()
+        if records and children:
+            first = children[0]
+            self.tree.selection_set(first)
+            self.tree.focus(first)
+            self.tree.see(first)
+            self._on_select()
+        elif not records:
+            self._set_detail_text(DETAIL_PLACEHOLDER)
+
     def _update_stats(self, records: list[dict], bad: int) -> None:
         """Refresh the four stat cards from the latest scan."""
         self.stat_total_var.set(str(len(records)))
@@ -428,6 +484,12 @@ class BeeSkyApp:
             f"{max(temps):.0f} °C" if temps else "-")
 
     # -- detail pane ---------------------------------------------------------
+
+    def _set_detail_text(self, text: str) -> None:
+        self.detail.configure(state="normal")
+        self.detail.delete("1.0", "end")
+        self.detail.insert("end", text)
+        self.detail.configure(state="disabled")
 
     def _on_tree_yscroll(self, first: str, last: str) -> None:
         """Feed the scrollbar and auto-hide it when nothing scrolls.
@@ -474,10 +536,7 @@ class BeeSkyApp:
             lines.append(
                 f"  Board {chain['index']}: {chain['chips_alive']}/"
                 f"{chain['chips_total']} chip, nhiệt {temp} °C")
-        self.detail.configure(state="normal")
-        self.detail.delete("1.0", "end")
-        self.detail.insert("end", "\n".join(lines))
-        self.detail.configure(state="disabled")
+        self._set_detail_text("\n".join(lines))
 
     # -- actions -------------------------------------------------------
 
@@ -497,7 +556,7 @@ class BeeSkyApp:
                 "Không có máy nào có vấn đề — không phiếu nào được xuất.")
 
     def open_local_web(self) -> None:
-        target = self.target_var.get().strip() or "192.168.1.0/24"
+        target = self.target_var.get().strip() or default_scan_target()
         if not self._serve_started:
             from .web.server import MonitorService, run_server
             args = make_scan_args(target, self.user_var.get(),
@@ -521,7 +580,7 @@ class BeeSkyApp:
             f"(quét {target} mỗi 30 giây)")
 
 
-def run_gui(default_target: str = "192.168.1.0/24") -> int:
+def run_gui(default_target: str | None = None) -> int:
     root = tk.Tk()
     BeeSkyApp(root, default_target=default_target)
     root.mainloop()
@@ -532,7 +591,9 @@ def smoke(target: str) -> int:
     """Headless self-check: build the UI, run one scan, print the rows.
 
     Used by tests/mock_gui_test.py under xvfb-run. Prints the row
-    count and the first row, then exits 0 on success.
+    count and the first row, plus (v0.19.7) the post-scan selection,
+    the detail pane's first line and the fitted window geometry,
+    then exits 0 when at least one row was found.
     """
     root = tk.Tk()
     app = BeeSkyApp(root, default_target=target)
@@ -547,6 +608,19 @@ def smoke(target: str) -> int:
     out = [f"GUI SMOKE: {len(rows)} row(s) for target {target}"]
     if rows:
         out.append("GUI SMOKE first row: " + " | ".join(str(v) for v in rows[0]))
+    # v0.19.7 first-run checks: post-scan landing (selection +
+    # detail content) and the screen-fitted window geometry.
+    root.update_idletasks()
+    selection = app.tree.selection()
+    out.append("GUI SMOKE selection: "
+               + (selection[0] if selection else "-"))
+    detail_text = app.detail.get("1.0", "end").strip()
+    out.append("GUI SMOKE detail: "
+               + (detail_text.splitlines()[0] if detail_text else ""))
+    out.append(f"GUI SMOKE geometry: {root.winfo_width()}x"
+               f"{root.winfo_height()}+{root.winfo_x()}+{root.winfo_y()} "
+               f"screen {root.winfo_screenwidth()}x"
+               f"{root.winfo_screenheight()}")
     text = "\n".join(out)
     try:
         print(text, flush=True)

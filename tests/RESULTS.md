@@ -1253,3 +1253,659 @@ PASS: first row = 127.0.0.1 | Antminer S19 Pro | ... | 339/342 chips | CHECK (sa
 
 GUI TEST PASSED
 ```
+
+---
+
+# v0.19.6 mock test — auto-detected default target + multi-range targets
+
+Field bug: on the owner's laptop the scan target defaulted to
+the hard-coded 192.168.1.0/24; his fleet is on 192.168.2.0/24,
+so the first sweep found 0 miners and the app read as broken.
+And BTC Tools beside it scanned several /24 ranges at once.
+
+v0.19.6 (beesky/core/discover.py, beesky/gui.py,
+beesky/cli.py, beesky/agent_gui.py, beesky/agent_app.py):
+
+  * New discover.default_scan_target(): the primary LAN
+    IPv4 via the UDP-connect trick (no packet is sent),
+    returned as its /24. Any failure, and loopback /
+    link-local / unspecified results, fall back to
+    192.168.1.0/24; the helper never raises.
+  * The helper pre-fills the main GUI target (default_target
+    now None -> helper), the agent config window on first
+    run (no config file yet; a saved config still wins),
+    the main GUI's empty-field fallback in open_local_web,
+    and the CLI gui --target default (None -> helper).
+    Fields stay fully editable — pre-fill only.
+  * parse_targets() now builds the multi-range union
+    explicitly: comma-separated items (IP / CIDR / range)
+    are parsed as before, de-duplicated preserving
+    first-seen order (each item expands ascending, so a
+    single spec yields exactly the list it always did),
+    and the MAX_HOSTS cap applies to the de-duplicated
+    union. One invalid item still rejects the whole spec.
+    Help texts (CLI scan/watch/agent, agent window hint)
+    now say comma-separated mixes scan several ranges.
+
+Changed test expectations: mock_agent_bg_test release pin
+0.19.5 -> 0.19.6 (plus __init__ and both .iss). New suite
+mock_targets_test.py; the real (unstubbed) subnet never
+leaks into an assertion — the helper is stubbed at each
+app's import seam and at the socket layer. No behaviour
+assertion was weakened. The updated suites:
+
+```
+PASS: fallback constant is the historic default
+PASS: helper: detected 192.168.2.37 -> its /24
+PASS: helper: detection used an AF_INET datagram socket
+PASS: helper: detected 10.20.30.40 -> 10.20.30.0/24
+PASS: helper: socket creation failure -> fallback
+PASS: helper: connect failure (offline) -> fallback
+PASS: helper: getsockname failure -> fallback, never raises
+PASS: helper: loopback result 127.0.0.1 -> fallback
+PASS: helper: link-local result 169.254.9.9 -> fallback
+PASS: helper: unspecified result 0.0.0.0 -> fallback
+PASS: helper: unstubbed call returns a parseable /24 target
+PASS: parser: union of two CIDRs
+PASS: parser: union keeps first-seen order, no global re-sort
+PASS: parser: overlapping ranges de-duplicate
+PASS: parser: an item fully inside another adds nothing
+PASS: parser: whitespace around items is tolerated
+PASS: parser: mixed forms (IP + CIDR + range) union
+PASS: parser: one bad item rejects the whole spec
+PASS: parser: bad first item rejects the whole spec
+PASS: parser: empty spec still rejected
+PASS: parser: oversized union still rejected
+PASS: parser: size cap counts the union, not raw duplicates
+PASS: parser: single CIDR output unchanged
+PASS: parser: single IP output unchanged
+PASS: parser: single range output unchanged
+PASS: main gui: target pre-filled from the helper
+PASS: main gui: explicit default beats the helper
+PASS: main gui: comma target reaches the scan unchanged
+PASS: main gui: make_scan_args passes the target through
+PASS: agent gui: first run pre-fills the helper target
+PASS: agent gui: comma target reaches the config unchanged
+PASS: agent gui: saved config target beats the helper
+PASS: agent config: comma target round-trips verbatim
+PASS: cli: `gui` without --target hands None to run_gui (helper resolves it)
+PASS: cli: `gui --target X` hands X through unchanged
+
+TARGETS TEST PASSED
+```
+
+```
+PASS: mock miner up on 127.0.0.1:4028
+GUI SMOKE: 1 row(s) for target 127.0.0.1
+GUI SMOKE first row: 127.0.0.1 | Antminer S19 Pro | cgminer RPC | 102.90 | 339/342 | 88 | 4320/4380/4440/4500 | CHECK
+PASS: beesky gui --smoke exits 0 under the virtual display
+PASS: GUI table holds exactly 1 row after one scan
+PASS: first row = 127.0.0.1 | Antminer S19 Pro | ... | 339/342 chips | CHECK (same values as the CLI)
+
+GUI TEST PASSED
+```
+
+```
+PASS: config: save creates parent dirs and returns the path
+PASS: config: save/load round-trip is lossless
+PASS: config: core fields survive (key/site/interval/notify)
+PASS: config: from_dict drops unknown keys, non-dict notify_config -> None
+PASS: config: missing_fields lists the empty required fields
+PASS: config path: $BEESKY_AGENT_CONFIG wins on any platform
+PASS: config path: Windows uses %APPDATA%\BeeSky
+PASS: config path: POSIX falls back to ~/.beesky
+PASS: spec: third Analysis targets entry_agent.py
+PASS: spec: agent exe is named beesky-agent
+PASS: spec: all three EXEs carry the official icon
+PASS: spec: agent exe is a console build (run logs visible)
+PASS: agent.iss: output is BeeSkyAgentSetup-<version>.exe
+PASS: agent.iss: installs beesky-agent.exe + icon + uninstall icon
+PASS: agent.iss: Start Menu shortcut launches the config window
+PASS: versions in sync: agent.iss == package == installer.iss
+PASS: workflow: builds the agent installer
+PASS: workflow: agent exe + agent setup in artifact AND release
+PASS: workflow: update manifest lists beesky-agent.exe + BeeSkyAgentSetup
+PASS: workflow: frozen agent exe smoke check present
+PASS: updater: manifest entry beesky-agent.exe matches by basename and applies
+PASS: updater: dummy beesky-agent.exe now holds the new bytes
+PASS: updater: previous agent exe kept as .old backup
+PASS: e2e: cloud-add-agent mints the key the config will carry
+PASS: e2e: cloud starts
+PASS: e2e: viewer login works
+PASS: e2e: config file on disk carries the documented fields
+PASS: agent app: `test` from a config file exits 0, TEST OK
+PASS: e2e: the test ingest landed — site shows 1 miner
+PASS: e2e: /api/miners shows the dashd S19 Pro from the config-driven agent
+PASS: agent app: `run --once` from the config exits 0
+PASS: agent app: `test` with a wrong key exits 1, TEST FAIL
+PASS: agent app: install-task off Windows prints the systemd/cron guidance instead of failing obscurely
+PASS: agent app: task command embeds exe + run + --config
+PASS: gui: config window constructs with all five fields
+PASS: gui: key entry starts masked
+PASS: gui: 'Hiện key' toggle unmasks the key entry
+PASS: gui: auto-start button disabled off Windows
+PASS: gui: 'Lưu cấu hình' accepts a complete form
+PASS: gui: save wrote the config JSON
+PASS: gui: saved JSON round-trips the form values
+
+AGENT APP TEST PASSED
+```
+
+```
+invalid command name "125155111658688_poll_queue"
+    while executing
+"125155111658688_poll_queue"
+    ("after" script)
+invalid command name "125155100744704_poll_queue"
+    while executing
+"125155100744704_poll_queue"
+    ("after" script)
+PASS: dpapi: saved file contains NO plain-text key
+PASS: dpapi: key field emptied, key_protected present
+PASS: dpapi: load() transparently returns the plain key
+PASS: dpapi: a protect failure degrades to plain text (config never lost)
+PASS: posix: without DPAPI the key stays plain text
+PASS: posix: config file is chmod 0600 after save
+PASS: migration: legacy plain-text key still loads
+PASS: migration: next save rewrites the key protected
+PASS: dpapi: an undecryptable blob loads as an empty key
+PASS: redact: every occurrence of the secret is masked
+PASS: redact: empty secrets are a no-op
+PASS: log stream: the key never reaches agent.log
+PASS: task xml: SYSTEM principal (S-1-5-18)
+PASS: task xml: highest run level
+PASS: task xml: BootTrigger present
+PASS: task xml: boot delay PT30S
+PASS: task xml: LogonTrigger present
+PASS: task xml: task hidden
+PASS: task xml: no execution time limit
+PASS: task xml: restart on failure every minute
+PASS: task xml: restart count 5
+PASS: task xml: network not required
+PASS: task xml: never stops on batteries
+PASS: task xml: windowless exe is the action
+PASS: task xml: config path baked into the action
+PASS: task xml: --console escape hatch uses the console exe
+PASS: spec: windowless twin named beesky-agentw
+PASS: spec: agentw is a console=False build
+PASS: agent.iss: ships beesky-agentw.exe alongside the console exe
+PASS: workflow: agentw in artifact AND release file lists
+PASS: workflow: signed update manifest lists beesky-agentw.exe
+PASS: versions in sync at 0.19.6
+PASS: e2e: cloud mints the agent key
+PASS: e2e: cloud starts
+PASS: bg e2e: `run --once` exits 0 and reports the pass
+PASS: bg e2e: agent-status.json written, ok with 1 miner
+PASS: bg e2e: agent.log mirrors the run output
+PASS: bg e2e: agent.log does NOT contain the agent key
+PASS: bg e2e: localhost http cloud raises no warning
+PASS: bg e2e: --background prints nothing to stdout
+PASS: bg e2e: --background still writes status + log
+PASS: bg e2e: a wrong-key cycle survives and is recorded as ok=false with an error
+PASS: bg e2e: the failing log never contains the (wrong) key
+PASS: bg e2e: non-local http:// cloud warns about the unencrypted key (but is not blocked)
+PASS: bg e2e: the unreachable-cloud cycle is recorded ok=false, not a crash
+PASS: gui: status card starts at 'Chưa có dữ liệu'
+PASS: gui: 'Xem log' button exists
+PASS: gui: non-local http:// cloud shows the https hint
+PASS: gui: localhost http clears the hint
+PASS: gui: https clears the hint
+PASS: gui: an OK status renders 'Đang chạy tốt' + miner count
+PASS: gui: an error status renders 'Lỗi gần nhất' + the error
+
+AGENT BG TEST PASSED
+```
+
+```
+PASS: theme: a font family is chosen
+PASS: theme: root background is the dashboard bg
+PASS: theme: TEntry fieldbackground is panel2
+PASS: theme: TEntry padding is (10, 7)
+PASS: theme: Accent.TButton background is the BeeSky yellow
+PASS: theme: Ghost.TButton background is panel2
+PASS: theme: Treeview background is the table well (v0.19)
+PASS: theme: Treeview rowheight is 30
+PASS: theme: Treeview border is pinned to the well colour (no white clam frame)
+PASS: theme: Treeview.Heading background is the heading strip
+PASS: theme: Treeview.Heading border is its own background (no separator line)
+PASS: theme: scrollbar is dark (border thumb, well trough)
+PASS: theme: table tokens match the v0.19 spec hex values
+PASS: theme: Card.TFrame background is the glass panel (v0.18)
+PASS: theme: palette constants match the spec hex values
+PASS: theme: glass tokens match the v0.18 spec hex values
+PASS: agent gui: 'Kết nối cloud' card is present
+PASS: agent gui: 'Quét tại trại' card is present
+PASS: agent gui: the three action buttons keep their labels
+PASS: agent gui: status pill starts at 'Chưa chạy thử'
+PASS: agent gui: pill recolours to the ok colour
+PASS: main gui: 'Mục tiêu quét' is present
+PASS: main gui: 'Tổng số máy' is present
+PASS: main gui: 'Tổng hashrate' is present
+PASS: main gui: 'Máy có vấn đề' is present
+PASS: main gui: 'Nhiệt độ cao nhất' is present
+PASS: main gui: 'Chi tiết máy đã chọn' is present
+PASS: main gui: toolbar buttons keep their labels
+PASS: main gui: stat cards follow a scan (1 máy, 100.50 TH/s)
+PASS: main gui: problem stat counts and turns red
+PASS: main gui: max-temp stat shows the hottest miner
+PASS: main gui: even OK row has no parity tag
+PASS: main gui: odd OK row carries the zebra tag
+PASS: main gui: CHECK row keeps its wash tag (no zebra)
+
+THEME TEST PASSED
+```
+
+```
+invalid command name "126963414712256_poll_queue"
+    while executing
+"126963414712256_poll_queue"
+    ("after" script)
+PASS: tokens: radius scale is 16 / 12 / 999
+PASS: web cloud/dashboard.html: radius tokens are defined
+PASS: web cloud/dashboard.html: no pre-token literal radii remain
+PASS: web cloud/dashboard.html: token vars are actually used
+PASS: web web/dashboard.html: radius tokens are defined
+PASS: web web/dashboard.html: no pre-token literal radii remain
+PASS: web web/dashboard.html: token vars are actually used
+PASS: button: accent constructs at >= 36px tall
+PASS: button: cget reports text + state like ttk
+PASS: button: press+release inside fires the command
+PASS: button: release outside cancels the click
+PASS: button: keyboard focus draws the focus ring
+PASS: button: Return and Space activate a focused button
+PASS: button: invoke() fires while enabled
+PASS: button: configure(state=) updates cget('state')
+PASS: button: a disabled button never fires (click or invoke)
+PASS: button: set_text relabels and resizes
+PASS: button: ghost + danger-ghost variants construct
+PASS: entry: .entry hosts the real tk.Entry
+PASS: entry: typing flows into the textvariable
+PASS: entry: variable writes flow into the entry
+PASS: entry: show='*' masks (cget delegates to the entry)
+PASS: entry: configure(show='') unmasks ('Hiện key' path)
+PASS: entry: focus turns the frame outline accent
+PASS: card: ui_theme.card returns a ttk.Frame (RoundedCard)
+PASS: card: title + content findable by tree walk
+PASS: card: the rounded surface is drawn on its canvas
+PASS: pill: status_pill returns a RoundedPill
+PASS: pill: set_pill recolours + retexts (cget('bg') = OK)
+PASS: windows: agent key_entry is a RoundedEntry
+PASS: windows: agent buttons are RoundedButtons
+PASS: windows: agent pills are RoundedPills
+PASS: windows: main scan_button is a RoundedButton
+
+ROUNDED TEST PASSED
+```
+
+```
+PASS: web cloud/dashboard.html: glass token is translucent white .045
+PASS: web cloud/dashboard.html: glass line token is rgba .09
+PASS: web cloud/dashboard.html: backdrop blur 16px saturate 150% applied
+PASS: web cloud/dashboard.html: ambient radial-gradient body backdrop
+PASS: web cloud/dashboard.html: @supports no-backdrop-filter fallback
+PASS: web cloud/dashboard.html: reduced-transparency fallback
+PASS: web cloud/dashboard.html: glass shadow token (rim inset + drop)
+PASS: web cloud/dashboard.html: accent CTA stays solid yellow
+PASS: web web/dashboard.html: glass token is translucent white .045
+PASS: web web/dashboard.html: glass line token is rgba .09
+PASS: web web/dashboard.html: backdrop blur 16px saturate 150% applied
+PASS: web web/dashboard.html: ambient radial-gradient body backdrop
+PASS: web web/dashboard.html: @supports no-backdrop-filter fallback
+PASS: web web/dashboard.html: reduced-transparency fallback
+PASS: web web/dashboard.html: glass shadow token (rim inset + drop)
+PASS: web web/dashboard.html: accent CTA stays solid yellow
+PASS: cloud: served footer shows current version
+PASS: cloud: no un-stamped placeholder left
+PASS: web: served footer shows current version
+PASS: web: no un-stamped placeholder left
+PASS: desktop: card surface is drawn
+PASS: desktop: card fill is PANEL_GLASS, outline GLASS_BORDER
+PASS: desktop: card draws exactly one rim-light item
+PASS: desktop: rim light colour is RIM_LIGHT
+PASS: desktop: rim survives a resize without double-drawing
+PASS: desktop: ghost button draws one rim item, accent none
+PASS: desktop: ghost colours are the glass triple
+PASS: desktop: disabled ghost drops the rim, mutes to glass
+PASS: desktop: entry shape is ENTRY_FILL / ENTRY_BORDER
+PASS: desktop: hosted entry bg matches the glass fill
+
+GLASS TEST PASSED
+```
+
+---
+
+# v0.19.7 mock test — auto-select first miner + window fits the screen
+
+Field reports from the owner's first real fleet scan
+(63 miners found on 192.168.2.0/24): (1) after the scan
+nothing was selected, so the detail pane kept its
+placeholder and he concluded details could not be viewed;
+(2) the fixed 1120x880 window was taller than his
+laptop's usable screen (Windows scaling), the bottom sank
+under the taskbar and the flexible table row collapsed
+to about one visible row.
+
+v0.19.7 (beesky/gui.py only):
+
+  * _poll_queue's records branch now calls _land_on_first
+    after show_records: with >= 1 row it selects + focuses
+    the first row, scrolls it into view and fills the
+    detail pane through the same _on_select path a click
+    uses. The rows were just rebuilt, so the selection can
+    never point at a dead row. With 0 rows it restores the
+    DETAIL_PLACEHOLDER text instead of leaving a previous
+    scan's detail on screen. show_records itself is
+    unchanged — it is also called directly by the theme
+    test, where no landing is wanted.
+  * _fit_window replaces the fixed center_window call:
+    size = min(1120, screen_w - 32) x min(880,
+    screen_h - 72), centred ((sw-w)/2, (sh-h)/2); the
+    min size (940, 720) now tracks the cap so it cannot
+    fight it on a small screen. On the default Xvfb
+    screen (1280x1024) the window is exactly 1120x880 at
+    +80+72; verified manually on a 1500x1100 screen too:
+    exactly 1120x880 at +190+110.
+  * gui --smoke additionally prints the post-scan
+    selection, the detail pane's first line and the fitted
+    geometry (screen size included) for the test.
+
+Changed test expectations: mock_gui_test gains an
+empty-scan phase (127.0.0.2, exit 1 as before; selection
+'-' and the placeholder intact) and asserts selection =
+first row, detail = first miner (not the placeholder),
+and geometry = the fitted formula, centred within 2px
+and fully on screen. mock_agent_bg_test release pin
+0.19.6 -> 0.19.7 (plus __init__ and both .iss). No
+behaviour assertion was weakened. The updated suites:
+
+```
+GUI SMOKE: 0 row(s) for target 127.0.0.2
+GUI SMOKE selection: -
+GUI SMOKE detail: Chọn một máy trong bảng để xem chi tiết và danh sách vấn đề.
+GUI SMOKE geometry: 1120x880+80+72 screen 1280x1024
+PASS: empty scan finds 0 rows (exit 1, as before)
+PASS: empty scan leaves no selection
+PASS: empty scan keeps the detail placeholder (no stale detail)
+PASS: mock miner up on 127.0.0.1:4028
+GUI SMOKE: 1 row(s) for target 127.0.0.1
+GUI SMOKE first row: 127.0.0.1 | Antminer S19 Pro | cgminer RPC | 102.90 | 339/342 | 88 | 4320/4380/4440/4500 | CHECK
+GUI SMOKE selection: 0
+GUI SMOKE detail: 127.0.0.1 — Antminer S19 Pro (cgminer RPC)
+GUI SMOKE geometry: 1120x880+80+72 screen 1280x1024
+PASS: beesky gui --smoke exits 0 under the virtual display
+PASS: GUI table holds exactly 1 row after one scan
+PASS: first row = 127.0.0.1 | Antminer S19 Pro | ... | 339/342 chips | CHECK (same values as the CLI)
+PASS: first row is auto-selected after the scan
+PASS: detail pane shows the first miner (not the placeholder)
+PASS: window size is the screen-fitted 1120x880 (screen 1280x1024)
+PASS: window centred (+80+72) and fully on screen
+
+GUI TEST PASSED
+```
+
+```
+PASS: theme: a font family is chosen
+PASS: theme: root background is the dashboard bg
+PASS: theme: TEntry fieldbackground is panel2
+PASS: theme: TEntry padding is (10, 7)
+PASS: theme: Accent.TButton background is the BeeSky yellow
+PASS: theme: Ghost.TButton background is panel2
+PASS: theme: Treeview background is the table well (v0.19)
+PASS: theme: Treeview rowheight is 30
+PASS: theme: Treeview border is pinned to the well colour (no white clam frame)
+PASS: theme: Treeview.Heading background is the heading strip
+PASS: theme: Treeview.Heading border is its own background (no separator line)
+PASS: theme: scrollbar is dark (border thumb, well trough)
+PASS: theme: table tokens match the v0.19 spec hex values
+PASS: theme: Card.TFrame background is the glass panel (v0.18)
+PASS: theme: palette constants match the spec hex values
+PASS: theme: glass tokens match the v0.18 spec hex values
+PASS: agent gui: 'Kết nối cloud' card is present
+PASS: agent gui: 'Quét tại trại' card is present
+PASS: agent gui: the three action buttons keep their labels
+PASS: agent gui: status pill starts at 'Chưa chạy thử'
+PASS: agent gui: pill recolours to the ok colour
+PASS: main gui: 'Mục tiêu quét' is present
+PASS: main gui: 'Tổng số máy' is present
+PASS: main gui: 'Tổng hashrate' is present
+PASS: main gui: 'Máy có vấn đề' is present
+PASS: main gui: 'Nhiệt độ cao nhất' is present
+PASS: main gui: 'Chi tiết máy đã chọn' is present
+PASS: main gui: toolbar buttons keep their labels
+PASS: main gui: stat cards follow a scan (1 máy, 100.50 TH/s)
+PASS: main gui: problem stat counts and turns red
+PASS: main gui: max-temp stat shows the hottest miner
+PASS: main gui: even OK row has no parity tag
+PASS: main gui: odd OK row carries the zebra tag
+PASS: main gui: CHECK row keeps its wash tag (no zebra)
+
+THEME TEST PASSED
+```
+
+```
+invalid command name "127193354440256_poll_queue"
+    while executing
+"127193354440256_poll_queue"
+    ("after" script)
+PASS: tokens: radius scale is 16 / 12 / 999
+PASS: web cloud/dashboard.html: radius tokens are defined
+PASS: web cloud/dashboard.html: no pre-token literal radii remain
+PASS: web cloud/dashboard.html: token vars are actually used
+PASS: web web/dashboard.html: radius tokens are defined
+PASS: web web/dashboard.html: no pre-token literal radii remain
+PASS: web web/dashboard.html: token vars are actually used
+PASS: button: accent constructs at >= 36px tall
+PASS: button: cget reports text + state like ttk
+PASS: button: press+release inside fires the command
+PASS: button: release outside cancels the click
+PASS: button: keyboard focus draws the focus ring
+PASS: button: Return and Space activate a focused button
+PASS: button: invoke() fires while enabled
+PASS: button: configure(state=) updates cget('state')
+PASS: button: a disabled button never fires (click or invoke)
+PASS: button: set_text relabels and resizes
+PASS: button: ghost + danger-ghost variants construct
+PASS: entry: .entry hosts the real tk.Entry
+PASS: entry: typing flows into the textvariable
+PASS: entry: variable writes flow into the entry
+PASS: entry: show='*' masks (cget delegates to the entry)
+PASS: entry: configure(show='') unmasks ('Hiện key' path)
+PASS: entry: focus turns the frame outline accent
+PASS: card: ui_theme.card returns a ttk.Frame (RoundedCard)
+PASS: card: title + content findable by tree walk
+PASS: card: the rounded surface is drawn on its canvas
+PASS: pill: status_pill returns a RoundedPill
+PASS: pill: set_pill recolours + retexts (cget('bg') = OK)
+PASS: windows: agent key_entry is a RoundedEntry
+PASS: windows: agent buttons are RoundedButtons
+PASS: windows: agent pills are RoundedPills
+PASS: windows: main scan_button is a RoundedButton
+
+ROUNDED TEST PASSED
+```
+
+```
+PASS: web cloud/dashboard.html: glass token is translucent white .045
+PASS: web cloud/dashboard.html: glass line token is rgba .09
+PASS: web cloud/dashboard.html: backdrop blur 16px saturate 150% applied
+PASS: web cloud/dashboard.html: ambient radial-gradient body backdrop
+PASS: web cloud/dashboard.html: @supports no-backdrop-filter fallback
+PASS: web cloud/dashboard.html: reduced-transparency fallback
+PASS: web cloud/dashboard.html: glass shadow token (rim inset + drop)
+PASS: web cloud/dashboard.html: accent CTA stays solid yellow
+PASS: web web/dashboard.html: glass token is translucent white .045
+PASS: web web/dashboard.html: glass line token is rgba .09
+PASS: web web/dashboard.html: backdrop blur 16px saturate 150% applied
+PASS: web web/dashboard.html: ambient radial-gradient body backdrop
+PASS: web web/dashboard.html: @supports no-backdrop-filter fallback
+PASS: web web/dashboard.html: reduced-transparency fallback
+PASS: web web/dashboard.html: glass shadow token (rim inset + drop)
+PASS: web web/dashboard.html: accent CTA stays solid yellow
+PASS: cloud: served footer shows current version
+PASS: cloud: no un-stamped placeholder left
+PASS: web: served footer shows current version
+PASS: web: no un-stamped placeholder left
+PASS: desktop: card surface is drawn
+PASS: desktop: card fill is PANEL_GLASS, outline GLASS_BORDER
+PASS: desktop: card draws exactly one rim-light item
+PASS: desktop: rim light colour is RIM_LIGHT
+PASS: desktop: rim survives a resize without double-drawing
+PASS: desktop: ghost button draws one rim item, accent none
+PASS: desktop: ghost colours are the glass triple
+PASS: desktop: disabled ghost drops the rim, mutes to glass
+PASS: desktop: entry shape is ENTRY_FILL / ENTRY_BORDER
+PASS: desktop: hosted entry bg matches the glass fill
+
+GLASS TEST PASSED
+```
+
+```
+PASS: config: save creates parent dirs and returns the path
+PASS: config: save/load round-trip is lossless
+PASS: config: core fields survive (key/site/interval/notify)
+PASS: config: from_dict drops unknown keys, non-dict notify_config -> None
+PASS: config: missing_fields lists the empty required fields
+PASS: config path: $BEESKY_AGENT_CONFIG wins on any platform
+PASS: config path: Windows uses %APPDATA%\BeeSky
+PASS: config path: POSIX falls back to ~/.beesky
+PASS: spec: third Analysis targets entry_agent.py
+PASS: spec: agent exe is named beesky-agent
+PASS: spec: all three EXEs carry the official icon
+PASS: spec: agent exe is a console build (run logs visible)
+PASS: agent.iss: output is BeeSkyAgentSetup-<version>.exe
+PASS: agent.iss: installs beesky-agent.exe + icon + uninstall icon
+PASS: agent.iss: Start Menu shortcut launches the config window
+PASS: versions in sync: agent.iss == package == installer.iss
+PASS: workflow: builds the agent installer
+PASS: workflow: agent exe + agent setup in artifact AND release
+PASS: workflow: update manifest lists beesky-agent.exe + BeeSkyAgentSetup
+PASS: workflow: frozen agent exe smoke check present
+PASS: updater: manifest entry beesky-agent.exe matches by basename and applies
+PASS: updater: dummy beesky-agent.exe now holds the new bytes
+PASS: updater: previous agent exe kept as .old backup
+PASS: e2e: cloud-add-agent mints the key the config will carry
+PASS: e2e: cloud starts
+PASS: e2e: viewer login works
+PASS: e2e: config file on disk carries the documented fields
+PASS: agent app: `test` from a config file exits 0, TEST OK
+PASS: e2e: the test ingest landed — site shows 1 miner
+PASS: e2e: /api/miners shows the dashd S19 Pro from the config-driven agent
+PASS: agent app: `run --once` from the config exits 0
+PASS: agent app: `test` with a wrong key exits 1, TEST FAIL
+PASS: agent app: install-task off Windows prints the systemd/cron guidance instead of failing obscurely
+PASS: agent app: task command embeds exe + run + --config
+PASS: gui: config window constructs with all five fields
+PASS: gui: key entry starts masked
+PASS: gui: 'Hiện key' toggle unmasks the key entry
+PASS: gui: auto-start button disabled off Windows
+PASS: gui: 'Lưu cấu hình' accepts a complete form
+PASS: gui: save wrote the config JSON
+PASS: gui: saved JSON round-trips the form values
+
+AGENT APP TEST PASSED
+```
+
+```
+invalid command name "135310921064768_poll_queue"
+    while executing
+"135310921064768_poll_queue"
+    ("after" script)
+invalid command name "135310910169344_poll_queue"
+    while executing
+"135310910169344_poll_queue"
+    ("after" script)
+PASS: dpapi: saved file contains NO plain-text key
+PASS: dpapi: key field emptied, key_protected present
+PASS: dpapi: load() transparently returns the plain key
+PASS: dpapi: a protect failure degrades to plain text (config never lost)
+PASS: posix: without DPAPI the key stays plain text
+PASS: posix: config file is chmod 0600 after save
+PASS: migration: legacy plain-text key still loads
+PASS: migration: next save rewrites the key protected
+PASS: dpapi: an undecryptable blob loads as an empty key
+PASS: redact: every occurrence of the secret is masked
+PASS: redact: empty secrets are a no-op
+PASS: log stream: the key never reaches agent.log
+PASS: task xml: SYSTEM principal (S-1-5-18)
+PASS: task xml: highest run level
+PASS: task xml: BootTrigger present
+PASS: task xml: boot delay PT30S
+PASS: task xml: LogonTrigger present
+PASS: task xml: task hidden
+PASS: task xml: no execution time limit
+PASS: task xml: restart on failure every minute
+PASS: task xml: restart count 5
+PASS: task xml: network not required
+PASS: task xml: never stops on batteries
+PASS: task xml: windowless exe is the action
+PASS: task xml: config path baked into the action
+PASS: task xml: --console escape hatch uses the console exe
+PASS: spec: windowless twin named beesky-agentw
+PASS: spec: agentw is a console=False build
+PASS: agent.iss: ships beesky-agentw.exe alongside the console exe
+PASS: workflow: agentw in artifact AND release file lists
+PASS: workflow: signed update manifest lists beesky-agentw.exe
+PASS: versions in sync at 0.19.7
+PASS: e2e: cloud mints the agent key
+PASS: e2e: cloud starts
+PASS: bg e2e: `run --once` exits 0 and reports the pass
+PASS: bg e2e: agent-status.json written, ok with 1 miner
+PASS: bg e2e: agent.log mirrors the run output
+PASS: bg e2e: agent.log does NOT contain the agent key
+PASS: bg e2e: localhost http cloud raises no warning
+PASS: bg e2e: --background prints nothing to stdout
+PASS: bg e2e: --background still writes status + log
+PASS: bg e2e: a wrong-key cycle survives and is recorded as ok=false with an error
+PASS: bg e2e: the failing log never contains the (wrong) key
+PASS: bg e2e: non-local http:// cloud warns about the unencrypted key (but is not blocked)
+PASS: bg e2e: the unreachable-cloud cycle is recorded ok=false, not a crash
+PASS: gui: status card starts at 'Chưa có dữ liệu'
+PASS: gui: 'Xem log' button exists
+PASS: gui: non-local http:// cloud shows the https hint
+PASS: gui: localhost http clears the hint
+PASS: gui: https clears the hint
+PASS: gui: an OK status renders 'Đang chạy tốt' + miner count
+PASS: gui: an error status renders 'Lỗi gần nhất' + the error
+
+AGENT BG TEST PASSED
+```
+
+```
+PASS: fallback constant is the historic default
+PASS: helper: detected 192.168.2.37 -> its /24
+PASS: helper: detection used an AF_INET datagram socket
+PASS: helper: detected 10.20.30.40 -> 10.20.30.0/24
+PASS: helper: socket creation failure -> fallback
+PASS: helper: connect failure (offline) -> fallback
+PASS: helper: getsockname failure -> fallback, never raises
+PASS: helper: loopback result 127.0.0.1 -> fallback
+PASS: helper: link-local result 169.254.9.9 -> fallback
+PASS: helper: unspecified result 0.0.0.0 -> fallback
+PASS: helper: unstubbed call returns a parseable /24 target
+PASS: parser: union of two CIDRs
+PASS: parser: union keeps first-seen order, no global re-sort
+PASS: parser: overlapping ranges de-duplicate
+PASS: parser: an item fully inside another adds nothing
+PASS: parser: whitespace around items is tolerated
+PASS: parser: mixed forms (IP + CIDR + range) union
+PASS: parser: one bad item rejects the whole spec
+PASS: parser: bad first item rejects the whole spec
+PASS: parser: empty spec still rejected
+PASS: parser: oversized union still rejected
+PASS: parser: size cap counts the union, not raw duplicates
+PASS: parser: single CIDR output unchanged
+PASS: parser: single IP output unchanged
+PASS: parser: single range output unchanged
+PASS: main gui: target pre-filled from the helper
+PASS: main gui: explicit default beats the helper
+PASS: main gui: comma target reaches the scan unchanged
+PASS: main gui: make_scan_args passes the target through
+PASS: agent gui: first run pre-fills the helper target
+PASS: agent gui: comma target reaches the config unchanged
+PASS: agent gui: saved config target beats the helper
+PASS: agent config: comma target round-trips verbatim
+PASS: cli: `gui` without --target hands None to run_gui (helper resolves it)
+PASS: cli: `gui --target X` hands X through unchanged
+
+TARGETS TEST PASSED
+```

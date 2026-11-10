@@ -400,7 +400,8 @@ def _run_parser(mode: str) -> argparse.ArgumentParser:
                         help="file cấu hình (mặc định: vị trí chuẩn "
                              "theo hệ điều hành / $BEESKY_AGENT_CONFIG)")
     parser.add_argument("target", nargs="?",
-                        help="IP, CIDR hoặc dải IP (ghi đè cấu hình)")
+                        help="IP, CIDR hoặc dải IP — nhiều dải cách "
+                             "nhau dấu phẩy (ghi đè cấu hình)")
     parser.add_argument("--cloud", metavar="URL", help="cloud base URL")
     parser.add_argument("--key", metavar="KEY", help="agent key")
     parser.add_argument("--site", metavar="NAME", help="tên trại")

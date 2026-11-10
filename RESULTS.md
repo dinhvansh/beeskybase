@@ -205,3 +205,43 @@ canvas now spans the full frame (negative place offset + 2*pad size), so the sur
 its outline sit at the frame's true edges and children rest inside them. Verified by
 geometry (canvas == frame on all 8 cards) and by corner zooms before/after. All desktop
 suites green.
+
+## v0.19.6 — default scan target = the machine's own subnet + multi-range targets
+Field test on the owner's laptop: BeeSky's hard-coded default 192.168.1.0/24 found 0 miners
+(his fleet is on 192.168.2.0/24; BTC Tools found all 63 there) and read as "méo quét đc".
+New discover.default_scan_target(): primary LAN IPv4 via the UDP-connect trick (no packet
+sent) → its /24; any failure, loopback, link-local or unspecified → 192.168.1.0/24; never
+raises. It pre-fills the main GUI target, the agent config window on first run (a saved
+config still wins), the GUI's empty-field fallback, and `gui --target` (default None →
+helper). Fields stay editable — pre-fill only. AgentConfig's "" default is untouched
+(empty = unconfigured is the config contract). Also multi-range: parse_targets() now
+builds the comma-separated union explicitly — per-item parsing unchanged, de-duplicated
+preserving first-seen order (single spec ⇒ byte-identical list to before), MAX_HOSTS cap
+on the union, one bad item still rejects the whole spec; CLI/agent help texts now say
+comma mixes scan several ranges at once. New suite tests/mock_targets_test.py (35 checks,
+socket layer + per-app helper seams stubbed — no real subnet in any assertion);
+mock_agent_bg release pin 0.19.5 → 0.19.6. Chain (tests/run_mock_test_v19_6.sh): targets,
+GUI, agent-app, agent-bg, theme, rounded, glass all green (229 PASS lines), plus watch and
+web suites re-run green since they feed targets through the same parser.
+
+## v0.19.7 — first-run view fixes: auto-select first miner + window fits the screen
+Field reports from the owner's first real fleet scan (63 miners on 192.168.2.0/24): (1) after
+the scan nothing was selected, so the detail pane kept its placeholder "Chọn một máy trong
+bảng..." and he concluded details could not be viewed; (2) the fixed 1120x880 window was
+taller than his laptop's usable screen (Windows scaling) — the bottom sank under the
+taskbar and the flexible table row collapsed to about one visible row. Both fixed in
+beesky/gui.py only. The scan-completion handler (_poll_queue's records branch) now calls
+_land_on_first after show_records: with ≥1 row it selects + focuses the first row, scrolls
+it into view and fills the detail pane through the same _on_select path a click uses (rows
+are rebuilt each scan, so the selection can never point at a dead row); with 0 rows it
+restores the placeholder instead of leaving a previous scan's detail. show_records itself
+is unchanged — the theme test calls it directly, where no landing is wanted. _fit_window
+replaces the fixed center_window call: size = min(1120, screen_w − 32) × min(880,
+screen_h − 72), centred; minsize (940, 720) now tracks the cap so it can't fight it on a
+small screen. On a large screen the window is exactly 1120x880 as before, now centred
+(verified: 1280x1024 → +80+72; 1500x1100 → +190+110). gui --smoke additionally prints the
+post-scan selection, detail first line and fitted geometry; mock_gui_test gains an
+empty-scan phase (127.0.0.2: selection "-", placeholder intact) and asserts selection =
+first row, detail = first miner, geometry = the fitted formula centred and fully on
+screen. Chain (tests/run_mock_test_v19_7.sh): GUI, theme, rounded, glass, agent-app,
+agent-bg, targets all green (236 PASS lines).
