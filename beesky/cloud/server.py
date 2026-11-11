@@ -753,7 +753,7 @@ def run_cloud_server(store: CloudStore, host: str = "127.0.0.1",
     httpd.daemon_threads = True
     poller = PoolPoller(store, _pool_poll_interval())
     poller.start()
-    print(f"Pool poller: mỗi {poller.interval_s:g} giây cho các trại "
+    print(f"Pool poller: mỗi {poller.interval_s:g} giây cho các xưởng "
           "đã cấu hình pool (BEESKY_POOL_POLL_S).", flush=True)
     print(f"BeeSky cloud: http://{host}:{port} — db {store.path}", flush=True)
     if password:

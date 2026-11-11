@@ -20,13 +20,13 @@ const rackDetailView=heatmapView;
 farmsView=function(){
   const params=new URLSearchParams(location.hash.split('?')[1]||''),site=params.get('farm');
   if(!site||!state.farms.some(f=>f.id===site)){
-    return head('','Trại của tôi','',button('Thêm trại','add-farm',true))+`<div class="farm-layout-grid">${state.farms.map(farmLayoutCard).join('')}</div>`+(state.farms.length?'':emptyData('Chưa có trại','Tạo trại trước khi bố trí rack.'));
+    return head('','Xưởng của tôi','',button('Thêm xưởng','add-farm',true))+`<div class="farm-layout-grid">${state.farms.map(farmLayoutCard).join('')}</div>`+(state.farms.length?'':emptyData('Chưa có xưởng','Tạo xưởng trước khi bố trí rack.'));
   }
   layout.site=site;state.selected=site;
   const f=state.farms.find(f=>f.id===site),issues=devicesFor(site).filter(d=>layoutIssue(d)),attention=params.get('attention')==='1';
   let html=rackDetailView();
   html=html.replace(/<div class="page-head">[\s\S]*?<\/div><\/div>/,head('',esc(f.name),'',button('Thêm rack','rack-add',true)));
-  const controls=`<div class="farm-layout-context"><a class="btn small" href="#/farms">← Trại của tôi</a><nav class="rack-tabs" aria-label="Tình trạng máy"><a class="btn small ${attention?'':'primary'}" href="${layoutLink(site)}">Tất cả máy</a><a class="btn small ${attention?'primary':''}" href="${layoutLink(site,true)}">${issues.length} cần kiểm tra</a></nav><button class="btn small" data-action="layout-depth" aria-pressed="${layout.depth!==false}">${layout.depth!==false?'Đang xem 3D':'Xem 3D'}</button></div>`;
+  const controls=`<div class="farm-layout-context"><a class="btn small" href="#/farms">← Xưởng của tôi</a><nav class="rack-tabs" aria-label="Tình trạng máy"><a class="btn small ${attention?'':'primary'}" href="${layoutLink(site)}">Tất cả máy</a><a class="btn small ${attention?'primary':''}" href="${layoutLink(site,true)}">${issues.length} cần kiểm tra</a></nav><button class="btn small" data-action="layout-depth" aria-pressed="${layout.depth!==false}">${layout.depth!==false?'Đang xem 3D':'Xem 3D'}</button></div>`;
   const list=attention?`<section class="panel farm-issue-panel"><div class="panel-head"><h2>${issues.length} máy cần kiểm tra</h2><span class="muted">${esc(f.name)}</span></div><div class="farm-issue-list">${issues.map(d=>{const p=locationOf(d.id);return `<button class="farm-issue-row" data-inspect-device="${d.id}"><strong>${d.ip}</strong><span>${esc(layoutIssue(d))}</span><span>${p?esc(position(p.rack,p.index)):'Chưa xếp vị trí'}</span>${icon('chevron')}</button>`}).join('')||'<p class="unplaced-empty">Không có máy cần kiểm tra.</p>'}</div></section>`:'';
   html=html.replace('<div class="toolbar">',controls+list+'<div class="toolbar">');
   // Highlight issue locations while keeping their physical context visible.

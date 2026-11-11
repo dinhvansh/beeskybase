@@ -6,7 +6,7 @@ Cloud hiện có `POST /mcp`, MCP Streamable HTTP, trả JSON, không mở luồ
 
 | Công cụ | Dữ liệu | Giới hạn |
 | --- | --- | --- |
-| `list_farms` | Tổng quan các trại có quyền | Không nhận tenant/site override |
+| `list_farms` | Tổng quan các xưởng có quyền | Không nhận tenant/site override |
 | `list_miners` | Máy, trạng thái, nhiệt, hashrate và đơn vị gốc | Bắt buộc site, tối đa 200 dòng/trang, offset |
 | `list_events` | Thời gian, máy, loại, mức độ sự kiện | Bắt buộc site, tối đa 200 sự kiện |
 | `get_hashrate_history` | Mẫu hashrate TH/s | Bắt buộc site, 1–168 giờ, phân trang |
@@ -18,14 +18,14 @@ Nguồn: database cloud hiện tại, **không phải** dữ liệu mẫu trong 
 
 MCP luôn yêu cầu `Authorization: Bearer <reporting-token>`, ngay cả khi dashboard cũ đang ở chế độ mở. Không dùng khóa Agent, mật khẩu quản trị hay cookie browser làm quyền MCP.
 
-Đặt `BEESKY_MCP_GRANTS_FILE` trỏ tới file JSON riêng **ngoài thư mục phục vụ web và ngoài Git**. File chỉ chứa hash SHA-256 của token, mã quyền, danh sách tên trại chính xác và hạn dùng Unix timestamp:
+Đặt `BEESKY_MCP_GRANTS_FILE` trỏ tới file JSON riêng **ngoài thư mục phục vụ web và ngoài Git**. File chỉ chứa hash SHA-256 của token, mã quyền, danh sách tên xưởng chính xác và hạn dùng Unix timestamp:
 
 ```json
 [
   {
     "id": "reporting-owner-a",
     "token_sha256": "<64 ký tự hex SHA-256 của token>",
-    "sites": ["Tên trại chính xác trong database"],
+    "sites": ["Tên xưởng chính xác trong database"],
     "expires_at": 1800000000,
     "revoked": false
   }
@@ -47,7 +47,7 @@ python -m beesky cloud --host 127.0.0.1 --port 8788 --db beesky-cloud.db
 ## Bảo vệ đã có
 
 - Chỉ có 5 công cụ đọc; không có reboot, thay pool, chạy workflow, SQL tùy ý hay gửi HTTP ra ngoài.
-- Site được so khớp với allowlist server trước khi đọc dữ liệu. Thiếu site không được chuyển thành truy vấn tất cả trại.
+- Site được so khớp với allowlist server trước khi đọc dữ liệu. Thiếu site không được chuyển thành truy vấn tất cả xưởng.
 - Projection chỉ trả các trường báo cáo; bỏ raw payload, mật khẩu, khóa Agent, hash khóa và detail tự do của sự kiện.
 - Giới hạn body 32 KiB, payload báo cáo 1 MiB, tối đa 60 request/phút/grant/process. Truy vấn lỗi không tiết lộ SQL.
 - Mặc định từ chối mọi header Origin; nếu có browser client hợp lệ, khai báo chính xác qua `BEESKY_MCP_ALLOWED_ORIGINS` (phân tách dấu phẩy). Không bật CORS wildcard.
@@ -66,4 +66,4 @@ Rate limit hiện nằm trong process. Triển khai nhiều instance cần quota
 python -m unittest discover -s tests -p test_mcp_reporting.py -v
 ```
 
-5 bài kiểm tra đã đạt: handshake/catalog/read; chặn khác trại/thiếu site/tham số thừa/lệnh ghi; hết hạn và thu hồi; Origin/version/body bounds và API cũ; kết nối qua MCP Python SDK chính thức. Bài SDK tự bỏ qua nếu máy chưa cài SDK.
+5 bài kiểm tra đã đạt: handshake/catalog/read; chặn khác xưởng/thiếu site/tham số thừa/lệnh ghi; hết hạn và thu hồi; Origin/version/body bounds và API cũ; kết nối qua MCP Python SDK chính thức. Bài SDK tự bỏ qua nếu máy chưa cài SDK.

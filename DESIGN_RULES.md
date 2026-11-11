@@ -56,7 +56,7 @@ Các màu light đề xuất trong master prompt:
 - Có điều hướng bàn phím, responsive navigation; command palette khi phù hợp.
 - Production bỏ thông báo demo/developer thừa; bản mẫu vẫn phải nhận biết được dữ liệu mẫu.
 
-## E. Trại, rack, máy và nhiệt (§6B–E)
+## E. Xưởng, rack, máy và nhiệt (§6B–E)
 
 - Luồng đi sâu: **Farm → Rack → Miner**.
 - Có tìm kiếm và bộ lọc; ưu tiên tìm và xử lý máy lỗi nhanh.
@@ -101,8 +101,8 @@ Các màu light đề xuất trong master prompt:
 - Tập trung web cloud; tool quét và agent native làm sau.
 - Tối ưu laptop 13–14 inch. Bỏ slogan/eyebrow/giới thiệu thừa chiếm chỗ.
 - Dropdown/ComboBox dùng component tùy chỉnh đồng bộ, không dùng hình thức mặc định trình duyệt.
-- Rack và nhiệt nằm trong **Trại của tôi**; không tách một mục heatmap độc lập.
-- Bấm trại mở sơ đồ. Bấm “N cần kiểm tra” mở đúng trại, đúng danh sách lỗi, có IP và vị trí.
+- Rack và nhiệt nằm trong **Xưởng của tôi**; không tách một mục heatmap độc lập.
+- Bấm xưởng mở sơ đồ. Bấm “N cần kiểm tra” mở đúng xưởng, đúng danh sách lỗi, có IP và vị trí.
 - Máy chưa xếp có search/filter và kéo thả vào ô trống; có cách bấm chọn vị trí thay thế.
 - Rack đổi tên và khu/dãy được; không làm mất máy đã gắn.
 - Tìm máy đã xếp theo IP/model/serial/tên rack; kết quả phải dẫn đến đúng rack/tầng/ô.
@@ -121,9 +121,13 @@ Các màu light đề xuất trong master prompt:
 ### Checklist cho mọi lần sửa tiếp theo
 
 - [ ] Đọc file này và đối chiếu component đang có.
-- [ ] Đúng vị trí chức năng, đúng ngữ cảnh trại.
+- [ ] Đúng vị trí chức năng, đúng ngữ cảnh xưởng.
 - [ ] Dùng component/token chung; default/hover/focus/empty nhất quán.
 - [ ] Không thêm tiêu đề hoặc hướng dẫn thừa.
 - [ ] Thử bàn phím, sáng/tối và laptop 1366×768; kiểm tra mobile nếu bị ảnh hưởng.
 - [ ] Thử thao tác chính, trường hợp không có kết quả và xóa lọc.
 - [ ] Lưu ảnh thực tế; báo chính xác phần đã kiểm thử và giới hạn.
+
+### Thuật ngữ giao diện
+
+- Dùng **Xưởng** cho địa điểm vận hành trong menu, tiêu đề, biểu mẫu, dữ liệu mẫu và thông báo. Không dùng tên gọi cũ.
