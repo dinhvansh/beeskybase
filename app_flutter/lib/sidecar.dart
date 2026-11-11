@@ -48,6 +48,11 @@ abstract class BeeSkyBridge {
   /// `<sidecar dir>/tickets`, the export's own staging dir.
   String get ticketsDirPath;
 
+  /// The file the IP-Report listener persists reports to:
+  /// `<sidecar dir>/beesky-ipreports.json` (the core's
+  /// `ipreport listen --out` store, v0.34).
+  String get ipreportsFilePath;
+
   Future<SysInfo> sysinfo();
 
   /// One scan pass. [credsFile] is the app's saved credential-sets
@@ -56,10 +61,14 @@ abstract class BeeSkyBridge {
   /// [eventsState] (v0.32) is the core EventEngine's persisted
   /// state file for THIS target; the result then carries the
   /// events this pass diffed out (docs/views-mapping.md §4).
+  /// [timeout]/[workers] (v0.34) are the Timeouts/Advanced
+  /// settings, passed as `scan --timeout/--workers`.
   Future<ScanResult> scan(
     String target, {
     String? credsFile,
     String? eventsState,
+    double? timeout,
+    int? workers,
   });
 
   /// One scan of a saved network group (v0.24): the CORE resolves
@@ -72,6 +81,8 @@ abstract class BeeSkyBridge {
     String? credsFile,
     String? groupsFile,
     String? eventsState,
+    double? timeout,
+    int? workers,
   });
 
   /// Exports repair tickets; returns a human-readable destination.
@@ -94,12 +105,33 @@ abstract class BeeSkyBridge {
   /// Credential resolution is the scan's own: [credsFile]'s sets,
   /// led by [group]'s when a group scope is active (the core
   /// resolves; only paths and the group NAME travel on argv).
+  /// [timeout] (v0.34) is the request timeout setting.
   Future<InspectResult> inspect(
     String ip, {
     String? credsFile,
     String? group,
     String? groupsFile,
+    double? timeout,
   });
+
+  /// Starts the IP-Report listener (v0.34): `beesky ipreport
+  /// listen --json --out <ipreportsFilePath>`, streamed NDJSON —
+  /// the panel's live feed, modelled on the ops run. The run
+  /// persists reports to the store file itself (core-side).
+  Future<IpReportRun> startIpReport();
+
+  /// Lists the persisted IP reports through the core's read-only
+  /// `ipreport list` verb (v0.34); newest first. Empty when the
+  /// store file does not exist yet.
+  Future<List<IpReport>> listIpReports();
+}
+
+/// One live `beesky ipreport listen` sidecar run: NDJSON lines in,
+/// [IpReport]s out. Stopping kills the process; the store file
+/// keeps what arrived.
+abstract class IpReportRun {
+  Stream<IpReport> get reports;
+  Future<void> stop();
 }
 
 /// Opens [url] in the OS default browser — used for a miner's own
@@ -232,10 +264,14 @@ class SidecarBridge implements BeeSkyBridge {
     String target, {
     String? credsFile,
     String? eventsState,
+    double? timeout,
+    int? workers,
   }) {
     final args = <String>['scan', target, '--json'];
     if (credsFile != null) args.addAll(['--creds-file', credsFile]);
     if (eventsState != null) args.addAll(['--events-state', eventsState]);
+    if (timeout != null) args.addAll(['--timeout', '$timeout']);
+    if (workers != null) args.addAll(['--workers', '$workers']);
     return args;
   }
 
@@ -249,9 +285,13 @@ class SidecarBridge implements BeeSkyBridge {
     String target,
     String dirPath, {
     String? credsFile,
+    double? timeout,
+    int? workers,
   }) {
     final args = <String>['scan', target, '--tickets', dirPath];
     if (credsFile != null) args.addAll(['--creds-file', credsFile]);
+    if (timeout != null) args.addAll(['--timeout', '$timeout']);
+    if (workers != null) args.addAll(['--workers', '$workers']);
     return args;
   }
 
@@ -264,13 +304,27 @@ class SidecarBridge implements BeeSkyBridge {
     String? credsFile,
     String? groupsFile,
     String? eventsState,
+    double? timeout,
+    int? workers,
   }) {
     final args = <String>['scan', '--group', name, '--json'];
     if (credsFile != null) args.addAll(['--creds-file', credsFile]);
     if (groupsFile != null) args.addAll(['--groups-file', groupsFile]);
     if (eventsState != null) args.addAll(['--events-state', eventsState]);
+    if (timeout != null) args.addAll(['--timeout', '$timeout']);
+    if (workers != null) args.addAll(['--workers', '$workers']);
     return args;
   }
+
+  /// Argument list for the IP-Report listener (v0.34):
+  /// `beesky ipreport listen --out FILE` — NDJSON to stdout, the
+  /// store file beside the exe so reports survive restarts.
+  static List<String> ipReportArgs(String outPath) =>
+      ['ipreport', 'listen', '--out', outPath];
+
+  /// Argument list for the read-only IP-Report listing (v0.34).
+  static List<String> listIpReportsArgs(String filePath) =>
+      ['ipreport', 'list', '--file', filePath, '--json'];
 
   /// Argument list for an ops run — the job travels as a FILE
   /// (its path is the only ops argument; no secret value ever
@@ -285,11 +339,13 @@ class SidecarBridge implements BeeSkyBridge {
     String? credsFile,
     String? group,
     String? groupsFile,
+    double? timeout,
   }) {
     final args = <String>['inspect', ip, '--json'];
     if (credsFile != null) args.addAll(['--creds-file', credsFile]);
     if (group != null) args.addAll(['--group', group]);
     if (groupsFile != null) args.addAll(['--groups-file', groupsFile]);
+    if (timeout != null) args.addAll(['--timeout', '$timeout']);
     return args;
   }
 
@@ -299,13 +355,49 @@ class SidecarBridge implements BeeSkyBridge {
     String? credsFile,
     String? group,
     String? groupsFile,
+    double? timeout,
   }) async {
     final doc = await _runJson(
       inspectArgs(ip,
-          credsFile: credsFile, group: group, groupsFile: groupsFile),
+          credsFile: credsFile,
+          group: group,
+          groupsFile: groupsFile,
+          timeout: timeout),
       timeout: const Duration(seconds: 60),
     );
     return InspectResult.fromJson(doc);
+  }
+
+  @override
+  String get ipreportsFilePath =>
+      '${_exeBaseDir(exePath)}${Platform.pathSeparator}'
+      'beesky-ipreports.json';
+
+  @override
+  Future<IpReportRun> startIpReport() async {
+    _requireSidecar();
+    final Process process;
+    try {
+      process =
+          await Process.start(exePath, ipReportArgs(ipreportsFilePath));
+    } on ProcessException catch (e) {
+      if (sidecarMissing) throw SidecarException(missingSidecarMessage);
+      throw SidecarException('Không chạy được beesky ($exePath): ${e.message}');
+    }
+    return _SidecarIpReportRun(process);
+  }
+
+  @override
+  Future<List<IpReport>> listIpReports() async {
+    if (sidecarMissing) return const [];
+    final file = File(ipreportsFilePath);
+    if (!file.existsSync()) return const [];
+    final doc = await _runJson(listIpReportsArgs(ipreportsFilePath),
+        timeout: const Duration(seconds: 30));
+    return ((doc['reports'] as List<dynamic>?) ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map(IpReport.fromJson)
+        .toList();
   }
 
   @override
@@ -344,9 +436,15 @@ class SidecarBridge implements BeeSkyBridge {
     String target, {
     String? credsFile,
     String? eventsState,
+    double? timeout,
+    int? workers,
   }) async {
     final doc = await _runJson(
-      scanArgs(target, credsFile: credsFile, eventsState: eventsState),
+      scanArgs(target,
+          credsFile: credsFile,
+          eventsState: eventsState,
+          timeout: timeout,
+          workers: workers),
     );
     return ScanResult.fromJson(doc);
   }
@@ -357,6 +455,8 @@ class SidecarBridge implements BeeSkyBridge {
     String? credsFile,
     String? groupsFile,
     String? eventsState,
+    double? timeout,
+    int? workers,
   }) async {
     final doc = await _runJson(
       scanGroupArgs(
@@ -364,6 +464,8 @@ class SidecarBridge implements BeeSkyBridge {
         credsFile: credsFile,
         groupsFile: groupsFile,
         eventsState: eventsState,
+        timeout: timeout,
+        workers: workers,
       ),
     );
     return ScanResult.fromJson(doc);
@@ -512,6 +614,54 @@ class _SidecarOpsRun implements OpsRun {
   }
 }
 
+/// One live `beesky ipreport listen` sidecar run (v0.34): NDJSON
+/// lines in, [IpReport]s out — the ops run's streaming shape,
+/// without a summary (the listener runs until stopped). The first
+/// line is the {"listening": [...]} announcement, skipped like a
+/// stray line; every {"report": {...}} line becomes a report.
+class _SidecarIpReportRun implements IpReportRun {
+  final Process _process;
+  final StreamController<IpReport> _controller =
+      StreamController<IpReport>();
+
+  _SidecarIpReportRun(this._process) {
+    _process.stdout
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .listen(_onLine, onError: (_) {});
+    // Drain stderr so a chatty failure can't fill the pipe buffer.
+    _process.stderr.listen((_) {}, onError: (_) {});
+    _process.exitCode.then((_) {
+      if (!_controller.isClosed) _controller.close();
+    });
+  }
+
+  void _onLine(String line) {
+    final trimmed = line.trim();
+    if (trimmed.isEmpty) return;
+    final Map<String, dynamic> doc;
+    try {
+      doc = jsonDecode(trimmed) as Map<String, dynamic>;
+    } on FormatException {
+      return; // bridge contract is NDJSON; a stray line is ignored
+    }
+    final report = doc['report'];
+    if (report is Map<String, dynamic>) {
+      if (!_controller.isClosed) {
+        _controller.add(IpReport.fromJson(report));
+      }
+    }
+  }
+
+  @override
+  Stream<IpReport> get reports => _controller.stream;
+
+  @override
+  Future<void> stop() async {
+    _process.kill();
+  }
+}
+
 /// Dev/demo bridge: canned data, no process. Enabled with the BEESKY_MOCK
 /// environment variable or --dart-define=BEESKY_MOCK=1, and used directly
 /// by the widget tests. The sample fleet intentionally includes the two
@@ -532,6 +682,40 @@ class MockBridge implements BeeSkyBridge {
 
   @override
   String get ticketsDirPath => '(mock) tickets';
+
+  @override
+  String get ipreportsFilePath => '(mock) ipreports';
+
+  /// Canned IP reports for the mock panel (v0.34): one Antminer
+  /// report with a payload IP+MAC, one Whatsminer report that only
+  /// the sender address identifies.
+  static final List<IpReport> _sampleReports = [
+    IpReport(
+      receivedAt:
+          DateTime.now().millisecondsSinceEpoch / 1000.0 - 120,
+      sender: '192.168.2.101',
+      text: '192.168.2.101,AA:BB:CC:DD:EE:01',
+      ip: '192.168.2.101',
+      mac: 'AA:BB:CC:DD:EE:01',
+      family: 'antminer',
+    ),
+    IpReport(
+      receivedAt:
+          DateTime.now().millisecondsSinceEpoch / 1000.0 - 45,
+      sender: '192.168.2.105',
+      text: '',
+      ip: null,
+      mac: null,
+      family: 'whatsminer',
+    ),
+  ];
+
+  @override
+  Future<IpReportRun> startIpReport() async => _MockIpReportRun();
+
+  @override
+  Future<List<IpReport>> listIpReports() async =>
+      List<IpReport>.unmodifiable(_sampleReports);
 
   static const String _sampleJson = '''
 {"records": [
@@ -591,7 +775,7 @@ class MockBridge implements BeeSkyBridge {
 
   @override
   Future<SysInfo> sysinfo() async =>
-      const SysInfo(version: '0.32.0', defaultTarget: '192.168.2.0/24');
+      const SysInfo(version: '0.35.0', defaultTarget: '192.168.2.0/24');
 
   /// The sample fleet's event story (v0.32): the Z15 crossed the
   /// temp limit and the L9 lost chips since the previous pass —
@@ -631,6 +815,8 @@ class MockBridge implements BeeSkyBridge {
     String target, {
     String? credsFile,
     String? eventsState,
+    double? timeout,
+    int? workers,
   }) async {
     await Future<void>.delayed(const Duration(milliseconds: 600));
     final base =
@@ -651,6 +837,8 @@ class MockBridge implements BeeSkyBridge {
     String? credsFile,
     String? groupsFile,
     String? eventsState,
+    double? timeout,
+    int? workers,
   }) =>
       scan(name, eventsState: eventsState);
 
@@ -695,6 +883,7 @@ class MockBridge implements BeeSkyBridge {
     String? credsFile,
     String? group,
     String? groupsFile,
+    double? timeout,
   }) async {
     await Future<void>.delayed(const Duration(milliseconds: 250));
     final doc = _inspectFixtures[ip] ??
@@ -938,6 +1127,30 @@ class MockBridge implements BeeSkyBridge {
 /// unit failing honestly, switch_pool failing on non-VNish sources
 /// exactly like the real executors, and Stop accounting the
 /// unstarted remainder as cancelled.
+/// Mock IP-Report run (v0.34): emits the canned reports once,
+/// shortly after start, then stays quiet until stopped.
+class _MockIpReportRun implements IpReportRun {
+  final StreamController<IpReport> _controller =
+      StreamController<IpReport>();
+
+  _MockIpReportRun() {
+    Future<void>.delayed(const Duration(milliseconds: 150), () {
+      if (_controller.isClosed) return;
+      for (final r in MockBridge._sampleReports) {
+        _controller.add(r);
+      }
+    });
+  }
+
+  @override
+  Stream<IpReport> get reports => _controller.stream;
+
+  @override
+  Future<void> stop() async {
+    await _controller.close();
+  }
+}
+
 class _MockOpsRun implements OpsRun {
   final Map<String, dynamic> _job;
   final StreamController<OpsEvent> _controller = StreamController<OpsEvent>();

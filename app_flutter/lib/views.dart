@@ -142,24 +142,108 @@ String formatTicketStamp(String iso) {
 // --------------------------------------------------------------------
 
 /// The settings that persist AND take effect (nothing decorative):
-/// the default scan target and the electricity price. Defaults
-/// mirror the rest of BeeSky: no target override (= sysinfo's
-/// auto-detected subnet, as before) and 2000 VNĐ/kWh (the cloud's
-/// electricity_price_vnd default).
+/// the default scan target and the electricity price (v0.32), plus
+/// the v0.34 Timeouts/Advanced/scale/IP-Report fields
+/// (docs/settings-mapping.md §2). Defaults mirror the rest of
+/// BeeSky: no target override (= sysinfo's auto-detected subnet),
+/// 2000 VNĐ/kWh (the cloud's electricity_price_vnd default),
+/// probe 1.5s / request 3.0s (the core's own defaults), stagger
+/// 0 (no pause), 64 scan workers / 4 ops workers (the core's
+/// defaults), scale 1.0, IP-Report listening off (opt-in — it
+/// opens UDP ports). fromJson tolerates files saved by older
+/// versions (every new key defaults when absent).
 class AppSettings {
   final String defaultTarget;
   final double priceVndKwh;
-  const AppSettings({this.defaultTarget = '', this.priceVndKwh = 2000});
+  final double probeTimeoutS;
+  final double requestTimeoutS;
+  final double opsStaggerS;
+  final int scanWorkers;
+  final int opsWorkers;
+  final double scale;
+  final bool ipReportEnabled;
+
+  const AppSettings({
+    this.defaultTarget = '',
+    this.priceVndKwh = 2000,
+    this.probeTimeoutS = 1.5,
+    this.requestTimeoutS = 3.0,
+    this.opsStaggerS = 0.0,
+    this.scanWorkers = 64,
+    this.opsWorkers = 4,
+    this.scale = 1.0,
+    this.ipReportEnabled = false,
+  });
+
+  static double _num(Map<String, dynamic> json, String key, double dflt) =>
+      ((json[key] as num?) ?? dflt).toDouble();
+
+  static int _int(Map<String, dynamic> json, String key, int dflt) =>
+      ((json[key] as num?) ?? dflt).toInt();
 
   factory AppSettings.fromJson(Map<String, dynamic> json) => AppSettings(
         defaultTarget: (json['default_target'] ?? '') as String,
-        priceVndKwh: ((json['price_vnd_kwh'] as num?) ?? 2000).toDouble(),
+        priceVndKwh: _num(json, 'price_vnd_kwh', 2000),
+        probeTimeoutS: _num(json, 'probe_timeout_s', 1.5),
+        requestTimeoutS: _num(json, 'request_timeout_s', 3.0),
+        opsStaggerS: _num(json, 'ops_stagger_s', 0.0),
+        scanWorkers: _int(json, 'scan_workers', 64),
+        opsWorkers: _int(json, 'ops_workers', 4),
+        scale: _num(json, 'scale', 1.0),
+        ipReportEnabled: (json['ip_report_enabled'] as bool?) ?? false,
       );
 
   Map<String, dynamic> toJson() => {
         'default_target': defaultTarget,
         'price_vnd_kwh': priceVndKwh,
+        'probe_timeout_s': probeTimeoutS,
+        'request_timeout_s': requestTimeoutS,
+        'ops_stagger_s': opsStaggerS,
+        'scan_workers': scanWorkers,
+        'ops_workers': opsWorkers,
+        'scale': scale,
+        'ip_report_enabled': ipReportEnabled,
       };
+
+  /// One field changed, everything else kept — the tab editors
+  /// and the zoom hotkeys build the next settings this way.
+  AppSettings copyWith({
+    String? defaultTarget,
+    double? priceVndKwh,
+    double? probeTimeoutS,
+    double? requestTimeoutS,
+    double? opsStaggerS,
+    int? scanWorkers,
+    int? opsWorkers,
+    double? scale,
+    bool? ipReportEnabled,
+  }) =>
+      AppSettings(
+        defaultTarget: defaultTarget ?? this.defaultTarget,
+        priceVndKwh: priceVndKwh ?? this.priceVndKwh,
+        probeTimeoutS: probeTimeoutS ?? this.probeTimeoutS,
+        requestTimeoutS: requestTimeoutS ?? this.requestTimeoutS,
+        opsStaggerS: opsStaggerS ?? this.opsStaggerS,
+        scanWorkers: scanWorkers ?? this.scanWorkers,
+        opsWorkers: opsWorkers ?? this.opsWorkers,
+        scale: scale ?? this.scale,
+        ipReportEnabled: ipReportEnabled ?? this.ipReportEnabled,
+      );
+}
+
+/// One app data file for the Logs tab (v0.34): label + size in
+/// bytes (null when the file does not exist yet).
+class StoreFileInfo {
+  final String label;
+  final int? bytes;
+  const StoreFileInfo(this.label, this.bytes);
+
+  String get sizeText {
+    if (bytes == null) return 'chưa có file';
+    if (bytes! < 1024) return '${bytes!} B';
+    if (bytes! < 1024 * 1024) return '${(bytes! / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes! / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
 }
 
 (Directory, Directory) _viewStoreDirs() {
@@ -846,6 +930,13 @@ class SettingsView extends StatefulWidget {
   final String ticketsDir;
   final String? coreVersion;
   final bool sidecarMissing;
+  // Logs tab (v0.34): the data directory + the real store files
+  // living there, and the two clear actions (each deletes its
+  // file; the parent reports the result in the status line).
+  final String dataDir;
+  final List<StoreFileInfo> storeFiles;
+  final VoidCallback onClearOpsHistory;
+  final VoidCallback onClearEvents;
   const SettingsView({
     super.key,
     required this.settings,
@@ -856,6 +947,10 @@ class SettingsView extends StatefulWidget {
     required this.ticketsDir,
     required this.coreVersion,
     required this.sidecarMissing,
+    required this.dataDir,
+    required this.storeFiles,
+    required this.onClearOpsHistory,
+    required this.onClearEvents,
   });
 
   @override
@@ -865,131 +960,459 @@ class SettingsView extends StatefulWidget {
 class _SettingsViewState extends State<SettingsView> {
   late final TextEditingController _targetCtrl;
   late final TextEditingController _priceCtrl;
+  late final TextEditingController _probeCtrl;
+  late final TextEditingController _requestCtrl;
+  late final TextEditingController _staggerCtrl;
+  late final TextEditingController _scanWorkersCtrl;
+  late final TextEditingController _opsWorkersCtrl;
+  late bool _ipReport;
+  late double _scale;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    _targetCtrl = TextEditingController(text: widget.settings.defaultTarget);
-    _priceCtrl =
-        TextEditingController(text: _priceText(widget.settings.priceVndKwh));
+    final s = widget.settings;
+    _targetCtrl = TextEditingController(text: s.defaultTarget);
+    _priceCtrl = TextEditingController(text: _numText(s.priceVndKwh));
+    _probeCtrl = TextEditingController(text: _numText(s.probeTimeoutS));
+    _requestCtrl =
+        TextEditingController(text: _numText(s.requestTimeoutS));
+    _staggerCtrl = TextEditingController(text: _numText(s.opsStaggerS));
+    _scanWorkersCtrl =
+        TextEditingController(text: '${s.scanWorkers}');
+    _opsWorkersCtrl = TextEditingController(text: '${s.opsWorkers}');
+    _ipReport = s.ipReportEnabled;
+    _scale = s.scale;
   }
 
   @override
   void dispose() {
     _targetCtrl.dispose();
     _priceCtrl.dispose();
+    _probeCtrl.dispose();
+    _requestCtrl.dispose();
+    _staggerCtrl.dispose();
+    _scanWorkersCtrl.dispose();
+    _opsWorkersCtrl.dispose();
     super.dispose();
   }
 
-  static String _priceText(double v) =>
+  static String _numText(double v) =>
       v == v.roundToDouble() ? v.toInt().toString() : v.toString();
 
+  double? _parseNum(TextEditingController c) {
+    final text = c.text.trim().replaceAll(',', '.');
+    return double.tryParse(text);
+  }
+
+  int? _parseInt(TextEditingController c) =>
+      int.tryParse(c.text.trim());
+
+  void _fail(String message) => setState(() => _error = message);
+
   void _save() {
-    final priceText = _priceCtrl.text.trim().replaceAll('.', '');
-    final price = double.tryParse(
-        _priceCtrl.text.trim().replaceAll(',', '.'));
-    final parsed = price ?? double.tryParse(priceText);
-    if (parsed == null || parsed < 0) {
-      setState(() => _error = 'Giá điện phải là một số ≥ 0 (VNĐ/kWh).');
+    final price = _parseNum(_priceCtrl);
+    if (price == null || price < 0) {
+      _fail('Giá điện phải là một số ≥ 0 (VNĐ/kWh).');
+      return;
+    }
+    final probe = _parseNum(_probeCtrl);
+    if (probe == null || probe < 0.2 || probe > 10) {
+      _fail('Probe timeout phải từ 0,2 đến 10 giây.');
+      return;
+    }
+    final request = _parseNum(_requestCtrl);
+    if (request == null || request < 0.2 || request > 120) {
+      _fail('Request timeout phải từ 0,2 đến 120 giây.');
+      return;
+    }
+    final stagger = _parseNum(_staggerCtrl);
+    if (stagger == null || stagger < 0 || stagger > 60) {
+      _fail('Dừng giữa các máy phải từ 0 đến 60 giây.');
+      return;
+    }
+    final scanWorkers = _parseInt(_scanWorkersCtrl);
+    if (scanWorkers == null || scanWorkers < 1 || scanWorkers > 256) {
+      _fail('Số luồng quét phải từ 1 đến 256.');
+      return;
+    }
+    final opsWorkers = _parseInt(_opsWorkersCtrl);
+    if (opsWorkers == null || opsWorkers < 1 || opsWorkers > 8) {
+      _fail('Song song thao tác phải từ 1 đến 8.');
       return;
     }
     setState(() => _error = null);
     widget.onSave(AppSettings(
       defaultTarget: _targetCtrl.text.trim(),
-      priceVndKwh: parsed,
+      priceVndKwh: price,
+      probeTimeoutS: probe,
+      requestTimeoutS: request,
+      opsStaggerS: stagger,
+      scanWorkers: scanWorkers,
+      opsWorkers: opsWorkers,
+      scale: _scale,
+      ipReportEnabled: _ipReport,
     ));
   }
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(18, 14, 18, 12),
-      children: [
-        GlassCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Quét & điện',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _targetCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Mục tiêu quét mặc định',
-                  hintText: 'Để trống = tự nhận diện subnet như hiện tại',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _priceCtrl,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(
-                  labelText: 'Giá điện (VNĐ/kWh)',
-                  hintText: 'Mặc định toàn BeeSky: 2000',
-                ),
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 8),
-                Text(_error!,
-                    style: const TextStyle(color: BeeSkyColors.bad)),
+    // Five tabs like HashCore's Settings dialog (General, Unlock,
+    // Timeouts, Logs, Advanced — docs/settings-mapping.md §1);
+    // each tab holds only settings BeeSky really has. One Lưu
+    // button at the bottom saves every tab at once.
+    return DefaultTabController(
+      length: 5,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const TabBar(
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
+            tabs: [
+              Tab(text: 'Chung'),
+              Tab(text: 'Tài khoản'),
+              Tab(text: 'Thời gian chờ'),
+              Tab(text: 'Nhật ký'),
+              Tab(text: 'Nâng cao'),
+            ],
+          ),
+          Expanded(
+            child: TabBarView(
+              children: [
+                _generalTab(),
+                _unlockTab(),
+                _timeoutsTab(),
+                _logsTab(),
+                _advancedTab(),
               ],
-              const SizedBox(height: 14),
-              FilledButton.icon(
-                onPressed: _save,
-                icon: const Icon(Icons.save_outlined, size: 17),
-                label: const Text('Lưu cài đặt'),
-              ),
-            ],
+            ),
           ),
-        ),
-        const SizedBox(height: 12),
-        GlassCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Liên kết nhanh',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 6),
-              _linkRow(
-                Icons.key_outlined,
-                'Tài khoản máy đào',
-                '${widget.credCount} bộ đã lưu',
-                widget.onOpenCreds,
-              ),
-              _linkRow(
-                Icons.device_hub_outlined,
-                'Nhóm mạng',
-                'Dải IP, tài khoản riêng và lịch tự quét theo nhóm',
-                widget.onOpenGroups,
-              ),
-            ],
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 8, 18, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(_error!,
+                        style:
+                            const TextStyle(color: BeeSkyColors.bad)),
+                  ),
+                FilledButton.icon(
+                  onPressed: _save,
+                  icon: const Icon(Icons.save_outlined, size: 17),
+                  label: const Text('Lưu cài đặt'),
+                ),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(height: 12),
-        GlassCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Giới thiệu',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 10),
-              _info('Phiên bản app', 'BeeSky v$beeskyAppVersion'),
-              _info(
-                'Ruột quét (beesky.exe)',
-                widget.sidecarMissing
-                    ? 'Chưa có (thiếu beesky.exe)'
-                    : widget.coreVersion != null
-                        ? 'v${widget.coreVersion}'
-                        : 'Chưa đọc được',
-              ),
-              _info('Thư mục phiếu sửa', widget.ticketsDir),
-            ],
-          ),
-        ),
-      ],
+        ],
+      ),
     );
+  }
+
+  Widget _tabScroll(Widget child) => ListView(
+        padding: const EdgeInsets.fromLTRB(18, 14, 18, 12),
+        children: [child],
+      );
+
+  Widget _section(String title, List<Widget> children) => GlassCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title,
+                style: const TextStyle(
+                    fontSize: 14, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 12),
+            ...children,
+          ],
+        ),
+      );
+
+  static const _fieldPad =
+      EdgeInsets.symmetric(horizontal: 12, vertical: 10);
+
+  Widget _generalTab() => _tabScroll(
+        _section('Quét & điện', [
+          TextField(
+            controller: _targetCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Mục tiêu quét mặc định',
+              hintText: 'Để trống = tự nhận diện subnet như hiện tại',
+              contentPadding: _fieldPad,
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _priceCtrl,
+            keyboardType:
+                const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+              labelText: 'Giá điện (VNĐ/kWh)',
+              hintText: 'Mặc định toàn BeeSky: 2000',
+              contentPadding: _fieldPad,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              const Expanded(
+                child: Text('Tỉ lệ giao diện',
+                    style: TextStyle(fontWeight: FontWeight.w600)),
+              ),
+              IconButton(
+                icon: const Icon(Icons.remove, size: 18),
+                tooltip: 'Thu nhỏ (Ctrl+-)',
+                onPressed: _scale <= 0.9
+                    ? null
+                    : () => setState(
+                        () => _scale = (_scale - 0.05).clamp(0.9, 1.3)),
+              ),
+              SizedBox(
+                width: 52,
+                child: Text(
+                  '${(_scale * 100).round()}%',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.add, size: 18),
+                tooltip: 'Phóng to (Ctrl+=)',
+                onPressed: _scale >= 1.3
+                    ? null
+                    : () => setState(
+                        () => _scale = (_scale + 0.05).clamp(0.9, 1.3)),
+              ),
+            ],
+          ),
+          const Text(
+            'Phóng to/thu nhỏ chữ trong bảng và nhãn (90–130%). '
+            'Khung cố định (sidebar, chiều cao hàng) không đổi.',
+            style: TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Switch(
+                value: _ipReport,
+                onChanged: (v) => setState(() => _ipReport = v),
+              ),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Nghe IP Report',
+                        style: TextStyle(fontWeight: FontWeight.w600)),
+                    Text(
+                      'Lắng nghe máy đào bấm nút IP Report trên '
+                      'mạng (UDP 14235/8888) — panel ở màn hình '
+                      'Nhóm mạng.',
+                      style: TextStyle(
+                          color: BeeSkyColors.muted, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ]),
+      );
+
+  Widget _unlockTab() => _tabScroll(
+        _section('Tài khoản máy đào', [
+          const Text(
+            'Cách mở khóa theo từng hãng nằm ở đây — cùng một bộ '
+            'cài đặt dùng cho quét, xem chi tiết và thao tác.',
+            style: TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+          ),
+          const SizedBox(height: 6),
+          _linkRow(
+            Icons.key_outlined,
+            'Tài khoản máy đào',
+            '${widget.credCount} bộ đã lưu',
+            widget.onOpenCreds,
+          ),
+          _linkRow(
+            Icons.device_hub_outlined,
+            'Nhóm mạng',
+            'Dải IP, tài khoản riêng và lịch tự quét theo nhóm',
+            widget.onOpenGroups,
+          ),
+        ]),
+      );
+
+  Widget _timeoutsTab() => _tabScroll(
+        _section('Thời gian chờ', [
+          const Text(
+            'Timeout càng lớn quét càng chậm nhưng càng ít sót máy; '
+            'quá nhỏ sẽ bỏ sót máy trả lời chậm.',
+            style: TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _probeCtrl,
+            keyboardType:
+                const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+              labelText: 'Probe timeout — quét tìm máy (giây)',
+              hintText: 'Mặc định: 1,5',
+              contentPadding: _fieldPad,
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _requestCtrl,
+            keyboardType:
+                const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+              labelText: 'Request timeout — xem chi tiết / thao tác (giây)',
+              hintText: 'Mặc định: 3',
+              contentPadding: _fieldPad,
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _staggerCtrl,
+            keyboardType:
+                const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+              labelText: 'Dừng giữa các máy khi thao tác hàng loạt (giây)',
+              hintText: 'Mặc định: 0 — chạy liền nhau',
+              contentPadding: _fieldPad,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Dừng giữa các máy: mỗi lệnh thao tác bắt đầu cách nhau '
+            'khoảng này, tránh dồn máy cùng lúc.',
+            style: TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+          ),
+        ]),
+      );
+
+  Widget _logsTab() => _tabScroll(
+        Column(
+          children: [
+            _section('Thư mục dữ liệu', [
+              _info('Thư mục', widget.dataDir),
+              const SizedBox(height: 6),
+              for (final f in widget.storeFiles) _info(f.label, f.sizeText),
+              const SizedBox(height: 6),
+              _info('Thư mục phiếu sửa', widget.ticketsDir),
+            ]),
+            const SizedBox(height: 12),
+            _section('Dọn dẹp', [
+              const Text(
+                'Xóa lịch sử thao tác hoặc nhật ký sự kiện đã lưu '
+                'trên máy này. Máy đào và nhóm mạng không bị ảnh hưởng.',
+                style: TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: () => _confirmClear(
+                      'Xóa lịch sử thao tác?',
+                      'Toàn bộ lịch sử thao tác đã chạy sẽ bị xóa.',
+                      widget.onClearOpsHistory,
+                    ),
+                    icon: const Icon(Icons.delete_outline, size: 17),
+                    label: const Text('Xóa lịch sử thao tác'),
+                  ),
+                  const SizedBox(width: 10),
+                  OutlinedButton.icon(
+                    onPressed: () => _confirmClear(
+                      'Xóa nhật ký sự kiện?',
+                      'Toàn bộ sự kiện đã ghi giữa các lần quét sẽ '
+                      'bị xóa.',
+                      widget.onClearEvents,
+                    ),
+                    icon: const Icon(Icons.delete_outline, size: 17),
+                    label: const Text('Xóa nhật ký sự kiện'),
+                  ),
+                ],
+              ),
+            ]),
+          ],
+        ),
+      );
+
+  Widget _advancedTab() => _tabScroll(
+        _section('Nâng cao', [
+          const Text(
+            'Sai số ở đây có thể làm quét chậm hoặc bỏ sót máy. '
+            'Mặc định đã hợp với trại vài trăm máy.',
+            style: TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _scanWorkersCtrl,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'Số luồng quét (1–256)',
+              hintText: 'Mặc định: 64',
+              contentPadding: _fieldPad,
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _opsWorkersCtrl,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'Thao tác song song (1–8)',
+              hintText: 'Mặc định: 4',
+              contentPadding: _fieldPad,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Thao tác song song: số máy được thao tác cùng lúc '
+            'trong một tác vụ (quét vẫn dò song song theo số luồng '
+            'quét).',
+            style: TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+          ),
+          const SizedBox(height: 16),
+          const Text('Giới thiệu',
+              style:
+                  TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 10),
+          _info('Phiên bản app', 'BeeSky v$beeskyAppVersion'),
+          _info(
+            'Ruột quét (beesky.exe)',
+            widget.sidecarMissing
+                ? 'Chưa có (thiếu beesky.exe)'
+                : widget.coreVersion != null
+                    ? 'v${widget.coreVersion}'
+                    : 'Chưa đọc được',
+          ),
+        ]),
+      );
+
+  Future<void> _confirmClear(
+      String title, String message, VoidCallback onConfirm) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: BeeSkyColors.panel,
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Hủy'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Xóa'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) onConfirm();
   }
 
   Widget _linkRow(

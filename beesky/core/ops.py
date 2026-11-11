@@ -433,6 +433,22 @@ def _action_creds(cand, merged: list[dict] | None,
                         break
             out = {**out, "password": known}
         return out
+    if cand.source in ("whatsminer", "luxos"):
+        # Anonymous reads, authenticated writes: the first
+        # family-ordered set's password is the write method (the
+        # whatsminer handler falls back to the factory default
+        # "admin" when there is none — see actions._wm_password;
+        # "" here is the explicit "no set" marker, never the
+        # merged "root" filler).
+        out = base
+        if merged:
+            for entry in ordered_creds(merged, cand.source):
+                if entry.get("password"):
+                    out = {**base, "password": entry["password"]}
+                    break
+        if "password" not in out:
+            out = {**base, "password": ""}
+        return out
     return base
 
 
@@ -468,8 +484,11 @@ def _fetch_record(cand, timeout: float) -> dict:
             record = report.error_record(ip, str(exc), source="stock")
     else:
         # cgminer family ("avalon" is the same wire, refined by
-        # the probe; the stats cache rides the candidate, v0.30).
-        source = cand.source if cand.source == "avalon" else "cgminer"
+        # the probe; "luxos" the same wire with the LUXminer
+        # version refinement, v0.33.0; the stats cache rides the
+        # candidate, v0.30).
+        source = cand.source if cand.source in ("avalon", "luxos") \
+            else "cgminer"
         client = CgminerClient(ip, port=cand.cgminer_port,
                                timeout=fetch_timeout)
         try:

@@ -1,5 +1,11 @@
 # Network groups — HashCore Toolkit → BeeSky behaviour mapping (v0.24.0)
 
+> **v0.35.0 update:** the §1.2 divergence is CLOSED — groups now
+> carry a `description` field (core `normalise_group` + app
+> `NetGroup`, card shows it or "Không có mô tả", editor field,
+> group search covers it). The per-range divergences in §1.3
+> (typed/named ranges, per-range disable, DNS, port ranges) stand.
+
 Written BEFORE the port, per the dissect-before-porting discipline.
 Every HashCore claim below is graded:
 

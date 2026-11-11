@@ -8,7 +8,9 @@ target, walk the adapter chain in a fixed order —
      first, then cgminer RPC (Bitmain & most forks; richest data) —
      with a Canaan Avalon refinement on the cgminer claim (the
      STATS "MM ID" module fingerprint; v0.30, see
-     docs/vendor-coverage-mapping.md)
+     docs/vendor-coverage-mapping.md) and a LuxOS refinement
+     (the ``version`` Description starts "LUXminer"; v0.33.0,
+     see docs/vendor-docs-mapping.md §2)
   2. VNish/HashCore dashd HTTP API on :80 (GET /api/v1/summary signature)
   3. Bitmain stock web CGI on :80 (digest auth, /cgi-bin/get_miner_status.cgi)
 
@@ -21,9 +23,10 @@ digest) accept a list of credential sets — each tagged with a machine
 family — and try them family-first (see ordered_creds). The winning
 set's label is carried on the candidate into the record (cred_label).
 Family tags (v0.30): the HashCore vendor set ported in
-docs/vendor-coverage-mapping.md §6 — detection exists for whatsminer
-and avalon; iceriver / jasminer / braiins / luxos are tag-only
-families (their contracts are named gaps in the mapping).
+docs/vendor-coverage-mapping.md §6 — detection exists for whatsminer,
+avalon and (v0.33.0) luxos; iceriver / jasminer / braiins are
+tag-only families (their contracts are named gaps in
+docs/vendor-docs-mapping.md §3–§5).
 """
 
 from __future__ import annotations
@@ -36,6 +39,7 @@ from dataclasses import dataclass, field
 from .bitmain import BitmainClient
 from .cgminer import CgminerClient
 from .dashd import DashdClient, DashdError
+from .luxos import is_luxos_version
 from .whatsminer import WhatsminerClient, is_whatsminer_summary
 
 HTTP_PORT = 80
@@ -92,7 +96,7 @@ class Candidate:
 
     ip: str
     source: str | None = None  # "cgminer" | "vnish" | "stock" |
-    #                            "whatsminer" | "avalon"
+    #                            "whatsminer" | "avalon" | "luxos"
     http_open: bool = False
     cgminer_open: bool = False
     cgminer_ok: bool = False  # answered a real `summary` command
@@ -288,6 +292,18 @@ def probe_host(ip: str, timeout: float = 1.5, http_port: int = HTTP_PORT,
                 cand.stats_data = {}
             if _avalon_fingerprint(cand.stats_data, cand.summary):
                 cand.source = "avalon"
+            else:
+                # LuxOS refinement (v0.33.0, docs/vendor-docs-mapping.md
+                # §2.4): a cgminer-claim device whose `version`
+                # Description starts "LUXminer" is a LuxOS miner.
+                # One extra call, positive-only — stock answers
+                # `cgminer …` / `bmminer …` and never matches.
+                try:
+                    version_resp = client.command("version")
+                except Exception:
+                    version_resp = {}
+                if is_luxos_version(version_resp):
+                    cand.source = "luxos"
             return cand
 
     # 2) + 3) HTTP adapters need the web port.

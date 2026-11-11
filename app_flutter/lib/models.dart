@@ -17,9 +17,9 @@ const List<String> rateUnitOrder = ['TH/s', 'GH/s', 'MH/s', 'ksol/s', 'sol/s'];
 const double tempLimitC = 85;
 
 /// The Flutter shell's own version — moves WITH the product
-/// version (pubspec 0.32.0+13); the sidebar and Cài đặt show the
+/// version (pubspec 0.35.0+16); the sidebar and Cài đặt show the
 /// CORE's version from sysinfo, this one is the app's.
-const String beeskyAppVersion = '0.32.0';
+const String beeskyAppVersion = '0.35.0';
 
 /// "1101.0, ksol/s" -> "1,101.00 ksol/s" — mirrors Python's f"{v:,.2f}".
 String formatRateNum(double value) {
@@ -173,6 +173,12 @@ class MinerRecord {
   /// other cell (docs/presets-ipreport-mapping.md §6).
   final String note;
 
+  /// The network group this record was scanned under (v0.34
+  /// "Quét tất cả nhóm"): decorated APP-SIDE like [note] — the
+  /// core's scan has no group concept, and [toJson] does not
+  /// serialise it. Empty outside a group scan.
+  final String groupName;
+
   const MinerRecord({
     required this.ip,
     required this.model,
@@ -194,6 +200,7 @@ class MinerRecord {
     this.mac,
     this.pools = const [],
     this.note = '',
+    this.groupName = '',
   });
 
   /// A copy carrying [note] (the app-side decoration above);
@@ -219,6 +226,33 @@ class MinerRecord {
         mac: mac,
         pools: pools,
         note: note,
+        groupName: groupName,
+      );
+
+  /// A copy carrying [groupName] (the v0.34 combined-scan
+  /// decoration); every other field is preserved untouched.
+  MinerRecord withGroup(String groupName) => MinerRecord(
+        ip: ip,
+        model: model,
+        source: source,
+        chains: chains,
+        fansRpm: fansRpm,
+        chipsAlive: chipsAlive,
+        chipsTotal: chipsTotal,
+        maxTempC: maxTempC,
+        issues: issues,
+        status: status,
+        rateValue: rateValue,
+        rateUnit: rateUnit,
+        legacyThs: legacyThs,
+        credLabel: credLabel,
+        elapsedS: elapsedS,
+        ghs5s: ghs5s,
+        powerW: powerW,
+        mac: mac,
+        pools: pools,
+        note: note,
+        groupName: groupName,
       );
 
   factory MinerRecord.fromJson(Map<String, dynamic> json) {
@@ -325,6 +359,7 @@ class MinerRecord {
         'stock' => 'Bitmain gốc',
         'whatsminer' => 'Whatsminer',
         'avalon' => 'Avalon (Canaan)',
+        'luxos' => 'LuxOS',
         _ => source,
       };
 
@@ -665,4 +700,66 @@ class SysInfo {
         version: (json['version'] ?? '') as String,
         defaultTarget: (json['default_target'] ?? '') as String,
       );
+}
+
+/// One miner IP-Report broadcast (v0.34, docs/ipreport-mapping.md):
+/// the core listener's report document. [ip] is the address the
+/// payload claims (first private IPv4 in the text) or null — then
+/// [targetIp] falls back to [sender], exactly like the reference
+/// implementations. [family] is "antminer" (UDP 14235,
+/// CORROBORATED) or "whatsminer" (UDP 8888, SINGLE-SOURCE).
+class IpReport {
+  final double receivedAt; // epoch seconds, as the core wrote it
+  final String sender;
+  final String text;
+  final String? ip;
+  final String? mac;
+  final String? family;
+
+  const IpReport({
+    required this.receivedAt,
+    required this.sender,
+    required this.text,
+    this.ip,
+    this.mac,
+    this.family,
+  });
+
+  /// The address to open/scan: the miner's own claim when valid,
+  /// otherwise the packet's source (Find-My-Miner's Target rule).
+  String get targetIp => ip ?? sender;
+
+  String get familyLabel => switch (family) {
+        'whatsminer' => 'Whatsminer',
+        'antminer' => 'Antminer',
+        _ => 'Không rõ hãng',
+      };
+
+  DateTime get receivedTime =>
+      DateTime.fromMillisecondsSinceEpoch((receivedAt * 1000).round());
+
+  String get whenText {
+    final t = receivedTime;
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${two(t.hour)}:${two(t.minute)}:${two(t.second)} '
+        '${two(t.day)}/${two(t.month)}';
+  }
+
+  factory IpReport.fromJson(Map<String, dynamic> json) => IpReport(
+        receivedAt: ((json['received_at'] as num?) ?? 0).toDouble(),
+        sender: (json['sender'] ?? '') as String,
+        text: (json['text'] ?? '') as String,
+        ip: json['ip'] as String?,
+        mac: json['mac'] as String?,
+        family: json['family'] as String?,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'received_at': receivedAt,
+        'sender': sender,
+        'text': text,
+        'ip': ip,
+        'mac': mac,
+        'family': family,
+      };
 }

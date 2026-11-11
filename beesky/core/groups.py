@@ -2,7 +2,8 @@
 
 A group is a named scan target with its own overrides:
 
-    {"id": "…", "name": "Trại chính", "targets": "192.168.2.0/24",
+    {"id": "…", "name": "Trại chính", "description": "Sảnh A — S19 Pro",
+     "targets": "192.168.2.0/24",
      "creds": [ …v0.23 creds-file entries… ],
      "autoscan": {"enabled": false, "interval_min": 30},
      "last_scan": {"at": "…", "scanned": N, "found": N,
@@ -208,6 +209,13 @@ def normalise_group(raw, source: str = "group") -> dict:
     if not isinstance(name, str) or not name.strip():
         raise GroupError(f"{source}: a group needs a non-empty \"name\"")
     name = name.strip()
+    description = raw.get("description", "")
+    if description is None:
+        description = ""
+    if not isinstance(description, str):
+        raise GroupError(
+            f"{source} ({name!r}): \"description\" must be a string")
+    description = description.strip()
     targets = raw.get("targets")
     if not isinstance(targets, str) or not targets.strip():
         raise GroupError(
@@ -248,6 +256,7 @@ def normalise_group(raw, source: str = "group") -> dict:
     return {
         "id": gid if isinstance(gid, str) and gid else secrets.token_hex(6),
         "name": name,
+        "description": description,
         "targets": targets,
         "creds": _validate_cred_entries(raw.get("creds"), f"{source} ({name!r})"),
         "autoscan": {

@@ -59,7 +59,14 @@
                                    [--force-file PATH] [--relaunch]
                                    (signed self-update, docs/updating.md)
 
-    python -m beesky fw identify <ip> [--ssh-user root]
+    python -m beesky ipreport listen [--port 14235] [--no-whatsminer]
+                                   [--out FILE] [--duration SECONDS]
+                                   [--allow-loopback]
+                                   (listen for miners' hardware IP-Report
+                                    broadcasts, NDJSON reports to stdout;
+                                    v0.34, docs/ipreport-mapping.md)
+    python -m beesky ipreport list --file FILE [--json]
+                                   (read persisted reports)
                                    [--ssh-password-env VAR] [--ssh-key F]
     python -m beesky fw install <ip> <firmware-file> [--yes]
                                    [--wait-minutes 5] (VNish API or stock CGI)
@@ -88,9 +95,11 @@ from . import __version__
 from .agent import AgentService
 from .cloud.server import run_cloud_server
 from .cloud.store import CloudStore
+from .core import arp as arp_mod
 from .core import firmware as firmware_mod
 from .core import groups as groups_mod
 from .core import inspect as inspect_mod
+from .core import ipreport as ipreport_mod
 from .core import ops as ops_mod
 from .core import notify as notify_mod
 from .core import report
@@ -192,7 +201,8 @@ def _validate_creds(args: argparse.Namespace, command: str) -> int | None:
     return None
 
 
-def _fetch_record(cand: Candidate, args: argparse.Namespace) -> dict:
+def _fetch_record(cand: Candidate, args: argparse.Namespace,
+                  arp_table: dict | None = None) -> dict:
     """Pull full health data for one candidate via its claiming adapter."""
     ip, timeout = cand.ip, max(args.timeout, 2.0)
     if cand.source == "whatsminer":
@@ -230,9 +240,11 @@ def _fetch_record(cand: Candidate, args: argparse.Namespace) -> dict:
     else:
         # cgminer RPC (also the fallback for port-open-but-silent
         # candidates; "avalon" is the same wire with the Canaan
-        # refinement the probe applied) — no auth, so never a
-        # cred_label.
-        source = cand.source if cand.source == "avalon" else "cgminer"
+        # refinement the probe applied, "luxos" the same wire with
+        # the LUXminer version refinement, v0.33.0) — no auth, so
+        # never a cred_label.
+        source = cand.source if cand.source in ("avalon", "luxos") \
+            else "cgminer"
         client = CgminerClient(ip, port=cand.cgminer_port, timeout=timeout)
         try:
             summary = client.summary()
@@ -253,6 +265,14 @@ def _fetch_record(cand: Candidate, args: argparse.Namespace) -> dict:
     # default-cred records stay label-free.
     if cand.cred_label and not _is_error_record(record):
         record["cred_label"] = cand.cred_label
+    # MAC from the host's ARP cache (v0.35): the scan just talked to
+    # this IP over TCP, so the cache holds its MAC. Best-effort —
+    # a missing entry leaves the record without "mac" (the grid
+    # shows "—"), never a failed record.
+    if arp_table:
+        mac = arp_table.get(ip)
+        if mac:
+            record["mac"] = mac
     return record
 
 
@@ -264,7 +284,8 @@ def _scan_records(args: argparse.Namespace) -> list[dict]:
         username=args.user, password=args.password,
         api_key=args.api_key, token=args.token,
         creds=_scan_creds(args))
-    return [_fetch_record(c, args) for c in candidates]
+    arp_table = arp_mod.read_arp_table()
+    return [_fetch_record(c, args, arp_table=arp_table) for c in candidates]
 
 
 def _print_table(records: list[dict]) -> None:
@@ -591,6 +612,25 @@ def cmd_groups(args: argparse.Namespace) -> int:
         print(json.dumps(group, indent=2, ensure_ascii=False))
         return 0
 
+    if action == "reset-stats":
+        # v0.34: HashCore's "Reset statistics" (per group, or --all
+        # for every group) — clears last_scan so the group reads
+        # "never scanned" again (the MỚI tag returns). Targets,
+        # creds and autoscan are untouched.
+        if args.all:
+            for g in groups:
+                g["last_scan"] = None
+            store.save(groups)
+            print(f"Reset statistics for {len(groups)} group(s).")
+            return 0
+        group = groups_mod.find_group(groups, args.name)
+        if group is None:
+            return _groups_fail(f"group not found: {args.name!r}")
+        group["last_scan"] = None
+        store.save(groups)
+        print(f"Reset statistics for group {group['name']!r}.")
+        return 0
+
     if action == "export":
         payload = {"version": groups_mod.STORE_VERSION, "groups": groups}
         try:
@@ -631,6 +671,99 @@ def cmd_groups(args: argparse.Namespace) -> int:
         return 0
 
     return _groups_fail(f"unknown groups command: {action}")
+
+
+# ---------------------------------------------------------------------------
+# ipreport — listen for miners' hardware IP-Report broadcasts (v0.34)
+# ---------------------------------------------------------------------------
+
+IPREPORT_STORE_VERSION = 1
+IPREPORT_STORE_CAP = 100
+
+
+def _load_ipreport_store(path: str) -> list[dict]:
+    """Reports persisted by `ipreport listen --out FILE` (newest
+    first, capped) — the Flutter panel reads this same file."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if isinstance(data, dict) and isinstance(data.get("reports"), list):
+        return [r for r in data["reports"] if isinstance(r, dict)]
+    return []
+
+
+def _append_ipreport(path: str, report: dict) -> None:
+    stored = _load_ipreport_store(path)
+    stored = [report] + [r for r in stored
+                         if r.get("ip") != report.get("ip")
+                         or r.get("sender") != report.get("sender")]
+    stored = stored[:IPREPORT_STORE_CAP]
+    tmp = Path(str(path) + ".tmp")
+    tmp.write_text(json.dumps({"version": IPREPORT_STORE_VERSION,
+                               "reports": stored}, ensure_ascii=False),
+                   encoding="utf-8")
+    tmp.replace(path)
+
+
+def cmd_ipreport(args: argparse.Namespace) -> int:
+    action = args.ipreport_command
+    if action == "list":
+        reports = _load_ipreport_store(args.file)
+        if args.json:
+            print(json.dumps({"reports": reports}, ensure_ascii=False))
+        elif not reports:
+            print(f"No IP reports recorded (store: {args.file}).")
+        else:
+            for r in reports:
+                print(f"{r.get('ip') or r.get('sender')}  "
+                      f"MAC {r.get('mac') or '—'}  "
+                      f"({r.get('family') or '?'}, từ {r.get('sender')})")
+        return 0
+
+    # listen — one NDJSON {"report": {...}} line per broadcast, to
+    # stdout (the Flutter panel streams this like an ops run) and,
+    # with --out, persisted to the store file.
+    ports = [args.port]
+    if not args.no_whatsminer and ipreport_mod.WHATS_MINER_PORT not in ports:
+        ports.append(ipreport_mod.WHATS_MINER_PORT)
+    received: list[dict] = []
+
+    def on_report(report: dict) -> None:
+        received.append(report)
+        print(json.dumps({"report": report}, ensure_ascii=False),
+              flush=True)
+        if args.out:
+            try:
+                _append_ipreport(args.out, report)
+            except OSError:
+                pass
+
+    listener = ipreport_mod.IpReportListener(
+        on_report=on_report, ports=tuple(ports),
+        allow_loopback=args.allow_loopback)
+    bound = listener.start()
+    if not bound:
+        print("ipreport: Failed to start IP Report listening — "
+              f"ports {ports} are already in use (another listener, "
+              "e.g. Bitmain's IP Reporter, may own them).",
+              file=sys.stderr)
+        return 2
+    print(json.dumps({"listening": bound}, ensure_ascii=False), flush=True)
+    try:
+        if args.duration and args.duration > 0:
+            time.sleep(args.duration)
+        else:
+            while True:
+                time.sleep(3600)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        listener.stop()
+    if args.duration and args.duration > 0:
+        print(json.dumps({"stopped": True,
+                          "received": len(received)}, ensure_ascii=False))
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -1154,6 +1287,12 @@ def main(argv: list[str] | None = None) -> int:
     g_remove.add_argument("name", help="group name")
     g_show = groups_sub.add_parser("show", help="print one group as JSON")
     g_show.add_argument("name", help="group name")
+    g_reset = groups_sub.add_parser(
+        "reset-stats", help="clear a group's last-scan statistics "
+                           "(v0.34; HashCore's 'Reset statistics')")
+    g_reset.add_argument("name", nargs="?", help="group name")
+    g_reset.add_argument("--all", action="store_true",
+                         help="reset statistics for every group")
     g_export = groups_sub.add_parser(
         "export", help="export all groups as JSON")
     g_export.add_argument("file", help="destination file")
@@ -1163,6 +1302,34 @@ def main(argv: list[str] | None = None) -> int:
                        "one, others are kept)")
     g_import.add_argument("file", help="file written by `groups export`")
     groups.set_defaults(func=cmd_groups)
+
+    ipreport = sub.add_parser(
+        "ipreport", help="listen for miners' hardware IP-Report "
+                         "broadcasts (v0.34; docs/ipreport-mapping.md)")
+    ip_sub = ipreport.add_subparsers(dest="ipreport_command", required=True)
+    ip_listen = ip_sub.add_parser(
+        "listen", help="listen on UDP 14235 (Antminer) + 8888 "
+                       "(Whatsminer) and stream NDJSON reports")
+    ip_listen.add_argument("--port", type=int, default=14235,
+                           help="Antminer-style report port (default 14235)")
+    ip_listen.add_argument("--no-whatsminer", action="store_true",
+                           help="do not listen on the Whatsminer port 8888")
+    ip_listen.add_argument("--out", metavar="FILE",
+                           help="persist reports to FILE "
+                                "(beesky-ipreports.json shape)")
+    ip_listen.add_argument("--duration", type=float, default=0,
+                           help="listen for N seconds then stop "
+                                "(0 = until Ctrl+C)")
+    ip_listen.add_argument("--allow-loopback", action="store_true",
+                           help="accept reports from 127.0.0.1 (tests only)")
+    ip_list = ip_sub.add_parser(
+        "list", help="read persisted IP reports (read-only)")
+    ip_list.add_argument("--file", required=True, metavar="FILE",
+                         help="the store file `ipreport listen --out` wrote")
+    ip_list.add_argument("--json", action="store_true",
+                         help="print ONE JSON document "
+                              "{\"reports\": [...]}")
+    ipreport.set_defaults(func=cmd_ipreport)
 
     sysinfo = sub.add_parser(
         "sysinfo", help="print version + auto-detected default scan "

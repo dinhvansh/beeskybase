@@ -117,7 +117,7 @@ Dart parse is NOT a core change; NO core change is made in v0.25.
 | pool1url / pool2url / pool3url | POOL 1 / 2 / 3 | **DATA-GAP**: scan records carry NO pool data at all (verified: `build_record` never attaches pools; the scanner never fetches POOLS). Columns exist and parse an optional wire `pools` list if a future core emits one; today they render "—" |
 | pool1worker … (N/A as HC columns; fields exist) | POOL n WORKER | **DATA-GAP**, same as above |
 | — (BeeSky v0.23) | ĐĂNG NHẬP | `cred_label` — which saved login authenticated ✓ |
-| mac | MAC | **DATA-GAP**: nothing in the core emits a MAC |
+| mac | MAC | **CLOSED in v0.35**: the core fills it from the host's local ARP table (`beesky/core/arp.py`, best-effort per scan); the column's `dataGap` flag is off. An IP with no ARP entry still renders "—". |
 | serial | S/N | **DATA-GAP**: no serial in records |
 
 ### 3.3 HashCore columns NOT offered (all DATA-GAPs, §9)

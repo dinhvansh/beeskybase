@@ -2,20 +2,38 @@
 """Fake MicroBT Whatsminer — the API v2 socket dialect on TCP 4028.
 
 Speaks the contract dissected in docs/vendor-coverage-mapping.md
-§1: requests are {"cmd": "<name>"} envelopes, replies wrap their
-payload in a "Msg" envelope (a list for summary/devs/pools, a
-dict for version). The summary item carries the Whatsminer fan
-pair ("Fan Speed In" / "Fan Speed Out") — the detection
-fingerprint. Board 2 runs at 87 C so the record builder flags
-OVER_TEMP. Privileged commands refuse without a token:
-`restart_btminer` answers STATUS-E "token required" (the auth
-fixture — BeeSky must never even try it, G-W1). cgminer-envelope
-requests ({"command": ...}) are refused like the real dialect
-boundary.
+§1 plus the privileged side closed in v0.33.0 from MicroBT's own
+manuals (docs/vendor-docs-mapping.md §1): requests are
+{"cmd": "<name>"} envelopes, replies wrap their payload in a
+"Msg" envelope (a list for summary/devs/pools, a dict for
+version). The summary item carries the Whatsminer fan pair
+("Fan Speed In" / "Fan Speed Out") — the detection fingerprint.
+Board 2 runs at 87 C so the record builder flags OVER_TEMP.
+
+Token flow (the mock uses the manuals' OWN worked example, so
+the client's token is checked against an independent value, not
+against the implementation under test):
+
+  get_token -> {"time": "5626", "salt": "BQ5hoXV9",
+                "newsalt": "jbzkfQls"}   (manual §3 example)
+  expected sign for password "admin" (the manual's default):
+  "w.BNbkCV6n1aNWgiBWLzT/" — generated with the manuals' own
+  reference implementation (openssl passwd -1); any other
+  password computes a different sign and is refused.
+
+Privileged commands (restart_btminer, reboot, power_off,
+power_on, set_led, update_pools) answer Code 131 only when the
+request's "token" equals that sign, else Code 135 ("check token
+error", the manual's own code). A privileged command sent with
+NO token is refused the same way. cgminer-envelope requests
+({"command": ...}) are refused like the real dialect boundary.
 
 Every received request's cmd/command name is appended to the
 file named by env MOCK_WM_LOG (when set) so tests can assert
-what the scanner did and did NOT ask (notably: get_token).
+what the scanner did and did NOT ask (notably: reads never send
+get_token). update_pools requests also log one
+"update_pools:pool1=<url>:worker1=<worker>:pool2=...:..." line
+(all three slots) so tests can prove the pool payload shape.
 
 Run:  python3 tests/mock_whatsminer.py [host] [port]
 """
@@ -28,6 +46,17 @@ import sys
 HOST = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 4028
 LOG = os.environ.get("MOCK_WM_LOG")
+
+# The manuals' worked example (V2.0.5 §3): get_token returns these
+# exact fields, and the sign for the default password "admin" is
+# this openssl-derived value (see docs/vendor-docs-mapping.md §1.3).
+TOKEN_TIME = "5626"
+TOKEN_SALT = "BQ5hoXV9"
+TOKEN_NEWSALT = "jbzkfQls"
+EXPECTED_SIGN = "w.BNbkCV6n1aNWgiBWLzT/"
+
+_PRIVILEGED = ("restart_btminer", "reboot", "power_off", "power_on",
+               "set_led", "update_pools")
 
 
 def _log(name: str) -> None:
@@ -43,9 +72,9 @@ def _ok(msg, code=131):
             "Msg": msg, "id": 1}
 
 
-def _err(message: str):
+def _err(message: str, code: int = 14):
     return {"STATUS": [{"STATUS": "E", "When": 1700000000,
-                        "Code": 14, "Msg": message,
+                        "Code": code, "Msg": message,
                         "Description": "mockwhatsminer 1.0"}], "id": 1}
 
 
@@ -92,7 +121,8 @@ def version_reply() -> dict:
 
 
 def token_reply() -> dict:
-    return _ok({"token": "mocktoken"})
+    return _ok({"time": TOKEN_TIME, "salt": TOKEN_SALT,
+                "newsalt": TOKEN_NEWSALT}, code=134)
 
 
 _REPLIES = {"summary": summary_reply, "devs": devs_reply,
@@ -125,8 +155,17 @@ class Handler(socketserver.BaseRequestHandler):
             payload = _err("Invalid command")
         else:
             _log(cmd)
-            if cmd == "restart_btminer":
-                payload = _err("token required")
+            if cmd in _PRIVILEGED:
+                if request.get("token") != EXPECTED_SIGN:
+                    payload = _err("check token error", code=135)
+                else:
+                    if cmd == "update_pools":
+                        _log(":".join(
+                            [f"update_pools"]
+                            + [f"pool{i}={request.get(f'pool{i}', '')}"
+                               f":worker{i}={request.get(f'worker{i}', '')}"
+                               for i in (1, 2, 3)]))
+                    payload = _ok({})
             elif cmd in _REPLIES:
                 payload = _REPLIES[cmd]()
             else:

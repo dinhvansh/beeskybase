@@ -21,9 +21,9 @@ non-collision in every direction (dialect vs envelope, Avalon
 refinement vs plain cgminer, dashd/stock unchanged); the cred
 family extension (all six new tags round-trip, family-first
 ordering); per-vendor actions (avalon reboot rides the cgminer
-RPC and lands; whatsminer writes are the honest gap — the mock's
-token refusal is never even triggered by the scanner); inspect
-sections for whatsminer. Prints PASS lines; exit 1 on failure.
+RPC and lands; whatsminer reboot rides the token flow since
+v0.33.0 — G-W1 closed — while reads still never send get_token);
+inspect sections for whatsminer. Prints PASS lines; exit 1 on failure.
 """
 
 import argparse
@@ -166,7 +166,7 @@ def main() -> int:
         except WhatsminerError as exc:
             refusal = str(exc)
         check("wm privileged refusal surfaces verbatim",
-              "token required" in refusal, refusal)
+              "check token error" in refusal, refusal)
 
         # ------------------------------------------------------- probing
         wm_cand = probe_host(WM_HOST, timeout=1.5,
@@ -262,14 +262,16 @@ def main() -> int:
               repr(av_cmds))
         ok, msg = actions.execute(
             WM_HOST, "whatsminer", "reboot",
-            creds={"cgminer_port": WM_PORT, "timeout": 2.0})
-        check("whatsminer reboot is the honest gap (G-W1)",
-              not ok and "not supported" in msg, msg)
+            creds={"cgminer_port": WM_PORT, "timeout": 2.0,
+                   "password": "admin"})
+        check("whatsminer reboot rides token auth (G-W1 closed v0.33)",
+              ok, msg)
         ok, msg = actions.execute(
             WM_HOST, "whatsminer", "switch_pool", {"pool_id": 1},
-            creds={"cgminer_port": WM_PORT, "timeout": 2.0})
-        check("whatsminer switch_pool honest gap",
-              not ok and "not supported" in msg, msg)
+            creds={"cgminer_port": WM_PORT, "timeout": 2.0,
+                   "password": "admin"})
+        check("whatsminer switch_pool needs url+user (honest)",
+              not ok and "url" in msg and "user" in msg, msg)
         ok, msg = actions.execute(
             AV_HOST, "avalon", "switch_pool", {"pool_id": 1},
             creds={"cgminer_port": AV_PORT, "timeout": 2.0})
@@ -317,10 +319,11 @@ def main() -> int:
               repr(group["creds"]))
 
         # Final get_token re-check: the fetch stages + inspect above
-        # must not have minted one either.
+        # must not have minted one — exactly ONE mint comes from
+        # the reboot action test (v0.33: G-W1 closed).
         wm_cmds = wm_log.read_text().split() if wm_log.exists() else []
-        check("get_token still never sent after all stages",
-              "get_token" not in wm_cmds, repr(wm_cmds))
+        check("get_token sent exactly once, by the action only",
+              wm_cmds.count("get_token") == 1, repr(wm_cmds))
     finally:
         for proc in procs:
             proc.terminate()

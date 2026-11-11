@@ -92,6 +92,7 @@ def test_store_units(tmp: str) -> None:
     check("store: a missing file loads as no groups", store.load() == [])
 
     g1 = _group("Trại chính", "192.168.2.0/24",
+                description="Sảnh chính — S19 Pro + L9",
                 creds=[{"label": "VNish trại", "user": "root",
                         "password": "dashd-pw", "type": "vnish"}],
                 autoscan={"enabled": True, "interval_min": 45},
@@ -103,10 +104,13 @@ def test_store_units(tmp: str) -> None:
     loaded = groups_mod.GroupStore(path).load()
     check("store: round-trip keeps both groups",
           [g["name"] for g in loaded] == ["Trại chính", "Kho phụ"])
-    check("store: round-trip keeps creds + autoscan + last_scan",
-          loaded[0]["creds"][0]["label"] == "VNish trại"
+    check("store: round-trip keeps description + creds + autoscan + last_scan",
+          loaded[0]["description"] == "Sảnh chính — S19 Pro + L9"
+          and loaded[0]["creds"][0]["label"] == "VNish trại"
           and loaded[0]["autoscan"] == {"enabled": True, "interval_min": 45}
           and loaded[0]["last_scan"]["found"] == 63)
+    check("store: description defaults to empty string",
+          loaded[1]["description"] == "")
     check("store: defaults fill in (id minted, autoscan off, no scan)",
           bool(loaded[1]["id"])
           and loaded[1]["autoscan"] == {"enabled": False, "interval_min": 30}
@@ -135,6 +139,8 @@ def test_store_units(tmp: str) -> None:
             ("invalid targets", [{"name": "X", "targets": "999.0.0.0/24"}]),
             ("a bad creds shape", [{"name": "X", "targets": "10.0.0.1",
                                     "creds": [{"user": "root"}]}]),
+            ("a non-string description",
+             [{"name": "X", "targets": "10.0.0.1", "description": 42}]),
             ("a zero autoscan interval",
              [{"name": "X", "targets": "10.0.0.1",
                "autoscan": {"enabled": True, "interval_min": 0}}])]:

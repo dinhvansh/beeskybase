@@ -17,7 +17,8 @@ import 'theme.dart';
 /// (beesky/core/groups.py), so the app and the CLI share one file:
 ///
 ///   {"version": 1, "groups": [
-///     {"id": "…", "name": "…", "targets": "192.168.2.0/24",
+///     {"id": "…", "name": "…", "description": "Sảnh A — S19 Pro",
+///      "targets": "192.168.2.0/24",
 ///      "creds": [ …the --creds-file entry schema… ],
 ///      "autoscan": {"enabled": false, "interval_min": 30},
 ///      "last_scan": {"at": "…", "scanned": N, "found": N,
@@ -82,6 +83,7 @@ class GroupLastScan {
 class NetGroup {
   String id;
   String name;
+  String description; // HashCore shows "No description" when unset (v0.35)
   String targets;
   List<CredSet> creds;
   bool autoscanEnabled;
@@ -91,6 +93,7 @@ class NetGroup {
   NetGroup({
     required this.id,
     required this.name,
+    this.description = '',
     required this.targets,
     List<CredSet>? creds,
     this.autoscanEnabled = false,
@@ -109,6 +112,7 @@ class NetGroup {
   factory NetGroup.fromJson(Map<String, dynamic> json) => NetGroup(
         id: (json['id'] ?? '') as String,
         name: (json['name'] ?? '') as String,
+        description: (json['description'] as String?) ?? '',
         targets: (json['targets'] ?? '') as String,
         creds: ((json['creds'] as List<dynamic>?) ?? const [])
             .whereType<Map<String, dynamic>>()
@@ -132,6 +136,7 @@ class NetGroup {
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
+        'description': description,
         'targets': targets,
         'creds': creds.map((c) => c.toJson()).toList(),
         'autoscan': {
@@ -144,6 +149,7 @@ class NetGroup {
   NetGroup copy() => NetGroup(
         id: id,
         name: name,
+        description: description,
         targets: targets,
         creds: creds.map((c) => c.copy()).toList(),
         autoscanEnabled: autoscanEnabled,
@@ -201,6 +207,7 @@ NetGroup mergeGroups(NetGroup keep, NetGroup other) {
   return NetGroup(
     id: keep.id,
     name: keep.name,
+    description: keep.description,
     targets: unionTargetSpecs(keep.targets, other.targets),
     creds: creds,
     autoscanEnabled: keep.autoscanEnabled,
@@ -305,6 +312,7 @@ List<NetGroup> demoGroups() => [
       NetGroup(
         id: 'demo-trang-chinh',
         name: 'Trại chính',
+        description: 'Sảnh chính — S19 Pro + L9',
         targets: '192.168.2.0/24',
         creds: [
           CredSet(
@@ -362,6 +370,9 @@ class _GroupEditorDialog extends StatefulWidget {
 class _GroupEditorDialogState extends State<_GroupEditorDialog> {
   late final TextEditingController _name =
       TextEditingController(text: widget.existing?.name ?? '');
+  late final TextEditingController _description = TextEditingController(
+    text: widget.existing?.description ?? '',
+  );
   late final TextEditingController _targets =
       TextEditingController(text: widget.existing?.targets ?? '');
   late final TextEditingController _interval = TextEditingController(
@@ -374,6 +385,7 @@ class _GroupEditorDialogState extends State<_GroupEditorDialog> {
   @override
   void dispose() {
     _name.dispose();
+    _description.dispose();
     _targets.dispose();
     _interval.dispose();
     super.dispose();
@@ -393,6 +405,7 @@ class _GroupEditorDialogState extends State<_GroupEditorDialog> {
       NetGroup(
         id: widget.existing?.id ?? newGroupId(),
         name: name,
+        description: _description.text.trim(),
         targets: targets,
         creds: _editorKey.currentState?.collect() ?? [],
         autoscanEnabled: _autoscan,
@@ -424,6 +437,15 @@ class _GroupEditorDialogState extends State<_GroupEditorDialog> {
                 decoration: const InputDecoration(
                   labelText: 'Tên nhóm',
                   hintText: 'vd: Trại chính',
+                  contentPadding: fieldPad,
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _description,
+                decoration: const InputDecoration(
+                  labelText: 'Mô tả',
+                  hintText: 'vd: Sảnh chính — S19 Pro + L9',
                   contentPadding: fieldPad,
                 ),
               ),

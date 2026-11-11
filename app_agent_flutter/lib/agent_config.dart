@@ -4,7 +4,7 @@ import 'dart:io';
 /// The product version this app reports (header pill — the Tk
 /// window takes it from the Python package; here it mirrors the
 /// package version, pinned by the release process).
-const String agentAppVersion = '0.32.0';
+const String agentAppVersion = '0.35.0';
 
 /// The agent config file — a Dart mirror of the Python core's
 /// `beesky/agent_config.py`, which stays the spec and the owner of

@@ -20,6 +20,7 @@ void main() {
       final group = NetGroup(
         id: 'abc123',
         name: 'Trại chính',
+        description: 'Sảnh chính — S19 Pro + L9',
         targets: '192.168.2.0/24',
         creds: [
           CredSet(label: 'VNish trại', user: 'root', secret: 'pw',
@@ -39,6 +40,7 @@ void main() {
       final back = NetGroup.fromJson(group.toJson());
       expect(back.id, 'abc123');
       expect(back.name, 'Trại chính');
+      expect(back.description, 'Sảnh chính — S19 Pro + L9');
       expect(back.targets, '192.168.2.0/24');
       expect(back.creds.single.type, 'vnish');
       expect(back.autoscanEnabled, isTrue);
@@ -52,6 +54,7 @@ void main() {
         'name': 'Kho phụ',
         'targets': '192.168.3.0/24',
       });
+      expect(group.description, '');
       expect(group.creds, isEmpty);
       expect(group.autoscanEnabled, isFalse);
       expect(group.autoscanIntervalMin, 30);
@@ -273,8 +276,8 @@ void main() {
         final dialog = find.byType(AlertDialog);
         expect(dialog, findsOneWidget);
 
-        // Fields in order: name, targets, interval, then the creds
-        // editor's add button starts empty (0 sets).
+        // Fields in order: name, description, targets, interval,
+        // then the creds editor's add button starts empty (0 sets).
         await tester.enterText(
           find.descendant(of: dialog, matching: find.byType(TextField))
               .at(0),
@@ -283,6 +286,11 @@ void main() {
         await tester.enterText(
           find.descendant(of: dialog, matching: find.byType(TextField))
               .at(1),
+          'Sảnh mới — S19 Pro',
+        );
+        await tester.enterText(
+          find.descendant(of: dialog, matching: find.byType(TextField))
+              .at(2),
           '10.0.0.0/24',
         );
         // One own cred set for the group.
@@ -294,11 +302,12 @@ void main() {
           of: dialog,
           matching: find.byType(TextField),
         );
-        // name + targets + interval + label + user + password.
-        expect(fields, findsNWidgets(6));
-        await tester.enterText(fields.at(3), 'Riêng trại mới');
-        await tester.enterText(fields.at(4), 'root');
-        await tester.enterText(fields.at(5), 'pw-rieng');
+        // name + description + targets + interval + label + user
+        // + password.
+        expect(fields, findsNWidgets(7));
+        await tester.enterText(fields.at(4), 'Riêng trại mới');
+        await tester.enterText(fields.at(5), 'root');
+        await tester.enterText(fields.at(6), 'pw-rieng');
 
         await tester.tap(
           find.descendant(of: dialog, matching: find.text('Lưu')),
@@ -330,6 +339,7 @@ void main() {
         final created = rawGroups
             .map((e) => e as Map<String, dynamic>)
             .firstWhere((g) => g['name'] == 'Trại mới');
+        expect(created['description'], 'Sảnh mới — S19 Pro');
         expect(created['targets'], '10.0.0.0/24');
         final sets = created['creds'] as List<dynamic>;
         expect(sets, hasLength(1));

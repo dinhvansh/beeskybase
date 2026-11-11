@@ -50,6 +50,7 @@ SOURCE_LABEL = {
     "stock": "Bitmain gốc",
     "whatsminer": "Whatsminer",
     "avalon": "Avalon (Canaan)",
+    "luxos": "LuxOS",
 }
 
 WEB_PORT = 8787

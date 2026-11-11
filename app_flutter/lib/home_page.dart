@@ -31,6 +31,24 @@ class _SelectAllIntent extends Intent {
   const _SelectAllIntent();
 }
 
+/// App-wide intents (v0.34): command palette + zoom — HashCore's
+/// `command_palette` and `settings scale` hotkeys.
+class _CommandPaletteIntent extends Intent {
+  const _CommandPaletteIntent();
+}
+
+class _ZoomInIntent extends Intent {
+  const _ZoomInIntent();
+}
+
+class _ZoomOutIntent extends Intent {
+  const _ZoomOutIntent();
+}
+
+class _ZoomResetIntent extends Intent {
+  const _ZoomResetIntent();
+}
+
 class _SearchIntent extends Intent {
   const _SearchIntent();
 }
@@ -232,6 +250,21 @@ class _HomePageState extends State<HomePage> {
   /// therefore its disk reload) hangs off it.
   int _repairsVisit = 0;
 
+  // IP Report (v0.34, docs/ipreport-mapping.md): the listener run
+  // (a long-running sidecar process, like an ops run), the reports
+  // it streamed in (plus the persisted ones loaded at startup),
+  // and the listener's own status for the panel.
+  IpReportRun? _ipReportRun;
+  StreamSubscription<IpReport>? _ipReportSub;
+  List<IpReport> _ipReports = const [];
+  bool _ipReportListening = false;
+  String? _ipReportError;
+
+  // Groups screen smalls (v0.34, docs/settings-mapping.md §3):
+  // the search query and the combined-mode toggle.
+  String _groupsQuery = '';
+  bool _combinedMode = false;
+
   void _goView(_View view) {
     setState(() {
       _view = view;
@@ -261,6 +294,11 @@ class _HomePageState extends State<HomePage> {
     // the Sự kiện view's whole content.
     _settings = _settingsStore.load();
     _eventLog = _eventStore.load();
+    // IP Report (v0.34): persisted reports load first (the panel
+    // shows them even before the listener starts), then the
+    // listener starts when the setting says so.
+    _loadIpReports();
+    if (_settings.ipReportEnabled) _startIpReportListener();
     _autoscanTimer = Timer.periodic(
       const Duration(seconds: 30),
       (_) => _tickAutoscan(),
@@ -269,6 +307,8 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    _ipReportSub?.cancel();
+    _ipReportRun?.stop();
     _opsSub?.cancel();
     _opsRun?.stop();
     _autoscanTimer?.cancel();
@@ -625,12 +665,16 @@ class _HomePageState extends State<HomePage> {
           ? await widget.bridge.scan(
               group.targets,
               eventsState: _eventStore.stateFilePathFor(group.targets),
+              timeout: _settings.probeTimeoutS,
+              workers: _settings.scanWorkers,
             )
           : await widget.bridge.scanGroup(
               group.name,
               credsFile: await _credsFileForScan(),
               groupsFile: _groupsFile?.path,
               eventsState: _eventStore.stateFilePathFor(group.targets),
+              timeout: _settings.probeTimeoutS,
+              workers: _settings.scanWorkers,
             );
       if (!mounted) return;
       _applyScanResult(result);
@@ -766,6 +810,8 @@ class _HomePageState extends State<HomePage> {
         _target,
         credsFile: await _credsFileForScan(),
         eventsState: _eventStore.stateFilePathFor(_target),
+        timeout: _settings.probeTimeoutS,
+        workers: _settings.scanWorkers,
       );
       if (!mounted) return;
       _applyScanResult(result);
@@ -873,6 +919,12 @@ class _HomePageState extends State<HomePage> {
       'type': type.wire,
       'targets': targets,
       if (payload != null) 'payload': payload,
+      // The Timeouts/Advanced settings (v0.34): the per-device
+      // request timeout, the stagger between device onsets, and
+      // the ops parallelism — the core validates all three.
+      'timeout': _settings.requestTimeoutS,
+      'stagger_s': _settings.opsStaggerS,
+      'workers': _settings.opsWorkers,
       // In a group's scope the job resolves creds through the
       // group's own sets first (v0.24 layering), exactly like the
       // group scan the user is looking at.
@@ -1367,9 +1419,142 @@ class _HomePageState extends State<HomePage> {
     _clearGridModifiers();
   }
 
+  // ------------------------------------------------------------------
+  // App-wide hotkeys (v0.34): the command palette + zoom live at
+  // the TOP level so they work from every view (the v0.25 grid
+  // hotkeys only lived in the miners column).
+  // ------------------------------------------------------------------
+
+  void _hotPalette() {
+    if (_editingText) return;
+    _showCommandPalette();
+  }
+
+  void _zoomBy(double delta) {
+    final next = (_settings.scale + delta).clamp(0.9, 1.3);
+    if (next == _settings.scale) return;
+    _saveSettings(_settings.copyWith(scale: next));
+  }
+
+  void _zoomReset() {
+    if (_settings.scale == 1.0) return;
+    _saveSettings(_settings.copyWith(scale: 1.0));
+  }
+
+  // ------------------------------------------------------------------
+  // Command palette (v0.34) — HashCore's "Type a command..." dialog:
+  // filter-as-you-type over the app's REAL commands. Every entry
+  // runs an existing handler; nothing here is decorative.
+  // ------------------------------------------------------------------
+
+  List<({String label, String hint, VoidCallback run})> _paletteCommands() {
+    final commands = <({String label, String hint, VoidCallback run})>[
+      (label: 'Quét', hint: 'Quét dải đang nhập', run: _runScan),
+      (label: 'Quét lại', hint: 'Chạy lại lần quét vừa rồi', run: _runScan),
+      (
+        label: 'Quét tất cả nhóm',
+        hint: 'Quét lần lượt từng nhóm, gộp kết quả',
+        run: _scanAllGroups,
+      ),
+      for (final g in _groups)
+        (
+          label: 'Quét nhóm ${g.name}',
+          hint: g.targets,
+          run: () => _scanGroup(g),
+        ),
+      (label: 'Mở Nhóm mạng', hint: 'Màn hình chính', run: () => _goView(_View.groups)),
+      (label: 'Mở Máy đào', hint: 'Bảng máy đào', run: () => _goView(_View.miners)),
+      (label: 'Mở Bản đồ nhiệt', hint: 'Nhiệt độ theo máy', run: () => _goView(_View.heat)),
+      (label: 'Mở Điện năng', hint: 'Công suất + tiền điện', run: () => _goView(_View.energy)),
+      (label: 'Mở Lịch sử sửa', hint: 'Phiếu sửa đã xuất', run: () => _goView(_View.repairs)),
+      (label: 'Mở Sự kiện', hint: 'Thay đổi giữa các lần quét', run: () => _goView(_View.events)),
+      (label: 'Mở Cài đặt', hint: 'Cài đặt, timeout, nhật ký', run: () => _goView(_View.settings)),
+      (label: 'Tài khoản máy đào', hint: 'Bộ đăng nhập theo hãng', run: _editCreds),
+      (label: 'Xuất phiếu sửa', hint: 'Phiếu cho máy có vấn đề', run: _exportTickets),
+    ];
+    return commands;
+  }
+
+  Future<void> _showCommandPalette() async {
+    final chosen =
+        await showDialog<({String label, String hint, VoidCallback run})>(
+      context: context,
+      builder: (ctx) => _CommandPaletteDialog(commands: _paletteCommands),
+    );
+    if (chosen != null && mounted) chosen.run();
+  }
+
+  /// Quét tất cả nhóm, lần lượt từng nhóm (v0.34, HashCore's
+  /// "Rescan all groups"): kết quả gộp vào bảng Máy đào, mỗi máy
+  /// mang tên nhóm của nó (trang trí app-side, như ghi chú v0.28).
+  /// Nhóm nào quét lỗi thì bỏ qua nhóm đó, các nhóm còn lại vẫn
+  /// chạy — một nhóm chết không giết cả đợt.
+  Future<void> _scanAllGroups() async {
+    if (_busy || _groups.isEmpty) return;
+    setState(() {
+      _busy = true;
+      _activeGroup = null;
+      _view = _View.miners;
+      _status = 'Đang quét tất cả ${_groups.length} nhóm…';
+    });
+    final merged = <MinerRecord>[];
+    var scannedTotal = 0;
+    try {
+      for (final group in _groups) {
+        try {
+          final result = widget.bridge.isMock
+              ? await widget.bridge.scan(
+                  group.targets,
+                  eventsState:
+                      _eventStore.stateFilePathFor(group.targets),
+                  timeout: _settings.probeTimeoutS,
+                  workers: _settings.scanWorkers,
+                )
+              : await widget.bridge.scanGroup(
+                  group.name,
+                  credsFile: await _credsFileForScan(),
+                  groupsFile: _groupsFile?.path,
+                  eventsState:
+                      _eventStore.stateFilePathFor(group.targets),
+                  timeout: _settings.probeTimeoutS,
+                  workers: _settings.scanWorkers,
+                );
+          scannedTotal += result.scanned;
+          merged.addAll(
+            result.records.map((r) => r.withGroup(group.name)),
+          );
+          _ingestEvents(result.events);
+        } catch (e) {
+          // One group's failure must not kill the whole pass.
+          if (mounted) {
+            setState(() => _status =
+                'Nhóm ${group.name} quét lỗi ($e) — vẫn quét tiếp.');
+          }
+        }
+        if (!mounted) return;
+      }
+      _appendHistorySamples(merged);
+      setState(() {
+        _records = _decorateNotes(merged);
+        _lastScan = null;
+        _scanned = true;
+        _selected = _records.isEmpty ? null : _records.first;
+        _selection.retainOnly(_records);
+        _status = 'Quét tất cả nhóm xong: tìm thấy ${merged.length} '
+            'máy trong $scannedTotal địa chỉ.';
+      });
+      if (!widget.bridge.isMock) await _loadGroups();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    // The interface scale (v0.34, Cài đặt → Chung): text scaling
+    // for the whole window — table fonts and labels grow, the
+    // fixed-pixel chrome does not (docs/settings-mapping.md D-S1).
+    final content = Scaffold(
       body: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1382,6 +1567,80 @@ class _HomePageState extends State<HomePage> {
             },
           ),
         ],
+      ),
+    );
+    return Shortcuts(
+      shortcuts: const {
+        SingleActivator(LogicalKeyboardKey.keyK, control: true):
+            _CommandPaletteIntent(),
+        SingleActivator(LogicalKeyboardKey.equal, control: true):
+            _ZoomInIntent(),
+        SingleActivator(LogicalKeyboardKey.minus, control: true):
+            _ZoomOutIntent(),
+        SingleActivator(LogicalKeyboardKey.digit0, control: true):
+            _ZoomResetIntent(),
+        // Grid hotkeys (v0.25, moved up here in v0.34): one focus,
+        // one shortcuts map — a second autofocus Focus in the miners
+        // column stole primary focus and these never fired.
+        SingleActivator(LogicalKeyboardKey.keyA, control: true):
+            _SelectAllIntent(),
+        SingleActivator(LogicalKeyboardKey.keyF, control: true):
+            _SearchIntent(),
+        SingleActivator(LogicalKeyboardKey.keyR, control: true):
+            _RescanIntent(),
+        SingleActivator(LogicalKeyboardKey.f5): _RescanIntent(),
+        SingleActivator(LogicalKeyboardKey.escape): _ClearGridIntent(),
+      },
+      child: Actions(
+        actions: {
+          _CommandPaletteIntent: CallbackAction<_CommandPaletteIntent>(
+            onInvoke: (_) => _hotPalette(),
+          ),
+          _ZoomInIntent: CallbackAction<_ZoomInIntent>(
+            onInvoke: (_) => _zoomBy(0.05),
+          ),
+          _ZoomOutIntent: CallbackAction<_ZoomOutIntent>(
+            onInvoke: (_) => _zoomBy(-0.05),
+          ),
+          _ZoomResetIntent: CallbackAction<_ZoomResetIntent>(
+            onInvoke: (_) => _zoomReset(),
+          ),
+          // Grid intents only act on the miners view (the column
+          // that used to own them is only built there).
+          _SelectAllIntent: CallbackAction<_SelectAllIntent>(
+            onInvoke: (_) {
+              if (_view == _View.miners) _hotSelectAll();
+              return null;
+            },
+          ),
+          _SearchIntent: CallbackAction<_SearchIntent>(
+            onInvoke: (_) {
+              if (_view == _View.miners) _hotSearch();
+              return null;
+            },
+          ),
+          _RescanIntent: CallbackAction<_RescanIntent>(
+            onInvoke: (_) {
+              if (_view == _View.miners) _hotRescan();
+              return null;
+            },
+          ),
+          _ClearGridIntent: CallbackAction<_ClearGridIntent>(
+            onInvoke: (_) {
+              if (_view == _View.miners) _hotClear();
+              return null;
+            },
+          ),
+        },
+        child: Focus(
+          autofocus: true,
+          child: MediaQuery(
+            data: MediaQuery.of(context).copyWith(
+              textScaler: TextScaler.linear(_settings.scale),
+            ),
+            child: content,
+          ),
+        ),
       ),
     );
   }
@@ -1445,6 +1704,10 @@ class _HomePageState extends State<HomePage> {
             ticketsDir: widget.bridge.ticketsDirPath,
             coreVersion: _sysinfo?.version,
             sidecarMissing: widget.bridge.sidecarMissing,
+            dataDir: _settingsStore.primaryDir.path,
+            storeFiles: _storeFileInfos(),
+            onClearOpsHistory: _clearOpsHistory,
+            onClearEvents: _clearEvents,
           ),
         ),
       _ => ('', '', const SizedBox.shrink()),
@@ -1463,11 +1726,14 @@ class _HomePageState extends State<HomePage> {
   /// Persist Cài đặt and apply what applies immediately: the
   /// default target refills the scan field while it still holds
   /// the previous effective default (or nothing); the price feeds
-  /// Điện năng on its next build.
+  /// Điện năng on its next build; the scale re-scales the text
+  /// on the next build; the IP-Report toggle starts/stops the
+  /// listener (v0.34).
   void _saveSettings(AppSettings next) {
     final previousDefault = _settings.defaultTarget.isNotEmpty
         ? _settings.defaultTarget
         : (_sysinfo?.defaultTarget ?? '');
+    final ipReportChanged = next.ipReportEnabled != _settings.ipReportEnabled;
     setState(() {
       _settings = next;
       if (_targetCtrl.text.isEmpty || _targetCtrl.text == previousDefault) {
@@ -1485,6 +1751,173 @@ class _HomePageState extends State<HomePage> {
             'cài đặt chỉ có tác dụng trong phiên này.');
       }
     }
+    if (ipReportChanged) {
+      if (next.ipReportEnabled) {
+        _startIpReportListener();
+      } else {
+        _stopIpReportListener();
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // IP Report (v0.34) — listener lifecycle + panel actions
+  // ------------------------------------------------------------------
+
+  Future<void> _loadIpReports() async {
+    try {
+      final reports = await widget.bridge.listIpReports();
+      if (!mounted) return;
+      setState(() => _ipReports = reports);
+    } catch (_) {
+      // No persisted reports (or no engine) — the panel simply
+      // starts empty.
+    }
+  }
+
+  /// A report lands: newest first, de-duplicated by target IP,
+  /// capped at 100 (the core store's cap, mirrored here).
+  void _applyIpReport(IpReport report) {
+    if (!mounted) return;
+    setState(() {
+      _ipReports = [
+        report,
+        ..._ipReports.where((r) => r.targetIp != report.targetIp),
+      ].take(100).toList();
+    });
+  }
+
+  Future<void> _startIpReportListener() async {
+    if (_ipReportRun != null || widget.bridge.sidecarMissing) return;
+    try {
+      final run = await widget.bridge.startIpReport();
+      if (!mounted) {
+        run.stop();
+        return;
+      }
+      _ipReportRun = run;
+      _ipReportSub = run.reports.listen(
+        _applyIpReport,
+        onError: (_) {
+          if (!mounted) return;
+          setState(() {
+            _ipReportListening = false;
+            _ipReportError = 'Nghe IP Report bị ngắt.';
+          });
+        },
+      );
+      setState(() {
+        _ipReportListening = true;
+        _ipReportError = null;
+      });
+    } on SidecarException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _ipReportListening = false;
+        _ipReportError = '$e';
+      });
+    }
+  }
+
+  Future<void> _stopIpReportListener() async {
+    await _ipReportSub?.cancel();
+    _ipReportSub = null;
+    await _ipReportRun?.stop();
+    _ipReportRun = null;
+    if (mounted) {
+      setState(() {
+        _ipReportListening = false;
+        _ipReportError = null;
+      });
+    }
+  }
+
+  /// The panel's toggle (v0.34): same setting as Cài đặt's Chung
+  /// tab — one save path, so the two switches never disagree.
+  void _toggleIpReport(bool enabled) {
+    _saveSettings(_settings.copyWith(ipReportEnabled: enabled));
+  }
+
+  /// Scan one reported IP into the miners view (the panel's
+  /// "Quét" action — HashCore's modifier-key isolate, BeeSky's
+  /// equivalent: the single IP becomes the scan target).
+  void _scanIpReport(IpReport report) {
+    setState(() {
+      _activeGroup = null;
+      _targetCtrl.text = report.targetIp;
+      _view = _View.miners;
+    });
+    _runScan();
+  }
+
+  /// Open a reported IP as a network group (HashCore's "open as
+  /// network group"): a group named "IP Report <ip>" with that IP
+  /// as its target — created in the shared store, then shown.
+  Future<void> _openIpReportAsGroup(IpReport report) async {
+    final ip = report.targetIp;
+    if (_groups.any((g) => g.targets == ip)) {
+      setState(() => _status = 'Đã có nhóm với dải $ip rồi.');
+      return;
+    }
+    final group = NetGroup(
+      id: newGroupId(),
+      name: 'IP Report $ip',
+      targets: ip,
+    );
+    setState(() {
+      _groups = [..._groups, group];
+      _status = 'Đã tạo nhóm "IP Report $ip".';
+    });
+    await _saveGroups();
+  }
+
+  /// The Logs tab's store-file readout (v0.34): the real files
+  /// the app owns, with sizes — missing files read "chưa có file".
+  List<StoreFileInfo> _storeFileInfos() {
+    int? sizeOf(String name) {
+      final dir = _settingsStore.primaryDir;
+      final file =
+          File('${dir.path}${Platform.pathSeparator}$name');
+      if (file.existsSync()) {
+        try {
+          return file.lengthSync();
+        } on FileSystemException {
+          return null;
+        }
+      }
+      return null;
+    }
+
+    return [
+      StoreFileInfo('Nhóm mạng (beesky-groups.json)',
+          sizeOf('beesky-groups.json')),
+      StoreFileInfo('Tài khoản (beesky-creds.json)',
+          sizeOf('beesky-creds.json')),
+      StoreFileInfo('Lịch sử thao tác (beesky-ops-history.json)',
+          sizeOf('beesky-ops-history.json')),
+      StoreFileInfo('Nhật ký sự kiện (beesky-events.json)',
+          sizeOf('beesky-events.json')),
+      StoreFileInfo('IP Report (beesky-ipreports.json)',
+          sizeOf('beesky-ipreports.json')),
+    ];
+  }
+
+  Future<void> _clearOpsHistory() async {
+    setState(() => _opsHistory = const []);
+    await _saveOpsHistory();
+    if (mounted) {
+      setState(() => _status = 'Đã xóa lịch sử thao tác.');
+    }
+  }
+
+  Future<void> _clearEvents() async {
+    setState(() => _eventLog = const []);
+    try {
+      _eventStore.save(_eventLog);
+    } on FileSystemException {
+      // The log stays in memory for this session.
+    }
+    if (mounted) setState(() => _status = 'Đã xóa nhật ký sự kiện.');
   }
 
   Widget _minersColumn() {
@@ -1501,38 +1934,14 @@ class _HomePageState extends State<HomePage> {
         _statusLine(),
       ],
     );
-    // The grid hotkey layer (v0.25): Ctrl+A select all visible,
-    // Ctrl+F focus search, Ctrl+R / F5 rescan, Esc clear modifiers.
-    // Handlers step aside while a text field owns the keyboard.
-    return Shortcuts(
-      shortcuts: const {
-        SingleActivator(LogicalKeyboardKey.keyA, control: true):
-            _SelectAllIntent(),
-        SingleActivator(LogicalKeyboardKey.keyF, control: true):
-            _SearchIntent(),
-        SingleActivator(LogicalKeyboardKey.keyR, control: true):
-            _RescanIntent(),
-        SingleActivator(LogicalKeyboardKey.f5): _RescanIntent(),
-        SingleActivator(LogicalKeyboardKey.escape): _ClearGridIntent(),
-      },
-      child: Actions(
-        actions: {
-          _SelectAllIntent: CallbackAction<_SelectAllIntent>(
-            onInvoke: (_) => _hotSelectAll(),
-          ),
-          _SearchIntent: CallbackAction<_SearchIntent>(
-            onInvoke: (_) => _hotSearch(),
-          ),
-          _RescanIntent: CallbackAction<_RescanIntent>(
-            onInvoke: (_) => _hotRescan(),
-          ),
-          _ClearGridIntent: CallbackAction<_ClearGridIntent>(
-            onInvoke: (_) => _hotClear(),
-          ),
-        },
-        child: Focus(autofocus: true, child: column),
-      ),
-    );
+    // The grid hotkey layer used to live here (v0.25) as its own
+    // Shortcuts + Focus(autofocus: true). v0.34 moved it to build():
+    // a second autofocus Focus at the top level stole primary focus,
+    // so Ctrl+A/F/R/Esc never reached this column — one focus, one
+    // shortcuts map, at the top (grid intents are view-guarded
+    // there). Handlers step aside while a text field owns the
+    // keyboard (see _editingText).
+    return column;
   }
 
   // ------------------------------------------------------------------
@@ -1975,9 +2384,99 @@ class _HomePageState extends State<HomePage> {
         _groupsHeader(),
         if (_busy) const LinearProgressIndicator(minHeight: 3),
         Expanded(child: _groupsContent()),
+        _ipReportPanel(),
         _statusLine(),
       ],
     );
+  }
+
+  /// The groups HashCore's search sees (v0.34): by name, target
+  /// text, or description (v0.35 — groups carry one now).
+  List<NetGroup> get _visibleGroups {
+    final q = _groupsQuery.trim().toLowerCase();
+    if (q.isEmpty) return _groups;
+    return _groups
+        .where((g) =>
+            g.name.toLowerCase().contains(q) ||
+            g.description.toLowerCase().contains(q) ||
+            g.targets.toLowerCase().contains(q))
+        .toList();
+  }
+
+  /// The combined-mode virtual group (v0.34, HashCore's "View
+  /// groups in combined mode"): one card over the UNION of every
+  /// group's targets, with the merged last-scan stats (sums, the
+  /// latest scan time). Scanning it runs ONE pass over the union
+  /// spec — the merged fleet in one go.
+  NetGroup get _combinedGroup {
+    var targets = '';
+    var scanned = 0;
+    var found = 0;
+    var ok = 0;
+    var check = 0;
+    var error = 0;
+    String? latestAt;
+    DateTime? latestTime;
+    for (final g in _groups) {
+      targets = unionTargetSpecs(targets, g.targets);
+      final last = g.lastScan;
+      if (last == null) continue;
+      scanned += last.scanned;
+      found += last.found;
+      ok += last.ok;
+      check += last.check;
+      error += last.error;
+      final at = last.atTime;
+      if (at != null && (latestTime == null || at.isAfter(latestTime))) {
+        latestTime = at;
+        latestAt = last.at;
+      }
+    }
+    return NetGroup(
+      id: 'combined',
+      name: 'Tất cả nhóm',
+      targets: targets,
+      lastScan: latestAt == null
+          ? null
+          : GroupLastScan(
+              at: latestAt,
+              scanned: scanned,
+              found: found,
+              ok: ok,
+              check: check,
+              error: error,
+            ),
+    );
+  }
+
+  /// Scan the combined card's union target in ONE pass (v0.34):
+  /// the merged fleet lands on the miners view.
+  Future<void> _scanCombined(NetGroup combined) async {
+    if (_busy || combined.targets.isEmpty) return;
+    setState(() {
+      _activeGroup = null;
+      _view = _View.miners;
+      _targetCtrl.text = combined.targets;
+    });
+    await _runScan();
+  }
+
+  Future<void> _resetGroupStats(NetGroup group) async {
+    setState(() {
+      group.lastScan = null;
+      _status = 'Đã đặt lại thống kê nhóm ${group.name}.';
+    });
+    await _saveGroups();
+  }
+
+  Future<void> _resetAllGroupStats() async {
+    setState(() {
+      for (final g in _groups) {
+        g.lastScan = null;
+      }
+      _status = 'Đã đặt lại thống kê tất cả nhóm.';
+    });
+    await _saveGroups();
   }
 
   // ------------------------------------------------------------------
@@ -2403,6 +2902,7 @@ class _HomePageState extends State<HomePage> {
       0,
       (sum, g) => sum + (g.lastScan?.error ?? 0),
     );
+    final anyStats = _groups.any((g) => g.lastScan != null);
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 16, 18, 12),
       decoration: const BoxDecoration(
@@ -2450,20 +2950,265 @@ class _HomePageState extends State<HomePage> {
               _chip('Lỗi $totalErrors', dot: BeeSkyColors.bad),
             ],
           ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              SizedBox(
+                width: 260,
+                child: TextField(
+                  decoration: const InputDecoration(
+                    hintText: 'Tìm nhóm theo tên hoặc dải IP',
+                    prefixIcon: Icon(Icons.search, size: 18),
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                  ),
+                  onChanged: (v) => setState(() => _groupsQuery = v),
+                ),
+              ),
+              if (_groups.length >= 2)
+                OutlinedButton.icon(
+                  onPressed: _busy
+                      ? null
+                      : () => setState(
+                          () => _combinedMode = !_combinedMode),
+                  icon: const Icon(Icons.view_comfy, size: 16),
+                  label: Text(_combinedMode ? 'Xem từng nhóm' : 'Xem gộp'),
+                  style: _ghostBtnStyle,
+                ),
+              if (_groups.isNotEmpty)
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _scanAllGroups,
+                  icon: const Icon(Icons.radar, size: 16),
+                  label: const Text('Quét tất cả nhóm'),
+                  style: _ghostBtnStyle,
+                ),
+              if (anyStats)
+                TextButton.icon(
+                  onPressed: _busy ? null : _resetAllGroupStats,
+                  icon: const Icon(Icons.restart_alt, size: 16),
+                  label: const Text('Đặt lại thống kê'),
+                ),
+            ],
+          ),
         ],
       ),
     );
   }
 
   Widget _groupsContent() {
+    if (_groups.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(18, 14, 18, 8),
+        child: _groupsEmptyState(),
+      );
+    }
+    // Combined mode (v0.34): one card over the union of all
+    // groups' targets; its Quét runs a single pass over the
+    // union spec.
+    if (_combinedMode && _groups.length >= 2) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(18, 14, 18, 8),
+        child: ListView(
+          children: [
+            _combinedCard(_combinedGroup),
+            const SizedBox(height: 4),
+            const Text(
+              'Xem gộp: một lần quét duy nhất trên hợp các dải '
+              'của mọi nhóm.',
+              style: TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+            ),
+          ],
+        ),
+      );
+    }
+    final visible = _visibleGroups;
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 14, 18, 8),
-      child: _groups.isEmpty
-          ? _groupsEmptyState()
+      child: visible.isEmpty
+          ? Center(
+              child: Text(
+                'Không có nhóm nào khớp "$_groupsQuery".',
+                style: const TextStyle(color: BeeSkyColors.muted),
+              ),
+            )
           : ListView.builder(
-              itemCount: _groups.length,
-              itemBuilder: (context, i) => _groupCard(_groups[i]),
+              itemCount: visible.length,
+              itemBuilder: (context, i) => _groupCard(visible[i]),
             ),
+    );
+  }
+
+  /// The combined-mode card (v0.34): the same shape as a group
+  /// card, but its Quét is the single union pass.
+  Widget _combinedCard(NetGroup combined) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: GlassCard(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    combined.name,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    combined.targets,
+                    style: const TextStyle(
+                      color: BeeSkyColors.muted,
+                      fontSize: 12,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    combined.lastScan == null
+                        ? 'Chưa quét'
+                        : combined.lastScan!.summaryText,
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            FilledButton.icon(
+              onPressed:
+                  _busy ? null : () => _scanCombined(combined),
+              icon: const Icon(Icons.radar, size: 15),
+              label: const Text('Quét gộp'),
+              style: _scanBtnStyle,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // IP Report panel (v0.34) — HashCore's ip_report_action_panel on
+  // the groups screen: the listening state, the toggle, and the
+  // received reports with Quét / Mở thành nhóm per report.
+  // ------------------------------------------------------------------
+
+  Widget _ipReportPanel() {
+    final statusText = widget.bridge.sidecarMissing
+        ? 'Chưa có ruột quét — bật nghe IP Report khi có beesky.exe.'
+        : _ipReportError != null
+            ? 'Không mở được cổng nghe IP Report: $_ipReportError'
+            : _ipReportListening
+                ? 'Đang nghe IP Report (UDP 14235 Antminer, 8888 '
+                    'Whatsminer) — bấm nút IP Report trên máy đào.'
+                : 'IP Report đang tắt — bật để nghe máy đào bấm nút.';
+    return Container(
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: BeeSkyColors.border)),
+      ),
+      padding: const EdgeInsets.fromLTRB(18, 10, 18, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.sensors, size: 18),
+              const SizedBox(width: 8),
+              const Text(
+                'IP Report',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  statusText,
+                  style: const TextStyle(
+                      color: BeeSkyColors.muted, fontSize: 12),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Switch(
+                value: _settings.ipReportEnabled,
+                onChanged: widget.bridge.sidecarMissing
+                    ? null
+                    : (v) => _toggleIpReport(v),
+              ),
+            ],
+          ),
+          if (_ipReports.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            SizedBox(
+              height: 132,
+              child: ListView.builder(
+                itemCount: _ipReports.length,
+                itemBuilder: (context, i) =>
+                    _ipReportRow(_ipReports[i]),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _ipReportRow(IpReport report) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: BeeSkyColors.accent,
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${report.targetIp}'
+                  '${report.mac != null ? '  •  ${report.mac}' : ''}'
+                  '  •  ${report.familyLabel}',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  '${report.whenText} — ${report.text.isEmpty ? '(không có nội dung gói tin — chỉ biết địa chỉ gửi)' : report.text}',
+                  style: const TextStyle(
+                      color: BeeSkyColors.muted, fontSize: 12),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton(
+            onPressed: _busy ? null : () => _scanIpReport(report),
+            style: _ghostBtnStyle,
+            child: const Text('Quét'),
+          ),
+          const SizedBox(width: 6),
+          OutlinedButton(
+            onPressed: _busy ? null : () => _openIpReportAsGroup(report),
+            style: _ghostBtnStyle,
+            child: const Text('Mở thành nhóm'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -2552,6 +3297,17 @@ class _HomePageState extends State<HomePage> {
                   ),
                   const SizedBox(height: 4),
                   Text(
+                    group.description.isEmpty
+                        ? 'Không có mô tả'
+                        : group.description,
+                    style: const TextStyle(
+                      color: BeeSkyColors.muted,
+                      fontSize: 12,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
                     group.targets,
                     style: const TextStyle(
                       color: BeeSkyColors.muted,
@@ -2607,6 +3363,13 @@ class _HomePageState extends State<HomePage> {
                       style: _ghostBtnStyle,
                       child: const Text('Sửa'),
                     ),
+                    if (group.lastScan != null)
+                      TextButton(
+                        onPressed: _busy
+                            ? null
+                            : () => _resetGroupStats(group),
+                        child: const Text('Đặt lại'),
+                      ),
                     IconButton(
                       icon: const Icon(Icons.delete_outline, size: 19),
                       tooltip: 'Xóa nhóm',
@@ -3417,6 +4180,7 @@ class _HomePageState extends State<HomePage> {
         // group's sets first (v0.24 layering), like its scans.
         group: _activeGroup?.name,
         groupsFile: _groupsFile?.path,
+        timeout: _settings.requestTimeoutS,
       );
       if (!mounted) return;
       setState(() {
@@ -3926,6 +4690,103 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// The Ctrl+K command palette dialog.
+///
+/// Owns its [TextEditingController] so it is disposed exactly when
+/// the dialog subtree goes away (after the pop animation) — disposing
+/// a controller right after `showDialog` returns is too early: the
+/// route is still animating out and its TextField rebuilds once more
+/// (v0.34 fix; the synchronous-dispose version threw
+/// "TextEditingController was used after being disposed" in tests).
+class _CommandPaletteDialog extends StatefulWidget {
+  const _CommandPaletteDialog({required this.commands});
+
+  final List<({String label, String hint, VoidCallback run})> Function()
+      commands;
+
+  @override
+  State<_CommandPaletteDialog> createState() => _CommandPaletteDialogState();
+}
+
+class _CommandPaletteDialogState extends State<_CommandPaletteDialog> {
+  final _ctrl = TextEditingController();
+  var _query = '';
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final all = widget.commands();
+    final q = _query.trim().toLowerCase();
+    final visible = q.isEmpty
+        ? all
+        : all
+            .where((c) =>
+                c.label.toLowerCase().contains(q) ||
+                c.hint.toLowerCase().contains(q))
+            .toList();
+    return AlertDialog(
+      backgroundColor: BeeSkyColors.panel,
+      title: const Text('Gõ lệnh…'),
+      content: SizedBox(
+        width: 520,
+        height: 380,
+        child: Column(
+          children: [
+            TextField(
+              controller: _ctrl,
+              autofocus: true,
+              decoration: const InputDecoration(
+                hintText: 'Quét, mở view, tài khoản…',
+                prefixIcon: Icon(Icons.search, size: 19),
+              ),
+              onChanged: (v) => setState(() => _query = v),
+              onSubmitted: (_) {
+                if (visible.isNotEmpty) {
+                  Navigator.of(context).pop(visible.first);
+                }
+              },
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: visible.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'Không có lệnh nào khớp.',
+                        style: TextStyle(color: BeeSkyColors.muted),
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: visible.length,
+                      itemBuilder: (ctx, i) {
+                        final c = visible[i];
+                        return ListTile(
+                          title: Text(c.label),
+                          subtitle: Text(c.hint,
+                              style: const TextStyle(
+                                  color: BeeSkyColors.muted, fontSize: 12)),
+                          onTap: () => Navigator.of(ctx).pop(c),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Đóng'),
+        ),
+      ],
     );
   }
 }

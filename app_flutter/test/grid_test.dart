@@ -535,6 +535,8 @@ class _FleetBridge extends MockBridge {
     String target, {
     String? credsFile,
     String? eventsState,
+    double? timeout,
+    int? workers,
   }) async =>
       ScanResult(
         records: generatedFleet(),
@@ -549,6 +551,8 @@ class _FleetBridge extends MockBridge {
     String? credsFile,
     String? groupsFile,
     String? eventsState,
+    double? timeout,
+    int? workers,
   }) =>
       scan(name);
 }

@@ -24,9 +24,16 @@ Per-source reality (checked against the firmwares' own documents):
     first.
   * stock Bitmain — ``GET /cgi-bin/reboot.cgi`` behind the usual
     digest auth.
-  * whatsminer (v0.30) — NOT SUPPORTED: privileged calls ride the
-    MicroBT token session and the token computation is not in the
-    dissected contract (docs/vendor-coverage-mapping.md G-W1).
+  * whatsminer (v0.33.0 — G-W1 CLOSED, docs/vendor-docs-mapping.md
+    §1): privileged calls ride the MicroBT token session minted by
+    ``{"cmd": "get_token"}``; the token computation is the manuals'
+    md5crypt scheme (``key`` then ``sign``), verified against the
+    manuals' worked example. ``reboot`` sends ``{"token", "cmd":
+    "reboot"}`` (control-board reboot, §3.8); the password is the
+    winning whatsminer set's, else the factory default "admin".
+  * luxos (v0.33.0, docs/vendor-docs-mapping.md §2): ``reboot``
+    sends the parameter-less ``rebootdevice`` command (Luxor's own
+    CLI usage); no session is documented for it.
 
 ``switch_pool``
   * dashd ONLY, via two documented mechanisms:
@@ -38,8 +45,27 @@ Per-source reality (checked against the firmwares' own documents):
         (default 0), then ``/mining/switch-pool`` activates it.
         Reading the settings needs an ``x-api-key`` — per the doc,
         ``GET /settings`` is apikeyAuth-only.
+  * whatsminer (v0.33.0, mapping §1.5): ``update_pools`` (§3.1)
+    rewrites the pool lines and switches immediately — there is
+    NO activate-a-slot form in the manual, so the payload MUST
+    carry url+user (pool_id selects which of pool1/2/3 the new
+    values land in; the other slots are re-sent unchanged — see
+    the mapping's hardware caveat).
   * cgminer / stock — not supported yet; the executor returns the
     honest failure instead of pretending.
+
+``restart_mining`` / ``pause_mining`` / ``resume_mining`` /
+``find_miner`` — beyond dashd (v0.29 tail):
+  * whatsminer (v0.33.0, mapping §1.5): ``restart_btminer``
+    (§3.2, mining-process restart), ``power_off`` / ``power_on``
+    (§3.3/§3.4, hashboard power), ``set_led`` with
+    ``param: "auto"`` (§3.5, find-miner) — all token-authenticated.
+  * luxos (v0.33.0, mapping §2.6): pause/resume are ``curtail``
+    ``sleep`` / ``wakeup`` behind a logon/logoff session. A
+    sleeping LuxOS rig can ONLY be woken by ``wakeup`` — the
+    state survives a reboot — and the pause message says so.
+    LuxOS has no ``restart_mining`` / ``find_miner`` in this
+    build (no documented equivalent wired).
 
 The v0.29 VNish tail (docs/vnish-ops-mapping.md — every contract
 below is the api-doc's own; presentation follows HashCore's task
@@ -94,6 +120,9 @@ from __future__ import annotations
 from .bitmain import BitmainClient, BitmainError
 from .cgminer import CgminerClient, CgminerError
 from .dashd import DashdClient, DashdError
+from .luxos import LuxosClient, LuxosError
+from .whatsminer import (DEFAULT_PASSWORD as WM_DEFAULT_PASSWORD,
+                         WhatsminerClient, WhatsminerError)
 
 COMMAND_TYPES = ("reboot", "switch_pool",
                  "pause_mining", "resume_mining", "restart_mining",
@@ -164,6 +193,122 @@ def _reboot_stock(ip: str, creds: dict) -> tuple[bool, str]:
     if code == 200:
         return True, "stock firmware accepted reboot (GET /cgi-bin/reboot.cgi -> 200)"
     return False, f"stock reboot refused: GET /cgi-bin/reboot.cgi -> HTTP {code}"
+
+
+def _wm_password(raw_creds: dict | None) -> tuple[str, bool]:
+    """The password a Whatsminer token is computed from.
+
+    The winning whatsminer-tagged set's password when one was
+    supplied; otherwise the manuals' factory default "admin"
+    (mapping §1.5). The second value says the default was used,
+    so the message can tell the operator to save a set when
+    their fleet changed the admin password. NOTE: this reads the
+    RAW creds dict, not the merged cfg — the merge fills
+    "root" when nothing was supplied, and "root" is never a
+    Whatsminer password.
+    """
+    password = (raw_creds or {}).get("password") or ""
+    if password:
+        return password, False
+    return WM_DEFAULT_PASSWORD, True
+
+
+def _reboot_whatsminer(ip: str, cfg: dict,
+                       raw_creds: dict | None) -> tuple[bool, str]:
+    password, used_default = _wm_password(raw_creds)
+    client = WhatsminerClient(ip, port=int(cfg["cgminer_port"]),
+                              timeout=float(cfg["timeout"]))
+    try:
+        client.reboot_board(password)
+    except WhatsminerError as exc:
+        return False, f"whatsminer reboot failed: {exc}"
+    note = (" (default admin password — save a whatsminer "
+            "credential set if this fleet changed it)"
+            if used_default else "")
+    return True, ("whatsminer accepted reboot "
+                  "({\"cmd\": \"reboot\"} -> Code 131)" + note)
+
+
+def _reboot_luxos(ip: str, cfg: dict) -> tuple[bool, str]:
+    client = LuxosClient(ip, port=int(cfg["cgminer_port"]),
+                         timeout=float(cfg["timeout"]))
+    try:
+        client.rebootdevice()
+    except LuxosError as exc:
+        return False, f"luxos reboot failed: {exc}"
+    return True, "luxos accepted reboot (rebootdevice -> STATUS S)"
+
+
+# ---------------------------------------------------------------------------
+# whatsminer / luxos family actions (v0.33.0)
+# ---------------------------------------------------------------------------
+
+def _wm_simple(ip: str, cfg: dict, raw_creds: dict | None,
+               method: str, label: str) -> tuple[bool, str]:
+    """One token-authenticated Whatsminer call, honest result."""
+    password, used_default = _wm_password(raw_creds)
+    client = WhatsminerClient(ip, port=int(cfg["cgminer_port"]),
+                              timeout=float(cfg["timeout"]))
+    try:
+        getattr(client, method)(password)
+    except WhatsminerError as exc:
+        return False, f"whatsminer {label} failed: {exc}"
+    note = (" (default admin password — save a whatsminer "
+            "credential set if this fleet changed it)"
+            if used_default else "")
+    return True, f"whatsminer accepted {label}" + note
+
+
+def _switch_pool_whatsminer(ip: str, payload: dict, cfg: dict,
+                            raw_creds: dict | None) -> tuple[bool, str]:
+    # update_pools always rewrites the pool lines (mapping §1.5):
+    # a bare pool_id has no meaning here — the payload must carry
+    # the new pool. pool_id selects the slot (default 0).
+    url = payload.get("url")
+    user = payload.get("user")
+    if not url or not user:
+        return False, ("switch_pool on whatsminer needs 'url' and "
+                       "'user' in the payload — the manual's "
+                       "update_pools always rewrites the pool lines, "
+                       "there is no activate-a-configured-slot form")
+    try:
+        pool_id = int(payload.get("pool_id", 0))
+    except (TypeError, ValueError):
+        return False, (f"switch_pool: pool_id must be an integer, "
+                       f"got {payload.get('pool_id')!r}")
+    if pool_id not in (0, 1, 2):
+        return False, (f"switch_pool: whatsminer has 3 pool slots, "
+                       f"pool_id must be 0-2, got {pool_id}")
+    password, used_default = _wm_password(raw_creds)
+    client = WhatsminerClient(ip, port=int(cfg["cgminer_port"]),
+                              timeout=float(cfg["timeout"]))
+    pools = [{"url": "", "worker": "", "password": ""} for _ in range(3)]
+    pools[pool_id] = {"url": str(url), "worker": str(user),
+                      "password": str(payload.get("password", ""))}
+    try:
+        client.update_pools(password, pools)
+    except WhatsminerError as exc:
+        return False, f"whatsminer switch_pool failed: {exc}"
+    note = (" (default admin password — save a whatsminer "
+            "credential set if this fleet changed it)"
+            if used_default else "")
+    return True, (f"whatsminer pool slot {pool_id} set to {url} "
+                  f"(user {user}) via update_pools" + note)
+
+
+def _curtail_luxos(ip: str, cfg: dict, action: str,
+                   label: str) -> tuple[bool, str]:
+    client = LuxosClient(ip, port=int(cfg["cgminer_port"]),
+                         timeout=float(cfg["timeout"]))
+    try:
+        client.curtail(action)
+    except LuxosError as exc:
+        return False, f"luxos {label} failed: {exc}"
+    tail = ""
+    if action == "sleep":
+        tail = (" (a sleeping LuxOS rig wakes ONLY via resume_mining "
+                "— the curtailment state survives a reboot)")
+    return True, f"luxos accepted {label} (curtail {action})" + tail
 
 
 # ---------------------------------------------------------------------------
@@ -451,6 +596,26 @@ _DASHD_ONLY = {
 }
 
 
+# Family actions beyond dashd (v0.33.0) — keyed (source, command);
+# each handler is (ip, payload, cfg, raw_creds) -> (ok, message).
+# Whatsminer handlers read the password from raw_creds (see
+# _wm_password); LuxOS handlers need no password at all.
+_FAMILY_ONLY = {
+    ("whatsminer", "restart_mining"): lambda ip, p, c, r: _wm_simple(
+        ip, c, r, "restart_btminer", "restart_mining (restart_btminer)"),
+    ("whatsminer", "pause_mining"): lambda ip, p, c, r: _wm_simple(
+        ip, c, r, "power_off", "pause_mining (power_off)"),
+    ("whatsminer", "resume_mining"): lambda ip, p, c, r: _wm_simple(
+        ip, c, r, "power_on", "resume_mining (power_on)"),
+    ("whatsminer", "find_miner"): lambda ip, p, c, r: _wm_simple(
+        ip, c, r, "set_led_auto", "find_miner (set_led auto)"),
+    ("luxos", "pause_mining"): lambda ip, p, c, r: _curtail_luxos(
+        ip, c, "sleep", "pause_mining (curtail sleep)"),
+    ("luxos", "resume_mining"): lambda ip, p, c, r: _curtail_luxos(
+        ip, c, "wakeup", "resume_mining (curtail wakeup)"),
+}
+
+
 # ---------------------------------------------------------------------------
 # dispatch
 # ---------------------------------------------------------------------------
@@ -473,18 +638,22 @@ def execute(ip: str, source: str | None, command_type: str,
             if source == "stock":
                 return _reboot_stock(ip, cfg)
             if source == "whatsminer":
-                # Whatsminer privileged calls ride its token
-                # session; the token computation is not in the
-                # dissected contract (mapping G-W1) — honest gap,
-                # never a pretend attempt.
-                return False, (f"reboot is {NOT_SUPPORTED} "
-                               f"(source: 'whatsminer')")
+                # G-W1 closed in v0.33.0: token-authenticated
+                # {"cmd": "reboot"} (mapping §1.5).
+                return _reboot_whatsminer(ip, cfg, creds)
+            if source == "luxos":
+                return _reboot_luxos(ip, cfg)
             return False, f"reboot: unknown miner source {source!r}"
         if command_type == "switch_pool":
             if source == "vnish":
                 return _switch_pool_dashd(ip, payload, cfg)
+            if source == "whatsminer":
+                return _switch_pool_whatsminer(ip, payload, cfg, creds)
             return False, (f"switch_pool is {NOT_SUPPORTED} "
                            f"(source: {source or 'unknown'})")
+        family = _FAMILY_ONLY.get((source, command_type))
+        if family is not None:
+            return family(ip, payload, cfg, creds)
         handler = _DASHD_ONLY.get(command_type)
         if handler is not None:
             if source == "vnish":

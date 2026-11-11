@@ -42,7 +42,10 @@ verified sequence that stops at the first failed stage:
      ``openssl dgst -sha256 -verify /etc/bitmain-adv.pub`` process for
      as long as the upload runs (--race-delay-ms before the first kill;
      no timing value was recovered — 0 by default, first real run is a
-     calibration).
+     calibration). The race retries at most 10 times — the bound was
+     recovered from the Toolkit's Rust core in v0.35
+     (docs/unlock-payload-mapping.md §2.1); the inter-attempt delay
+     formula was not recoverable and stays UNKNOWN.
   3. upload ``update_second.bmu`` the same way.
   4. poll the success marker ``/cgi-bin/patch_success.cgi``.
   5. cleanup (best effort): remove /nvdata/update.log and /tmp/tmpfw —

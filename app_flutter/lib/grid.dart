@@ -186,7 +186,7 @@ const List<GridColumnDef> gridColumnUniverse = [
   GridColumnDef('temps', 'NHIỆT', 3, isTemps: true),
   GridColumnDef('fans', 'QUẠT', 3),
   GridColumnDef('status', 'TRẠNG THÁI', 2, isStatus: true),
-  GridColumnDef('mac', 'MAC', 3, dataGap: true),
+  GridColumnDef('mac', 'MAC', 3), // v0.35: core fills it from the ARP table
   GridColumnDef('serial', 'S/N', 3, dataGap: true),
   GridColumnDef('uptime', 'UPTIME', 2, kind: GridColumnKind.numeric),
   GridColumnDef('hashrateRt', 'HASHRATE RT', 3, kind: GridColumnKind.rate),
