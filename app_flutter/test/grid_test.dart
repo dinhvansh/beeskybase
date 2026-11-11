@@ -531,7 +531,11 @@ void main() {
 /// grid's scale exercise at widget level.
 class _FleetBridge extends MockBridge {
   @override
-  Future<ScanResult> scan(String target, {String? credsFile}) async =>
+  Future<ScanResult> scan(
+    String target, {
+    String? credsFile,
+    String? eventsState,
+  }) async =>
       ScanResult(
         records: generatedFleet(),
         scanned: 254,
@@ -544,6 +548,7 @@ class _FleetBridge extends MockBridge {
     String name, {
     String? credsFile,
     String? groupsFile,
+    String? eventsState,
   }) =>
       scan(name);
 }

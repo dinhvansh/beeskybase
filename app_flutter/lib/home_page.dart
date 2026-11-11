@@ -16,11 +16,14 @@ import 'ops_dialogs.dart';
 import 'presets_dialogs.dart';
 import 'sidecar.dart';
 import 'theme.dart';
+import 'views.dart';
 
-/// The two content views: the app OPENS on network groups (the
+/// The content views: the app OPENS on network groups (the
 /// HashCore Toolkit's home screen, v0.24); the miners table is the
-/// per-group / ad-hoc scan view behind it.
-enum _View { groups, miners }
+/// per-group / ad-hoc scan view behind it; v0.32 landed the five
+/// remaining sidebar views (heat map, energy, repairs, events,
+/// settings — docs/views-mapping.md).
+enum _View { groups, miners, heat, energy, repairs, events, settings }
 
 /// Grid hotkey intents (v0.25) — the Flutter mirror of HashCore's
 /// `package:toolkit/hot_keys/intents_and_actions/` layer.
@@ -86,6 +89,16 @@ class HomePage extends StatefulWidget {
   /// beside the executable (v0.27).
   final NoteStore? noteStore;
 
+  /// Settings-store override (tests point it at a temp dir); the
+  /// real app uses [SettingsStore.appDefault] —
+  /// beesky-settings.json beside the executable (v0.32).
+  final SettingsStore? settingsStore;
+
+  /// Event-log override (tests point it at a temp dir); the real
+  /// app uses [EventLogStore.appDefault] — beesky-events.json
+  /// beside the executable (v0.32).
+  final EventLogStore? eventStore;
+
   /// Row double-click opener override (tests record the URL instead
   /// of launching a browser); defaults to [openUrlInBrowser].
   final Future<void> Function(String url)? urlOpener;
@@ -100,6 +113,8 @@ class HomePage extends StatefulWidget {
     this.opsFiles,
     this.historyStore,
     this.noteStore,
+    this.settingsStore,
+    this.eventStore,
     this.urlOpener,
   });
 
@@ -204,6 +219,26 @@ class _HomePageState extends State<HomePage> {
   final _noteCtrl = TextEditingController();
   String? _noteOwnerKey;
 
+  // The five v0.32 views' state: persisted app settings (default
+  // target + electricity price) and the accumulated event log.
+  late final SettingsStore _settingsStore =
+      widget.settingsStore ?? SettingsStore.appDefault();
+  late final EventLogStore _eventStore =
+      widget.eventStore ?? EventLogStore.appDefault();
+  AppSettings _settings = const AppSettings();
+  List<FleetEvent> _eventLog = const [];
+
+  /// Bumped on every entry into Lịch sử sửa; the view's key (and
+  /// therefore its disk reload) hangs off it.
+  int _repairsVisit = 0;
+
+  void _goView(_View view) {
+    setState(() {
+      _view = view;
+      if (view == _View.repairs) _repairsVisit++;
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -221,6 +256,11 @@ class _HomePageState extends State<HomePage> {
     _loadOpsHistory();
     _loadHistory();
     _loadNotes();
+    // v0.32 stores are tiny and sync (the creds-store pattern):
+    // settings feed the sysinfo prefill below, the event log is
+    // the Sự kiện view's whole content.
+    _settings = _settingsStore.load();
+    _eventLog = _eventStore.load();
     _autoscanTimer = Timer.periodic(
       const Duration(seconds: 30),
       (_) => _tickAutoscan(),
@@ -582,11 +622,15 @@ class _HomePageState extends State<HomePage> {
     });
     try {
       final result = widget.bridge.isMock
-          ? await widget.bridge.scan(group.targets)
+          ? await widget.bridge.scan(
+              group.targets,
+              eventsState: _eventStore.stateFilePathFor(group.targets),
+            )
           : await widget.bridge.scanGroup(
               group.name,
               credsFile: await _credsFileForScan(),
               groupsFile: _groupsFile?.path,
+              eventsState: _eventStore.stateFilePathFor(group.targets),
             );
       if (!mounted) return;
       _applyScanResult(result);
@@ -645,16 +689,24 @@ class _HomePageState extends State<HomePage> {
         _sysinfoFailed = false;
         // Pre-fill the target with this machine's own /24 (the v0.19.6
         // lesson: a hard-coded foreign subnet finds nothing at a farm),
-        // unless the user already typed something.
+        // unless the user already typed something. A saved default
+        // target (Cài đặt, v0.32) wins over the auto-detected subnet;
+        // an empty setting keeps the auto behaviour untouched.
         if (_targetCtrl.text.isEmpty) {
-          _targetCtrl.text = info.defaultTarget;
+          _targetCtrl.text = _settings.defaultTarget.isNotEmpty
+              ? _settings.defaultTarget
+              : info.defaultTarget;
         }
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _sysinfoFailed = true;
-        _status = 'Không đọc được sysinfo từ beesky: $e';
+        // Missing engine: the status line IS the one friendly
+        // message, never a wrapped raw exception (v0.32).
+        _status = widget.bridge.sidecarMissing
+            ? missingSidecarMessage
+            : 'Không đọc được sysinfo từ beesky: $e';
       });
     }
   }
@@ -666,8 +718,22 @@ class _HomePageState extends State<HomePage> {
   /// Land a finished pass on the table (both scan paths share it):
   /// v0.19.7 behaviour — the first row is selected so the detail
   /// panel is alive immediately.
+  /// Accumulate the events this pass diffed out (v0.32): the
+  /// payload's events are newest-first within the pass, the log
+  /// is newest-first overall, and the store caps at 500.
+  void _ingestEvents(List<FleetEvent> fresh) {
+    if (fresh.isEmpty) return;
+    _eventLog = [...fresh, ..._eventLog].take(EventLogStore.cap).toList();
+    try {
+      _eventStore.save(_eventLog);
+    } on FileSystemException {
+      // The log stays in memory for this session.
+    }
+  }
+
   void _applyScanResult(ScanResult result) {
     _appendHistorySamples(result.records);
+    _ingestEvents(result.events);
     setState(() {
       _records = _decorateNotes(result.records);
       _lastScan = result;
@@ -699,6 +765,7 @@ class _HomePageState extends State<HomePage> {
       final result = await widget.bridge.scan(
         _target,
         credsFile: await _credsFileForScan(),
+        eventsState: _eventStore.stateFilePathFor(_target),
       );
       if (!mounted) return;
       _applyScanResult(result);
@@ -1308,11 +1375,116 @@ class _HomePageState extends State<HomePage> {
         children: [
           _sidebar(),
           Expanded(
-            child: _view == _View.groups ? _groupsColumn() : _minersColumn(),
+            child: switch (_view) {
+              _View.groups => _groupsColumn(),
+              _View.miners => _minersColumn(),
+              _ => _auxColumn(_view),
+            },
           ),
         ],
       ),
     );
+  }
+
+  /// The v0.32 views share one chrome: header, busy line, content,
+  /// the status line — the groups column's shape.
+  Widget _auxColumn(_View view) {
+    final (title, subtitle, content) = switch (view) {
+      _View.heat => (
+          'Bản đồ nhiệt',
+          'Mỗi ô là một máy theo lần quét gần nhất, màu theo '
+              'nhiệt độ board cao nhất.',
+          HeatMapView(
+            records: _records,
+            scanned: _scanned,
+            onSelect: (rec) => setState(() {
+              _selected = rec;
+              _view = _View.miners;
+            }),
+          ),
+        ),
+      _View.energy => (
+          'Điện năng',
+          'Công suất hiện tại + điện tích lũy từ các mẫu quét đã '
+              'lưu trên máy này.',
+          EnergyView(
+            records: _records,
+            history: _history,
+            priceVndKwh: _settings.priceVndKwh,
+          ),
+        ),
+      _View.repairs => (
+          'Lịch sử sửa',
+          'Các phiếu .txt đã xuất cho máy có vấn đề, mới nhất '
+              'trước. File phiếu không ghi trạng thái sửa.',
+          RepairsView(
+            // A fresh key per VISIT so the list reloads from disk
+            // every time the view opens (exports land any time).
+            key: ValueKey('repairs-$_repairsVisit'),
+            loader: () => widget.bridge.listTickets(
+              widget.bridge.ticketsDirPath,
+            ),
+            ticketsDir: widget.bridge.ticketsDirPath,
+          ),
+        ),
+      _View.events => (
+          'Sự kiện',
+          'Thay đổi giữa các lần quét: mất kết nối, sụt hashrate, '
+              'quá nhiệt, mất chip, board ngắt.',
+          EventsView(events: _eventLog),
+        ),
+      _View.settings => (
+          'Cài đặt',
+          'Chỉ những cài đặt thật sự lưu lại và có tác dụng.',
+          SettingsView(
+            settings: _settings,
+            onSave: _saveSettings,
+            credCount: _creds.length,
+            onOpenCreds: _editCreds,
+            onOpenGroups: () => setState(() => _view = _View.groups),
+            ticketsDir: widget.bridge.ticketsDirPath,
+            coreVersion: _sysinfo?.version,
+            sidecarMissing: widget.bridge.sidecarMissing,
+          ),
+        ),
+      _ => ('', '', const SizedBox.shrink()),
+    };
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        viewHeader(title, subtitle),
+        if (_busy) const LinearProgressIndicator(minHeight: 3),
+        Expanded(child: content),
+        _statusLine(),
+      ],
+    );
+  }
+
+  /// Persist Cài đặt and apply what applies immediately: the
+  /// default target refills the scan field while it still holds
+  /// the previous effective default (or nothing); the price feeds
+  /// Điện năng on its next build.
+  void _saveSettings(AppSettings next) {
+    final previousDefault = _settings.defaultTarget.isNotEmpty
+        ? _settings.defaultTarget
+        : (_sysinfo?.defaultTarget ?? '');
+    setState(() {
+      _settings = next;
+      if (_targetCtrl.text.isEmpty || _targetCtrl.text == previousDefault) {
+        _targetCtrl.text = next.defaultTarget.isNotEmpty
+            ? next.defaultTarget
+            : (_sysinfo?.defaultTarget ?? _targetCtrl.text);
+      }
+      _status = 'Đã lưu cài đặt.';
+    });
+    try {
+      _settingsStore.save(next);
+    } on FileSystemException {
+      if (mounted) {
+        setState(() => _status = 'Không ghi được file cài đặt — '
+            'cài đặt chỉ có tác dụng trong phiên này.');
+      }
+    }
   }
 
   Widget _minersColumn() {
@@ -1871,11 +2043,36 @@ class _HomePageState extends State<HomePage> {
           // Roadmap views: listed so the structure matches where the
           // product is going, greyed + "SAU" until they are real —
           // no fake functionality behind them.
-          _navItem(Icons.grid_on, 'Bản đồ nhiệt', upcoming: true),
-          _navItem(Icons.bolt, 'Điện năng', upcoming: true),
-          _navItem(Icons.build, 'Lịch sử sửa', upcoming: true),
-          _navItem(Icons.notifications_none, 'Sự kiện', upcoming: true),
-          _navItem(Icons.settings, 'Cài đặt', upcoming: true),
+          _navItem(
+            Icons.grid_on,
+            'Bản đồ nhiệt',
+            active: _view == _View.heat,
+            onTap: () => _goView(_View.heat),
+          ),
+          _navItem(
+            Icons.bolt,
+            'Điện năng',
+            active: _view == _View.energy,
+            onTap: () => _goView(_View.energy),
+          ),
+          _navItem(
+            Icons.build,
+            'Lịch sử sửa',
+            active: _view == _View.repairs,
+            onTap: () => _goView(_View.repairs),
+          ),
+          _navItem(
+            Icons.notifications_none,
+            'Sự kiện',
+            active: _view == _View.events,
+            onTap: () => _goView(_View.events),
+          ),
+          _navItem(
+            Icons.settings,
+            'Cài đặt',
+            active: _view == _View.settings,
+            onTap: () => _goView(_View.settings),
+          ),
           const Spacer(),
           _sidebarFooter(),
         ],
@@ -1887,7 +2084,6 @@ class _HomePageState extends State<HomePage> {
     IconData icon,
     String label, {
     bool active = false,
-    bool upcoming = false,
     VoidCallback? onTap,
   }) {
     final row = Container(
@@ -1920,7 +2116,6 @@ class _HomePageState extends State<HomePage> {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          if (upcoming) _soonTag(),
         ],
       ),
     );
@@ -1936,24 +2131,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _soonTag() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: BeeSkyColors.entryFill,
-        borderRadius: BorderRadius.circular(radiusPill),
-      ),
-      child: const Text(
-        'SAU',
-        style: TextStyle(
-          color: BeeSkyColors.muted,
-          fontSize: 9,
-          letterSpacing: 0.6,
-        ),
-      ),
-    );
-  }
-
   /// (dot colour, label) for the sidebar footer: mock mode, sidecar
   /// found and talking, sidecar exe missing beside the app, or the
   /// sysinfo probe still in flight / failed.
@@ -1961,11 +2138,8 @@ class _HomePageState extends State<HomePage> {
     if (widget.bridge.isMock) {
       return (BeeSkyColors.warn, 'Ruột quét: dữ liệu mẫu');
     }
-    final exe = widget.bridge.exePath;
-    if (exe != null &&
-        exe.contains(Platform.pathSeparator) &&
-        !File(exe).existsSync()) {
-      return (BeeSkyColors.bad, 'Ruột quét: thiếu beesky.exe');
+    if (widget.bridge.sidecarMissing) {
+      return (BeeSkyColors.bad, 'Chưa có ruột quét (thiếu beesky.exe)');
     }
     if (_sysinfo != null) return (BeeSkyColors.ok, 'Ruột quét: đã nối');
     if (_sysinfoFailed) return (BeeSkyColors.bad, 'Ruột quét: không nối được');

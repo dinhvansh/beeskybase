@@ -384,6 +384,21 @@ def cmd_scan(args: argparse.Namespace) -> int:
             "found": len(records),
             "elapsed_s": round(elapsed, 3),
         }
+        # --events-state (v0.32): run this pass through the event
+        # engine, `watch --state` style, and carry the diff in the
+        # payload. ONLY with the flag — a flagless bridge scan's
+        # document is byte-identical to before. First pass against
+        # a fresh state only seeds baselines (no events), exactly
+        # like the engine's watch behaviour.
+        events_state = getattr(args, "events_state", None)
+        if events_state:
+            engine = EventEngine()
+            _load_state(engine, events_state)
+            present = {r["ip"]: r for r in records
+                       if not _is_error_record(r)}
+            payload["events"] = [
+                _jsonable(e) for e in engine.observe_cycle(present)]
+            _save_state(engine, events_state)
         print(json.dumps(payload, ensure_ascii=False))
     else:
         if not records:
@@ -404,6 +419,28 @@ def cmd_scan(args: argparse.Namespace) -> int:
         for path in written:
             print(f"Ticket written to {path}",
                   file=sys.stderr if bridge else sys.stdout)
+    return 0
+
+
+def cmd_tickets(args: argparse.Namespace) -> int:
+    """List exported repair tickets (v0.32) — read-only.
+
+    The listing half of `scan --tickets DIR`: report.list_tickets
+    parses the .txt files write_tickets produced (newest first).
+    --json prints ONE document {"tickets": [...]} for the Flutter
+    shell's Lịch sử sửa view; a missing directory lists as empty.
+    """
+    tickets = report.list_tickets(args.dir)
+    if args.json:
+        print(json.dumps({"tickets": tickets}, ensure_ascii=False))
+    else:
+        if not tickets:
+            print(f"No tickets in {args.dir}")
+        for ticket in tickets:
+            print(f"{ticket['modified']}  {ticket['ip']}  "
+                  f"{ticket['model']}  "
+                  f"({len(ticket['problems'])} problem(s))  "
+                  f"{ticket['file']}")
     return 0
 
 
@@ -1079,7 +1116,23 @@ def main(argv: list[str] | None = None) -> int:
                            "(sidecar bridge mode for the Flutter shell)")
     scan.add_argument("--tickets", metavar="DIR",
                       help="write one repair ticket per problem miner into DIR")
+    scan.add_argument("--events-state", metavar="FILE",
+                      help="bridge mode only: diff this pass through "
+                           "the event engine with its state persisted "
+                           "at FILE (watch --state semantics) and add "
+                           "the pass's events to the JSON payload "
+                           "under \"events\" (v0.32)")
     scan.set_defaults(func=cmd_scan)
+
+    tickets = sub.add_parser(
+        "tickets", help="list exported repair tickets (read-only, v0.32)")
+    tickets.add_argument("--dir", required=True, metavar="DIR",
+                         help="the tickets directory scan --tickets "
+                              "wrote into")
+    tickets.add_argument("--json", action="store_true",
+                         help="print ONE JSON document "
+                              "{\"tickets\": [...]} (sidecar bridge mode)")
+    tickets.set_defaults(func=cmd_tickets)
 
     groups = sub.add_parser(
         "groups", help="network groups: named scan targets with "

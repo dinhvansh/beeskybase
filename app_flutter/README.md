@@ -25,14 +25,20 @@ where each record is the same dict the agent/cloud path serialises
 
 Sidecar resolution order (`lib/sidecar.dart`): constructor override →
 `BEESKY_EXE` env → `--dart-define=BEESKY_EXE=` → `beesky.exe` next to
-this app's exe (the shipped layout) → `beesky` on PATH.
+this app's exe (the shipped layout) → on Windows, that same sibling
+path even when the file is absent (so the app can report the
+missing engine with one clear message instead of a raw OS error —
+v0.32); on POSIX, `beesky` on PATH.
 
 ## Layout of the shipped bundle
 
-The CI zip (`BeeSkyFlutter-<tag>-win64.zip`) contains the Flutter runner
-folder. **Drop `beesky.exe` (from the main BeeSky release) beside
-`beesky_app.exe`** — that is the layout the sidecar expects. No installer
-in stage 1; the Tk installers keep shipping unchanged.
+Since v0.32 the CI zip (`BeeSkyFlutter-<tag>-win64.zip`) is
+**self-contained**: the Flutter runner folder PLUS `beesky.exe`
+beside `beesky_app.exe` — extract and run, no second download.
+(Before v0.32 the zip held the runner only and the owner had to
+drop `beesky.exe` in by hand; his first real-Windows test showed
+how that ends.) The unified BeeSkySetup installer ships the same
+layout.
 
 ## Dev modes
 

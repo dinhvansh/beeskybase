@@ -486,3 +486,69 @@ def write_tickets(records: list[dict], outdir: str | Path) -> list[Path]:
         path.write_text(make_ticket(record), encoding="utf-8")
         written.append(path)
     return written
+
+
+def _ticket_problem_lines(text: str) -> list[str]:
+    """The bullet lines of a ticket's "Vấn đề phát hiện:" section.
+
+    The section runs from its header to the first blank line —
+    make_ticket's format is fixed, so the parse is exact, not a
+    heuristic.
+    """
+    lines = text.splitlines()
+    try:
+        start = lines.index("Vấn đề phát hiện:") + 1
+    except ValueError:
+        return []
+    problems: list[str] = []
+    for line in lines[start:]:
+        if not line.strip():
+            break
+        if line.startswith("- "):
+            problems.append(line[2:])
+    return problems
+
+
+def list_tickets(outdir: str | Path) -> list[dict]:
+    """List the ticket files in *outdir*, newest first (v0.32).
+
+    The read side of write_tickets, backing the read-only
+    `beesky tickets` verb and the Flutter Lịch sử sửa view. Each
+    entry: {file, ip, modified, model, problems, text} — ip from
+    the filename (write_tickets' own encoding), model from the
+    ticket's "Model:" line, problems from its problem section,
+    modified = the file's mtime as local ISO time (the ticket
+    text itself carries no timestamp). A missing directory is
+    an empty history, not an error. Local ticket files carry
+    NO status — that concept exists only in the cloud repairs
+    table, and none is invented here.
+    """
+    import time as _time
+
+    out = Path(outdir)
+    if not out.is_dir():
+        return []
+    entries: list[tuple[float, dict]] = []
+    for path in out.glob("ticket-*.txt"):
+        try:
+            text = path.read_text(encoding="utf-8")
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        stem = path.name[len("ticket-"):-len(".txt")]
+        model = ""
+        for line in text.splitlines():
+            if line.startswith("Model: "):
+                model = line[len("Model: "):].strip()
+                break
+        entries.append((mtime, {
+            "file": path.name,
+            "ip": stem.replace("_", "."),
+            "modified": _time.strftime(
+                "%Y-%m-%dT%H:%M:%S", _time.localtime(mtime)),
+            "model": model,
+            "problems": _ticket_problem_lines(text),
+            "text": text,
+        }))
+    entries.sort(key=lambda item: item[0], reverse=True)
+    return [entry for _mtime, entry in entries]

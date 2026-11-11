@@ -4247,3 +4247,152 @@ FINAL RELEASE ASSET LIST (tag build; was 7, now 8):
     blob), the schtasks probe + task verbs from the
     Flutter process, and the unified installer's
     component selection + pairing write on a real PC.
+
+# v0.32.0 — The five remaining views + the sidecar fix
+
+Grounded in the owner's FIRST real-Windows test (2026-11-12):
+he extracted the v0.31.1 BeeSkyFlutter zip standalone (folder:
+beesky_app.exe + flutter_windows.dll + data/ — nothing else),
+so no beesky.exe ever sat beside the app; scans failed with
+"Lỗi quét: Không chạy được beesky (beesky): The system cannot
+find the file specified" and ticket export leaked the raw
+"ProcessException: … Command: beesky scan … --tickets
+.\tickets". No Defender involvement was evidenced. The
+dissection + per-view mapping was written BEFORE the build:
+docs/views-mapping.md (the "originals" are BeeSky's own web
+dashboard / cloud store / event engine / ticket writer).
+
+## Workstream B — the sidecar failure mode (the bug he hit)
+
+ROOT CAUSE (in code, app_flutter/lib/sidecar.dart):
+SidecarBridge.resolveBeeSkyExe() resolved override → env →
+dart-define → sibling beesky.exe → and then fell back to the
+BARE NAME 'beesky'. Nothing beside the app in the owner's
+layout meant every Process.run('beesky', …) raised
+ProcessException; _runJson wrapped it with the raw OS text,
+exportTickets had NO try/catch at all (the unwrapped
+ProcessException in his photo), and the sidebar's missing-exe
+check could not fire because a bare name has no path
+separator to test.
+
+FIX:
+  * Resolution: on Windows the resolver now returns the
+    EXPLICIT sibling path (<app exe dir>\beesky.exe) even
+    when the file is absent — both shipped layouts always
+    place it there, so absence becomes a knowable state
+    (bridge.sidecarMissing). POSIX keeps the bare-PATH
+    fallback (dev machines). Overrides unchanged; an
+    override naming a missing file counts as missing too.
+  * ONE friendly message everywhere: sysinfo, scan, group
+    scan, inspect, ops start and ticket export check the
+    state BEFORE spawning (and map a racing ProcessException
+    to the same text): "Không tìm thấy beesky.exe cạnh app —
+    hãy giải nén app vào cùng thư mục với beesky.exe (hoặc
+    cài bằng BeeSkySetup), và kiểm tra Windows Defender >
+    Protection history nếu file bị cách ly." The sidebar
+    pill reads "Chưa có ruột quét (thiếu beesky.exe)"; the
+    sysinfo status line shows the message itself.
+  * exportTickets gained its missing try/catch.
+
+PACKAGING (the structural fix): from v0.32 both portable
+zips are SELF-CONTAINED — build-flutter.yml jobs now build
+the PyInstaller spec themselves (the two workflows are
+independent runs on one tag; cross-workflow artifact
+download would couple + race them) and stage the sidecar
+into the runner folder before zipping, then VERIFY the zip
+in-job (fails unless every expected entry is present).
+Expected zip contents:
+  BeeSkyFlutter-<tag>-win64.zip:
+    beesky_app.exe, beesky.exe, flutter_windows.dll, data/…
+  BeeSkyAgentFlutter-<tag>-win64.zip:
+    beesky_agent_app.exe, beesky-agent.exe,
+    beesky-agentw.exe, flutter_windows.dll, data/…
+Size implication: main zip ~12 MB -> ~26 MB (+beesky.exe
+~14 MB); agent zip ~12 MB -> ~40 MB. The agent zip bundles
+BOTH agent exes symmetrically (the same staging route made
+it trivial) — agentw is required, not decoration: the
+agent app's install-task verb registers the windowless
+twin as the scheduled-task target, so a shell-only agent
+zip would break exactly the way the main zip did. Named
+divergence: zip-bundled exes are built from the same
+tagged source but are NOT eSigner-signed inside
+build-flutter (signing lives in build-windows; its signed
+beesky.exe remains the standalone release asset and the
+installers' embedded copy). The update manifest is
+unchanged (the zips were never in the self-update
+channel).
+
+## Workstream A — the five views (data source + scope)
+
+| View | Original | Data source (local) | Scope shipped |
+|------|----------|---------------------|---------------|
+| Bản đồ nhiệt | `beesky serve` web dashboard heat map (Tk has none) | CURRENT scan records in memory | Web semantics ported exactly: tiles sorted by numeric IP, last octet + temp + `ip · rate`, the web's 5 band hexes on max_temp_c, offline = grey/"Offline", problem = red border, web tooltip + web empty text. Divergences named in the mapping: tile click selects + jumps to Máy đào (web is display-only); bands render at 0.88 alpha on the dark theme. The v0.25 Overview heat-grid (filtered grid pipeline, HashCore-style) is a different surface and is unchanged. |
+| Điện năng | cloud energy report (store.energy_report over energy_hours; price setting default 2000 VNĐ/kWh) | records' power_w + beesky-history.json samples (which carry power_w) | The cloud report's three shapes over LOCAL data: current fleet (Σ kW, est. kWh/day, est. cost/day, honest N/M power-reporting coverage), 7-day integration of saved samples (rectangle rule, >30 min gaps skipped, day = start sample's day), per-day + per-device rows. The cloud's hour-integrated history is cloud-only; the view states this scope on its face. Price editable in Cài đặt. |
+| Lịch sử sửa | ticket files (report.write_tickets) — cloud repairs table is server-side | `tickets/` dir beside the sidecar, via the NEW read-only core verb `beesky tickets --dir DIR --json` (report.list_tickets) | Lists exported tickets newest-first (mtime), ip from filename, model + problem bullets parsed from the ticket text, full text on tap. Local ticket files carry NO status and NO timestamp — none is invented (the cloud status chips are not ported; mtime is shown as the export date). |
+| Sự kiện | core EventEngine (watch --state / serve ring) | NEW: `scan --events-state FILE` (bridge only) diffs each pass watch-style; app accumulates emissions in beesky-events.json | Engine semantics untouched (baseline seeding, anti-flap, cooldown); one state file PER TARGET string (one engine per watched target, like separate watch runs). App log newest-first, cap 500; rows = severity chip + the web dashboard's Vietnamese type/severity labels + ip · model + detail + time. Neither original filters by type, so the port doesn't either. Flagless bridge payloads are byte-identical to before (pinned). |
+| Cài đặt | — (settings that persist + take effect only) | beesky-settings.json (new app store) | Default scan target (wins over sysinfo's auto subnet at prefill; empty = auto), electricity price VNĐ/kWh (default 2000, feeds Điện năng), entry buttons reusing the EXISTING creds dialog + groups view, tickets-dir readout, about block (app version const + core version from sysinfo). No decorative toggles. |
+
+CORE ADDITIONS (both read-only, established bridge style):
+  * `beesky tickets --dir DIR --json` → one JSON document
+    {"tickets": [{file, ip, modified, model, problems,
+    text}]}; missing dir = empty list, exit 0.
+  * `scan --events-state FILE` (with --json): after records
+    are built, present = non-error records, engine diffs,
+    state persists (the watch _load_state/_save_state pair),
+    payload gains "events" — only with the flag.
+
+## Tests
+
+(a) VERIFIED LOCALLY (this machine):
+  * Python (tests/run_mock_test_v32.sh): NEW
+    mock_views_test 20 PASS / 0 FAIL (tickets verb:
+    round-trip of write_tickets output, newest-first,
+    problem-line parsing, missing-dir contract, human
+    mode; events-state: flagless payload has no "events"
+    key, pass 1 seeds silently, OFFLINE fires once,
+    anti-flap latch, BACK_ONLINE on return). Regression
+    set all green at established counts:
+    mock_vendors_test 51; mock_agent_bg_test 52 (xvfb;
+    "versions in sync at 0.32.0"); mock_bridge_test 24;
+    mock_creds_test 32; mock_groups_test 39;
+    mock_units_test 50; mock_ops_test 32;
+    mock_ops2_test 34; mock_inspect_test 33;
+    mock_pools_test 43; mock_agent_app_test PASSED
+    (xvfb, exit 0). The known timing-sensitive v0.11
+    firmware assertion did not flake this run.
+  * Flutter (SDK 3.47.9 at ~/workspace/flutter-sdk): main
+    app — flutter analyze clean; flutter test 141 PASS /
+    0 FAIL (125 established + 16 new in
+    test/views_test.dart: sidecar-missing pinned on all
+    six bridge verbs + the full shell — pill text, status
+    line, scan error, and NO 'ProcessException'/'cannot
+    find the file' text anywhere; heat band hexes +
+    thresholds; IP ordering; fleet-power coverage;
+    energy integration math (rectangle/gap/window);
+    formatVnd; settings + event-log store round-trips;
+    per-target state paths; all five views rendering from
+    the mock bridge incl. honest empty states; settings
+    save persisting AND taking effect in Điện năng;
+    sidebar shows no 'SAU'). The two _FleetBridge
+    overrides in grid_test.dart moved to the extended
+    bridge signatures. Agent app — analyze clean;
+    flutter test 34 PASS / 0 FAIL (version pins only).
+  * Version pins moved together: beesky 0.32.0, both
+    .iss MyAppVersion 0.32.0, main pubspec 0.32.0+13,
+    agent pubspec 0.32.0+3, mock sysinfo + app version
+    consts 0.32.0.
+
+(b) VERIFIED ONLY BY CI:
+  * Both Windows Flutter builds and the new self-contained
+    zip staging + verification steps in build-flutter.yml
+    (the YAML parses locally; PowerShell/Compress-Archive
+    cannot run in this sandbox — the first tag build is
+    their first execution), and build-windows' installer
+    builds (unchanged this release).
+
+(c) HARDWARE / WINDOWS-UNCONFIRMED:
+  * The whole v0.32 shell on real Windows — above all the
+    self-contained zip route that replaces the layout the
+    owner hit, the events diff against a real fleet
+    (engine semantics are the core's own, mock-verified),
+    and ticket listing against tickets exported on his PC.

@@ -15,13 +15,24 @@
 # staging lives in build-windows.yml; these zips stay the
 # no-installer route.)
 #
-# The zips hold the Flutter runner folders only (beesky_app.exe /
-# beesky_agent_app.exe + flutter_windows.dll + data/). At runtime
-# the main shell looks for the Python sidecar beesky.exe NEXT TO
-# beesky_app.exe — drop the beesky.exe from the same release beside
-# it (see app_flutter/README.md); the agent app resolves
-# beesky-agent.exe beside itself or one folder up (see
-# app_agent_flutter/README.md).
+# The zips are SELF-CONTAINED since v0.32: alongside the Flutter
+# runner folder (beesky_app.exe / beesky_agent_app.exe +
+# flutter_windows.dll + data/) each zip carries the Python
+# sidecar exe(s) the shell drives — beesky.exe for the main app,
+# beesky-agent.exe + beesky-agentw.exe for the agent app (the
+# windowless twin is the scheduled-task target the agent app's
+# install verb registers, so a standalone agent install needs
+# it too). The owner's first real-Windows test (2026-11-12)
+# extracted the v0.31 zip on its own, no beesky.exe ever landed
+# beside the app, and every scan failed — a zip that only works
+# after a second manual download is a broken zip. The exes are
+# built HERE (same PyInstaller spec as build-windows) rather
+# than downloaded from that workflow's artifacts: the two
+# workflows are independent runs on the same tag, and coupling
+# them would race. Cost: ~+14 MB (main) / ~+28 MB (agent) per
+# zip, and the bundled exes are NOT eSigner-signed (signing
+# lives in build-windows; its signed beesky.exe remains the
+# standalone release asset + the installers' embedded copy).
 #
 # Runs:
 #   * on every tag v* (same trigger as the installer workflow)
@@ -57,6 +68,30 @@ jobs:
           flutter test
           flutter build windows --release
 
+      # Self-contained zip (v0.32): build the Python sidecar from
+      # the same spec build-windows uses and stage beesky.exe
+      # INTO the runner folder, so extracting this zip alone is
+      # a working app.
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build sidecar exe (PyInstaller)
+        run: |
+          pip install pyinstaller
+          pyinstaller packaging/beesky.spec --noconfirm
+
+      - name: Stage beesky.exe beside the app
+        shell: pwsh
+        run: |
+          Copy-Item dist\beesky.exe `
+            app_flutter\build\windows\x64\runner\Release\beesky.exe
+          if (-not (Test-Path `
+            app_flutter\build\windows\x64\runner\Release\beesky.exe)) {
+            exit 1
+          }
+
       - name: Zip the runner folder
         shell: pwsh
         run: |
@@ -65,6 +100,30 @@ jobs:
             -Path "app_flutter/build/windows/x64/runner/Release/*" `
             -DestinationPath "$name.zip"
           Write-Host "packed $name.zip"
+
+      # CI-visible proof the zip is self-contained: the job fails
+      # unless the app exe, the sidecar, the Flutter dll and the
+      # data/ folder are all inside.
+      - name: Verify zip is self-contained
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = Get-ChildItem BeeSkyFlutter-*.zip | Select-Object -First 1
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($zip.FullName)
+          try {
+            $names = $archive.Entries | ForEach-Object { $_.FullName }
+            $names | ForEach-Object { Write-Host "zip entry: $_" }
+            foreach ($need in @("beesky_app.exe", "beesky.exe",
+                                "flutter_windows.dll")) {
+              if ($names -notcontains $need) {
+                Write-Error "zip is missing $need"; exit 1
+              }
+            }
+            if (-not ($names | Where-Object { $_ -like "data/*" })) {
+              Write-Error "zip is missing data/"; exit 1
+            }
+          } finally { $archive.Dispose() }
+          Write-Host "self-contained OK: $($zip.Name)"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -101,6 +160,31 @@ jobs:
           flutter test
           flutter build windows --release
 
+      # Self-contained zip (v0.32), symmetric with the main app:
+      # the agent app drives beesky-agent.exe, and its
+      # install-task verb registers the windowless twin
+      # beesky-agentw.exe as the scheduled-task target — both
+      # ride in the zip, or the standalone route breaks exactly
+      # the way the main zip did in the owner's 2026-11-12 test.
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build sidecar exes (PyInstaller)
+        run: |
+          pip install pyinstaller
+          pyinstaller packaging/beesky.spec --noconfirm
+
+      - name: Stage agent exes beside the app
+        shell: pwsh
+        run: |
+          $rel = "app_agent_flutter\build\windows\x64\runner\Release"
+          Copy-Item dist\beesky-agent.exe "$rel\beesky-agent.exe"
+          Copy-Item dist\beesky-agentw.exe "$rel\beesky-agentw.exe"
+          if (-not (Test-Path "$rel\beesky-agent.exe")) { exit 1 }
+          if (-not (Test-Path "$rel\beesky-agentw.exe")) { exit 1 }
+
       - name: Zip the runner folder
         shell: pwsh
         run: |
@@ -109,6 +193,29 @@ jobs:
             -Path "app_agent_flutter/build/windows/x64/runner/Release/*" `
             -DestinationPath "$name.zip"
           Write-Host "packed $name.zip"
+
+      - name: Verify zip is self-contained
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = Get-ChildItem BeeSkyAgentFlutter-*.zip |
+            Select-Object -First 1
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($zip.FullName)
+          try {
+            $names = $archive.Entries | ForEach-Object { $_.FullName }
+            $names | ForEach-Object { Write-Host "zip entry: $_" }
+            foreach ($need in @("beesky_agent_app.exe",
+                                "beesky-agent.exe", "beesky-agentw.exe",
+                                "flutter_windows.dll")) {
+              if ($names -notcontains $need) {
+                Write-Error "zip is missing $need"; exit 1
+              }
+            }
+            if (-not ($names | Where-Object { $_ -like "data/*" })) {
+              Write-Error "zip is missing data/"; exit 1
+            }
+          } finally { $archive.Dispose() }
+          Write-Host "self-contained OK: $($zip.Name)"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

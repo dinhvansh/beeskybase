@@ -16,6 +16,11 @@ const List<String> rateUnitOrder = ['TH/s', 'GH/s', 'MH/s', 'ksol/s', 'sol/s'];
 /// makes the core emit a per-chain OVER_TEMP problem.
 const double tempLimitC = 85;
 
+/// The Flutter shell's own version — moves WITH the product
+/// version (pubspec 0.32.0+13); the sidebar and Cài đặt show the
+/// CORE's version from sysinfo, this one is the app's.
+const String beeskyAppVersion = '0.32.0';
+
 /// "1101.0, ksol/s" -> "1,101.00 ksol/s" — mirrors Python's f"{v:,.2f}".
 String formatRateNum(double value) {
   final fixed = value.toStringAsFixed(2);
@@ -513,16 +518,91 @@ int fleetProblemCount(List<MinerRecord> records) =>
 int fleetStatusCount(List<MinerRecord> records, String label) =>
     records.where((r) => r.statusLabel == label).length;
 
+/// One fleet event from the core's EventEngine (wire document of
+/// beesky/core/events.py, carried in the scan bridge payload only
+/// when the app passes --events-state — v0.32). The Vietnamese
+/// labels are the web dashboard's (`TYPE_LABEL` / `SEV_LABEL` in
+/// beesky/web/dashboard.html) so every BeeSky surface names an
+/// event the same way.
+class FleetEvent {
+  final double ts;
+  final String time;
+  final String ip;
+  final String model;
+  final String? source;
+  final String type;
+  final String severity;
+  final String detail;
+
+  const FleetEvent({
+    required this.ts,
+    required this.time,
+    required this.ip,
+    required this.model,
+    required this.source,
+    required this.type,
+    required this.severity,
+    required this.detail,
+  });
+
+  factory FleetEvent.fromJson(Map<String, dynamic> json) => FleetEvent(
+        ts: ((json['ts'] as num?) ?? 0).toDouble(),
+        time: (json['time'] ?? '') as String,
+        ip: (json['ip'] ?? '') as String,
+        model: (json['model'] ?? 'Unknown') as String,
+        source: json['source'] as String?,
+        type: (json['type'] ?? '') as String,
+        severity: (json['severity'] ?? 'info') as String,
+        detail: (json['detail'] ?? '') as String,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'ts': ts,
+        'time': time,
+        'ip': ip,
+        'model': model,
+        'source': source,
+        'type': type,
+        'severity': severity,
+        'detail': detail,
+      };
+
+  static const Map<String, String> typeLabels = {
+    'OFFLINE': 'Mất kết nối',
+    'BACK_ONLINE': 'Đã kết nối lại',
+    'HASHRATE_DROP': 'Sụt hashrate',
+    'OVER_TEMP': 'Quá nhiệt',
+    'CHIPS_LOST': 'Mất chip',
+    'CHAIN_DOWN': 'Board ngắt',
+  };
+
+  static const Map<String, String> severityLabels = {
+    'info': 'Thông tin',
+    'warning': 'Cảnh báo',
+    'major': 'Nghiêm trọng',
+    'critical': 'Khẩn cấp',
+  };
+
+  String get typeLabel => typeLabels[type] ?? type;
+  String get severityLabel => severityLabels[severity] ?? severity;
+}
+
 class ScanResult {
   final List<MinerRecord> records;
   final int scanned;
   final int found;
   final double elapsedS;
+
+  /// Events the core's engine diffed out of THIS pass (v0.32);
+  /// empty unless the scan ran with an events-state file.
+  final List<FleetEvent> events;
+
   const ScanResult({
     required this.records,
     required this.scanned,
     required this.found,
     required this.elapsedS,
+    this.events = const [],
   });
 
   factory ScanResult.fromJson(Map<String, dynamic> json) => ScanResult(
@@ -532,7 +612,48 @@ class ScanResult {
         scanned: ((json['scanned'] as num?) ?? 0).toInt(),
         found: ((json['found'] as num?) ?? 0).toInt(),
         elapsedS: ((json['elapsed_s'] as num?) ?? 0).toDouble(),
+        events: ((json['events'] as List<dynamic>?) ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map(FleetEvent.fromJson)
+            .toList(),
       );
+}
+
+/// One exported repair ticket as the core's read-only
+/// `beesky tickets --dir … --json` verb lists it (v0.32): the
+/// .txt file report.write_tickets wrote, parsed back by its
+/// owner (report.list_tickets). Local ticket files carry NO
+/// status — the field simply does not exist on disk (the cloud
+/// repairs table has one; see docs/views-mapping.md §3).
+class TicketInfo {
+  final String file;
+  final String ip;
+  final String modified; // ISO local time of the file's mtime
+  final String model;
+  final List<String> problems;
+  final String text;
+
+  const TicketInfo({
+    required this.file,
+    required this.ip,
+    required this.modified,
+    required this.model,
+    required this.problems,
+    required this.text,
+  });
+
+  factory TicketInfo.fromJson(Map<String, dynamic> json) => TicketInfo(
+        file: (json['file'] ?? '') as String,
+        ip: (json['ip'] ?? '') as String,
+        modified: (json['modified'] ?? '') as String,
+        model: (json['model'] ?? '') as String,
+        problems: ((json['problems'] as List<dynamic>?) ?? const [])
+            .map((e) => '$e')
+            .toList(),
+        text: (json['text'] ?? '') as String,
+      );
+
+  DateTime? get modifiedAt => DateTime.tryParse(modified);
 }
 
 class SysInfo {

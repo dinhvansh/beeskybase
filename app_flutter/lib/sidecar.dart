@@ -16,6 +16,21 @@ import 'ops.dart';
 ///
 /// The interface exists so widget tests can inject [MockBridge] and never
 /// touch a real process.
+/// THE message for a missing scan engine (v0.32, Workstream B —
+/// docs/views-mapping.md). The owner's first real-Windows run
+/// (2026-11-12) extracted the portable zip standalone, so no
+/// beesky.exe sat beside the app and every bridge call failed
+/// with the raw OS text "The system cannot find the file
+/// specified". From v0.32 the zip bundles the exe, and when the
+/// file is STILL absent (partial copy, quarantine) every surface
+/// — scan, tickets, sysinfo, ops, inspect — says exactly this,
+/// never a raw ProcessException.
+const String missingSidecarMessage =
+    'Không tìm thấy beesky.exe cạnh app — hãy giải nén app vào '
+    'cùng thư mục với beesky.exe (hoặc cài bằng BeeSkySetup), và '
+    'kiểm tra Windows Defender > Protection history nếu file bị '
+    'cách ly.';
+
 abstract class BeeSkyBridge {
   bool get isMock;
 
@@ -23,12 +38,29 @@ abstract class BeeSkyBridge {
   /// The sidebar's status dot uses it to tell "sidecar found" apart
   /// from "beesky.exe missing next to the app".
   String? get exePath;
+
+  /// True when the resolved sidecar is a concrete path that does
+  /// not exist on disk — the v0.32 missing-engine state (a bare
+  /// PATH name can never prove itself missing, so it stays false).
+  bool get sidecarMissing;
+
+  /// The folder repair tickets are exported to / listed from:
+  /// `<sidecar dir>/tickets`, the export's own staging dir.
+  String get ticketsDirPath;
+
   Future<SysInfo> sysinfo();
 
   /// One scan pass. [credsFile] is the app's saved credential-sets
   /// file (the --creds-file schema) or null when no sets are saved —
   /// passwords never travel on the command line (v0.23).
-  Future<ScanResult> scan(String target, {String? credsFile});
+  /// [eventsState] (v0.32) is the core EventEngine's persisted
+  /// state file for THIS target; the result then carries the
+  /// events this pass diffed out (docs/views-mapping.md §4).
+  Future<ScanResult> scan(
+    String target, {
+    String? credsFile,
+    String? eventsState,
+  });
 
   /// One scan of a saved network group (v0.24): the CORE resolves
   /// the group's targets, merges the group's own credential sets
@@ -39,10 +71,15 @@ abstract class BeeSkyBridge {
     String name, {
     String? credsFile,
     String? groupsFile,
+    String? eventsState,
   });
 
   /// Exports repair tickets; returns a human-readable destination.
   Future<String> exportTickets(String target, {String? credsFile});
+
+  /// Lists the exported repair tickets in [dir] through the
+  /// core's read-only `tickets` verb (v0.32); newest first.
+  Future<List<TicketInfo>> listTickets(String dir);
 
   /// Starts ONE Operations task (v0.26): [job] is the core runner's
   /// job document (type / targets / payload / group / creds_file —
@@ -93,13 +130,45 @@ class SidecarBridge implements BeeSkyBridge {
   @override
   bool get isMock => false;
 
+  @override
+  bool get sidecarMissing =>
+      exePath.contains(Platform.pathSeparator) &&
+      !File(exePath).existsSync();
+
+  /// Throws the ONE missing-engine message when the sidecar is a
+  /// concrete path that isn't there — called before every spawn so
+  /// no surface can leak the raw OS "file not found" text (v0.32).
+  void _requireSidecar() {
+    if (sidecarMissing) throw SidecarException(missingSidecarMessage);
+  }
+
+  @override
+  String get ticketsDirPath =>
+      '${_exeBaseDir(exePath)}${Platform.pathSeparator}tickets';
+
+  /// The directory the sidecar exe lives in (or '.' when the exe
+  /// is a bare PATH name) — the base every app-managed file that
+  /// must sit WITH the engine uses (tickets dir, ops job file).
+  static String _exeBaseDir(String exePath) =>
+      exePath.contains(Platform.pathSeparator)
+          ? File(exePath).parent.path
+          : '.';
+
   /// Sidecar resolution order:
   /// 1. explicit constructor override (tests / tooling),
   /// 2. BEESKY_EXE environment variable,
   /// 3. --dart-define=BEESKY_EXE=…,
   /// 4. beesky.exe sitting next to this app's executable (the shipped
-  ///    bundle layout — see .github/workflows/build-flutter.yml),
-  /// 5. plain `beesky` from PATH (dev machines with the package installed).
+  ///    bundle layout — see .github/workflows/build-flutter.yml).
+  /// 5. fallback: on Windows the EXPLICIT sibling path from step 4
+  ///    even when the file is absent (v0.32): both shipped layouts
+  ///    (installer, self-contained zip) place beesky.exe there, so
+  ///    a missing file becomes the knowable [sidecarMissing] state
+  ///    with one clear message — the pre-v0.32 bare `beesky` name
+  ///    instead failed every call with the raw OS "The system
+  ///    cannot find the file specified" (owner's 2026-11-12 test).
+  ///    POSIX keeps the bare `beesky` from PATH (dev machines with
+  ///    the package installed).
   static String resolveBeeSkyExe() {
     final env = Platform.environment['BEESKY_EXE'];
     if (env != null && env.isNotEmpty) return env;
@@ -108,13 +177,14 @@ class SidecarBridge implements BeeSkyBridge {
     final dir = File(Platform.resolvedExecutable).parent.path;
     final sibling = File('$dir${Platform.pathSeparator}beesky.exe');
     if (sibling.existsSync()) return sibling.path;
-    return 'beesky';
+    return Platform.isWindows ? sibling.path : 'beesky';
   }
 
   Future<Map<String, dynamic>> _runJson(
     List<String> args, {
     Duration timeout = const Duration(minutes: 10),
   }) async {
+    _requireSidecar();
     final ProcessResult result;
     try {
       result = await Process.run(
@@ -123,6 +193,9 @@ class SidecarBridge implements BeeSkyBridge {
         stdoutEncoding: utf8,
       ).timeout(timeout);
     } on ProcessException catch (e) {
+      // The exe vanished between the check and the spawn (or a
+      // PATH-resolved name stopped resolving): same one message.
+      if (sidecarMissing) throw SidecarException(missingSidecarMessage);
       throw SidecarException('Không chạy được beesky ($exePath): ${e.message}');
     } on TimeoutException {
       throw SidecarException('beesky chạy quá lâu, đã hủy: ${args.join(' ')}');
@@ -152,12 +225,24 @@ class SidecarBridge implements BeeSkyBridge {
 
   /// Argument list for a bridge scan — factored out so tests can pin
   /// the contract: the creds file is referenced by PATH only; no
-  /// credential value ever appears in argv (v0.23).
-  static List<String> scanArgs(String target, {String? credsFile}) {
+  /// credential value ever appears in argv (v0.23). [eventsState]
+  /// (v0.32) is a PATH too — the EventEngine state file whose
+  /// diff lands in the payload's "events".
+  static List<String> scanArgs(
+    String target, {
+    String? credsFile,
+    String? eventsState,
+  }) {
     final args = <String>['scan', target, '--json'];
     if (credsFile != null) args.addAll(['--creds-file', credsFile]);
+    if (eventsState != null) args.addAll(['--events-state', eventsState]);
     return args;
   }
+
+  /// Argument list for the read-only tickets listing (v0.32):
+  /// `beesky tickets --dir DIR --json` — one JSON document out.
+  static List<String> listTicketsArgs(String dir) =>
+      ['tickets', '--dir', dir, '--json'];
 
   /// Argument list for the tickets pass (a scan with --tickets).
   static List<String> ticketsArgs(
@@ -178,10 +263,12 @@ class SidecarBridge implements BeeSkyBridge {
     String name, {
     String? credsFile,
     String? groupsFile,
+    String? eventsState,
   }) {
     final args = <String>['scan', '--group', name, '--json'];
     if (credsFile != null) args.addAll(['--creds-file', credsFile]);
     if (groupsFile != null) args.addAll(['--groups-file', groupsFile]);
+    if (eventsState != null) args.addAll(['--events-state', eventsState]);
     return args;
   }
 
@@ -223,9 +310,8 @@ class SidecarBridge implements BeeSkyBridge {
 
   @override
   Future<OpsRun> startOps(Map<String, dynamic> job) async {
-    final exeFile = File(exePath);
-    final baseDir =
-        exePath.contains(Platform.pathSeparator) ? exeFile.parent.path : '.';
+    _requireSidecar();
+    final baseDir = _exeBaseDir(exePath);
     final files = OpsFiles(
       primaryDir: Directory(baseDir),
       fallbackDir: OpsFiles.appDefault().fallbackDir,
@@ -247,14 +333,21 @@ class SidecarBridge implements BeeSkyBridge {
     try {
       process = await Process.start(exePath, opsArgs(jobFile.path));
     } on ProcessException catch (e) {
+      if (sidecarMissing) throw SidecarException(missingSidecarMessage);
       throw SidecarException('Không chạy được beesky ($exePath): ${e.message}');
     }
     return _SidecarOpsRun(process, job, jobFile);
   }
 
   @override
-  Future<ScanResult> scan(String target, {String? credsFile}) async {
-    final doc = await _runJson(scanArgs(target, credsFile: credsFile));
+  Future<ScanResult> scan(
+    String target, {
+    String? credsFile,
+    String? eventsState,
+  }) async {
+    final doc = await _runJson(
+      scanArgs(target, credsFile: credsFile, eventsState: eventsState),
+    );
     return ScanResult.fromJson(doc);
   }
 
@@ -263,28 +356,53 @@ class SidecarBridge implements BeeSkyBridge {
     String name, {
     String? credsFile,
     String? groupsFile,
+    String? eventsState,
   }) async {
     final doc = await _runJson(
-      scanGroupArgs(name, credsFile: credsFile, groupsFile: groupsFile),
+      scanGroupArgs(
+        name,
+        credsFile: credsFile,
+        groupsFile: groupsFile,
+        eventsState: eventsState,
+      ),
     );
     return ScanResult.fromJson(doc);
   }
 
   @override
+  Future<List<TicketInfo>> listTickets(String dir) async {
+    final doc = await _runJson(
+      listTicketsArgs(dir),
+      timeout: const Duration(seconds: 30),
+    );
+    return ((doc['tickets'] as List<dynamic>?) ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map(TicketInfo.fromJson)
+        .toList();
+  }
+
+  @override
   Future<String> exportTickets(String target, {String? credsFile}) async {
-    // There is no standalone "tickets" verb in the CLI: tickets are a
-    // post-step of `scan` (--tickets DIR prints one .txt per problem
-    // miner). Stage 1 therefore runs a scan pass with that flag next to
-    // the sidecar exe — same behaviour as the Tk app's button.
-    // TODO(stage-2): a `tickets` verb re-using the last scan's records
-    // would avoid the second network pass.
-    final exeFile = File(exePath);
-    final baseDir =
-        exePath.contains(Platform.pathSeparator) ? exeFile.parent.path : '.';
-    final dir = Directory('$baseDir${Platform.pathSeparator}tickets');
+    // Tickets are a post-step of `scan` (--tickets DIR prints one
+    // .txt per problem miner), so the export runs a scan pass with
+    // that flag next to the sidecar exe — same behaviour as the
+    // Tk app's button. (The v0.32 `tickets` verb only LISTS what
+    // exports wrote; it never scans.)
+    _requireSidecar();
+    final dir = Directory(ticketsDirPath);
     await dir.create(recursive: true);
     final args = ticketsArgs(target, dir.path, credsFile: credsFile);
-    final result = await Process.run(exePath, args, stdoutEncoding: utf8);
+    final ProcessResult result;
+    try {
+      result = await Process.run(exePath, args, stdoutEncoding: utf8);
+    } on ProcessException catch (e) {
+      // Pre-v0.32 this escaped UNWRAPPED — the owner's screenshot
+      // showed the raw "ProcessException: … Command: beesky scan …"
+      // text. It now lands in the same SidecarException channel
+      // as every other bridge failure.
+      if (sidecarMissing) throw SidecarException(missingSidecarMessage);
+      throw SidecarException('Không chạy được beesky ($exePath): ${e.message}');
+    }
     if (result.exitCode != 0) {
       final err = ('${result.stderr}').trim();
       throw SidecarException(
@@ -409,6 +527,12 @@ class MockBridge implements BeeSkyBridge {
   @override
   String? get exePath => null;
 
+  @override
+  bool get sidecarMissing => false;
+
+  @override
+  String get ticketsDirPath => '(mock) tickets';
+
   static const String _sampleJson = '''
 {"records": [
   {"ip": "192.168.2.101", "model": "Antminer S19 Pro", "source": "vnish",
@@ -467,12 +591,58 @@ class MockBridge implements BeeSkyBridge {
 
   @override
   Future<SysInfo> sysinfo() async =>
-      const SysInfo(version: '0.31.1', defaultTarget: '192.168.2.0/24');
+      const SysInfo(version: '0.32.0', defaultTarget: '192.168.2.0/24');
+
+  /// The sample fleet's event story (v0.32): the Z15 crossed the
+  /// temp limit and the L9 lost chips since the previous pass —
+  /// exactly the diffs the real engine would emit. Returned only
+  /// when the caller passes an events-state file, like the core.
+  static List<FleetEvent> _sampleEvents() {
+    final now = DateTime.now();
+    String stamp(DateTime t) =>
+        '${t.year.toString().padLeft(4, '0')}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')} '
+        '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}:${t.second.toString().padLeft(2, '0')}';
+    return [
+      FleetEvent(
+        ts: now.millisecondsSinceEpoch / 1000.0,
+        time: stamp(now),
+        ip: '192.168.2.103',
+        model: 'Antminer Z15',
+        source: 'cgminer',
+        type: 'OVER_TEMP',
+        severity: 'warning',
+        detail: 'max temp 88 C >= 85 C limit (mock)',
+      ),
+      FleetEvent(
+        ts: now.millisecondsSinceEpoch / 1000.0 - 60,
+        time: stamp(now.subtract(const Duration(minutes: 1))),
+        ip: '192.168.2.102',
+        model: 'Antminer L9',
+        source: 'cgminer',
+        type: 'CHIPS_LOST',
+        severity: 'major',
+        detail: 'alive chips 369 -> 330 (mock)',
+      ),
+    ];
+  }
 
   @override
-  Future<ScanResult> scan(String target, {String? credsFile}) async {
+  Future<ScanResult> scan(
+    String target, {
+    String? credsFile,
+    String? eventsState,
+  }) async {
     await Future<void>.delayed(const Duration(milliseconds: 600));
-    return ScanResult.fromJson(jsonDecode(_sampleJson) as Map<String, dynamic>);
+    final base =
+        ScanResult.fromJson(jsonDecode(_sampleJson) as Map<String, dynamic>);
+    if (eventsState == null) return base;
+    return ScanResult(
+      records: base.records,
+      scanned: base.scanned,
+      found: base.found,
+      elapsedS: base.elapsedS,
+      events: _sampleEvents(),
+    );
   }
 
   @override
@@ -480,12 +650,35 @@ class MockBridge implements BeeSkyBridge {
     String name, {
     String? credsFile,
     String? groupsFile,
+    String? eventsState,
   }) =>
-      scan(name);
+      scan(name, eventsState: eventsState);
 
   @override
   Future<String> exportTickets(String target, {String? credsFile}) async =>
       '(mock) không ghi file phiếu thật';
+
+  @override
+  Future<List<TicketInfo>> listTickets(String dir) async => const [
+        TicketInfo(
+          file: 'ticket-192_168_2_103.txt',
+          ip: '192.168.2.103',
+          modified: '2026-11-11T20:14:03',
+          model: 'Antminer Z15',
+          problems: ['Board 1: nhiệt độ cao 88°C (ngưỡng 85°C)'],
+          text: 'PHIẾU KIỂM TRA / SỬA CHỮA MÁY ĐÀO — BeeSky\n'
+              'IP: 192.168.2.103\nModel: Antminer Z15\n(mock)',
+        ),
+        TicketInfo(
+          file: 'ticket-192_168_2_102.txt',
+          ip: '192.168.2.102',
+          modified: '2026-11-11T20:14:03',
+          model: 'Antminer L9',
+          problems: ['Board 1: thiếu 39 chip (vị trí chết: 85, 86, …)'],
+          text: 'PHIẾU KIỂM TRA / SỬA CHỮA MÁY ĐÀO — BeeSky\n'
+              'IP: 192.168.2.102\nModel: Antminer L9\n(mock)',
+        ),
+      ];
 
   @override
   Future<OpsRun> startOps(Map<String, dynamic> job) async =>
