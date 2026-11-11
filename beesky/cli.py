@@ -23,6 +23,12 @@
     python -m beesky sysinfo [--json]  (version + auto-detected default
                                         scan target; --json for machines)
 
+    python -m beesky ops --job FILE   (one Operations task — rescan /
+                                        reboot / switch_pool — over a
+                                        job file's targets, streaming
+                                        NDJSON progress; v0.26,
+                                        docs/operations-mapping.md)
+
     python -m beesky watch <target> [--interval 30] [--notify config.json]
                                     [--state state.json] [--once]
                                     (plus the scan options above)
@@ -63,7 +69,9 @@ import argparse
 import json
 import os
 import secrets
+import signal
 import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -74,6 +82,7 @@ from .cloud.server import run_cloud_server
 from .cloud.store import CloudStore
 from .core import firmware as firmware_mod
 from .core import groups as groups_mod
+from .core import ops as ops_mod
 from .core import notify as notify_mod
 from .core import report
 from .core import updater
@@ -515,6 +524,46 @@ def _save_state(engine: EventEngine, path: str) -> None:
 
 def _is_error_record(record: dict) -> bool:
     return any(p.get("code") == "FETCH_ERROR" for p in record["problems"])
+
+
+def cmd_ops(args: argparse.Namespace) -> int:
+    """Run one Operations task from a job file, NDJSON to stdout.
+
+    Exit 2 when the job (or its group / creds references) is
+    malformed — validated before any device is touched, like
+    scan's contract. A job that RAN exits 0 whatever the
+    per-device outcomes were; the summary line carries the
+    counts and the derived task status.
+    """
+    try:
+        job = ops_mod.load_job(args.job)
+        # Resolve creds up front too: an unknown group / unreadable
+        # creds file must fail before the stream's first line.
+        ops_mod.resolve_creds(job)
+    except ops_mod.JobError as exc:
+        print(f"ops: {exc}", file=sys.stderr)
+        return 2
+
+    cancel = threading.Event()
+
+    def _request_cancel(signum, frame):  # noqa: ARG001 — signal API
+        cancel.set()
+
+    # POSIX stop path (mapping §4.7): SIGTERM/SIGINT ask the runner
+    # to stop starting devices and still emit its summary. On
+    # Windows the app kills this process outright; no handler runs.
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(sig, _request_cancel)
+        except (ValueError, OSError):
+            pass  # not the main thread / unsupported — kill still works
+
+    def emit(event: dict) -> None:
+        print(json.dumps(_jsonable(event), ensure_ascii=False),
+              flush=True)
+
+    ops_mod.run_job(job, emit, cancel)
+    return 0
 
 
 def cmd_watch(args: argparse.Namespace) -> int:
@@ -974,6 +1023,17 @@ def main(argv: list[str] | None = None) -> int:
     sysinfo.add_argument("--json", action="store_true",
                          help="print as one JSON document")
     sysinfo.set_defaults(func=cmd_sysinfo)
+
+    ops = sub.add_parser(
+        "ops", help="run ONE Operations task (rescan / reboot / "
+                    "switch_pool) over a set of miners, streaming "
+                    "NDJSON progress (v0.26; docs/operations-"
+                    "mapping.md). The job is a JSON FILE — secrets "
+                    "never ride the command line")
+    ops.add_argument("--job", required=True, metavar="FILE",
+                     help="job JSON file (see beesky/core/ops.py "
+                          "for the schema)")
+    ops.set_defaults(func=cmd_ops)
 
     watch = sub.add_parser(
         "watch", help="watch a target, emit events and send notifications")

@@ -1,0 +1,443 @@
+"""Operations task runner — one bulk device action, streamed (v0.26).
+
+The local counterpart of the cloud agent's remote actions (v0.6):
+where the agent executes cloud-issued commands against the farm LAN,
+this runner executes ONE operator-issued task from the desktop app
+against a selected set of miners, reporting per-device progress as it
+goes. The port follows the HashCore Toolkit's Operations model —
+see docs/operations-mapping.md for the dissection and the graded
+action inventory. Only actions with a REAL primitive in this
+codebase exist here; the rest are named gaps in that doc, on purpose.
+
+Job (a JSON file — secrets never ride the command line; credential
+sets are referenced by file path exactly like scan's --creds-file):
+
+    {"type": "reboot" | "rescan" | "switch_pool",
+     "targets": ["192.168.2.101", ...],
+     "payload": {...},            # switch_pool only
+     "group": "Trại chính",        # optional: creds layer 1 (v0.24)
+     "creds_file": "sets.json",   # optional: creds layer 2 (v0.23)
+     "groups_file": "groups.json",# optional store override
+     "workers": 4,                # parallel devices, hard cap 8
+     "stagger_s": 0.0,            # pause between device starts
+     "timeout": 3.0,              # per-device timeout, seconds
+     "http_port": 80, "cgminer_port": 4028}
+
+Credential resolution mirrors `scan --group/--creds-file` exactly:
+the group's own sets lead, the creds-file (global) sets follow
+(core.groups.effective_creds), and discover.ordered_creds applies
+the family tiers per miner. With neither layer the probe falls back
+to the legacy single root/root pair, as a plain scan does.
+
+Per device the runner PROBES first (probe_host with the merged
+sets): the probe identifies the family (``source``) and the winning
+credential set, which is then translated into the single creds dict
+core.actions.execute consumes — the same dict the cloud agent
+passes. A device that does not answer is an honest per-device
+failure ("not answering — action not executed"), never a guess.
+
+Events (the CLI prints them as NDJSON; run_job takes any callable):
+
+    {"event": "start", "type": ..., "total": N}
+    {"event": "result", "done": k, "total": N, "ip": ...,
+     "ok": bool, "message": str}      # rescan adds "record": {...}
+    {"event": "summary", "type": ..., "total": N, "completed": k,
+     "ok": x, "failed": y, "cancelled": z,
+     "status": "success" | "hasErrors" | "error" | "cancelled",
+     "elapsed_s": float}
+
+Cancellation is cooperative: when the cancel event is set (the CLI
+wires SIGTERM/SIGINT to it), devices not yet started are counted as
+cancelled and in-flight devices finish within their timeout. On
+Windows the app kills the sidecar outright — no summary is emitted
+then, and the app accounts the remainder as cancelled itself (the
+mapping doc names this mechanism divergence).
+"""
+
+from __future__ import annotations
+
+import ipaddress
+import json
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+from . import actions, report
+from .bitmain import BitmainClient, BitmainError
+from .cgminer import CgminerClient, CgminerError
+from .dashd import DashdClient, DashdError
+from .discover import ordered_creds, probe_host
+from .groups import GroupStore, effective_creds
+
+TASK_TYPES = ("rescan", "reboot", "switch_pool")
+
+MAX_TARGETS = 1024
+MAX_WORKERS = 8
+
+
+class JobError(ValueError):
+    """A malformed job — the CLI turns it into exit 2 before any I/O."""
+
+
+# ---------------------------------------------------------------------------
+# credential files (the v0.23 schema; rules mirrored from cli.py —
+# core cannot import the CLI layer, so the normaliser lives here too
+# and mock_ops_test pins both to the same behaviour)
+# ---------------------------------------------------------------------------
+
+def _normalise_creds(data: list, source: str) -> list[dict]:
+    creds: list[dict] = []
+    for idx, item in enumerate(data):
+        if not isinstance(item, dict):
+            raise JobError(f"{source}: entry {idx} must be an object")
+        user = item.get("user")
+        secret = item.get("password")
+        api_key = item.get("api_key")
+        has_login = isinstance(user, str) and isinstance(secret, str)
+        has_key = isinstance(api_key, str) and bool(api_key)
+        if not has_login and not has_key:
+            raise JobError(
+                f"{source}: entry {idx} needs string "
+                "\"user\" + \"password\", or an \"api_key\"")
+        label = item.get("label")
+        raw_type = item.get("type")
+        creds.append({
+            "label": str(label) if label else (
+                user if has_login else "api_key"),
+            "user": user if isinstance(user, str) else "",
+            "password": secret if isinstance(secret, str) else "",
+            "api_key": api_key if has_key else None,
+            "type": raw_type if raw_type in ("stock", "vnish") else "any",
+        })
+    return creds
+
+
+def _load_creds_file(path: str) -> list[dict]:
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise JobError(f"cannot read creds file {path}: {exc}") from exc
+    if not isinstance(data, list):
+        raise JobError(
+            f"creds file {path}: top level must be a JSON list of "
+            "{\"label\", \"user\", \"password\", \"type\"} objects")
+    return _normalise_creds(data, f"creds file {path}")
+
+
+# ---------------------------------------------------------------------------
+# job validation — everything is checked BEFORE the first device I/O,
+# so a typo'd job fails loud and touches nothing (scan's exit-2 rule)
+# ---------------------------------------------------------------------------
+
+def validate_job(raw) -> dict:
+    """Normalise a raw job document; JobError on anything malformed."""
+    if not isinstance(raw, dict):
+        raise JobError("job must be a JSON object")
+    task_type = raw.get("type")
+    if task_type not in TASK_TYPES:
+        raise JobError(
+            f"job \"type\" must be one of {list(TASK_TYPES)}, "
+            f"got {task_type!r}")
+
+    targets_raw = raw.get("targets")
+    if not isinstance(targets_raw, list) or not targets_raw:
+        raise JobError("job \"targets\" must be a non-empty list of IPs")
+    if len(targets_raw) > MAX_TARGETS:
+        raise JobError(
+            f"job \"targets\" has {len(targets_raw)} entries; "
+            f"the cap is {MAX_TARGETS}")
+    targets: list[str] = []
+    seen: set[str] = set()
+    for idx, item in enumerate(targets_raw):
+        if not isinstance(item, str):
+            raise JobError(f"job targets entry {idx} must be a string IP")
+        try:
+            ip = str(ipaddress.IPv4Address(item.strip()))
+        except ValueError:
+            raise JobError(
+                f"job targets entry {idx} is not an IPv4 address: "
+                f"{item!r}") from None
+        if ip not in seen:
+            seen.add(ip)
+            targets.append(ip)
+
+    payload = raw.get("payload") or {}
+    if not isinstance(payload, dict):
+        raise JobError("job \"payload\" must be an object")
+    if task_type == "switch_pool":
+        if "pool_id" in payload:
+            try:
+                pool_id = int(payload["pool_id"])
+            except (TypeError, ValueError):
+                raise JobError(
+                    "switch_pool payload \"pool_id\" must be an "
+                    f"integer, got {payload['pool_id']!r}") from None
+            if pool_id < 0:
+                raise JobError(
+                    f"switch_pool payload \"pool_id\" must be >= 0, "
+                    f"got {pool_id}")
+            payload = {**payload, "pool_id": pool_id}
+        url, user = payload.get("url"), payload.get("user")
+        if bool(url) != bool(user):
+            raise JobError(
+                "switch_pool payload needs both \"url\" and \"user\" "
+                "(or neither, to activate an existing slot)")
+
+    group = raw.get("group")
+    if group is not None and not isinstance(group, str):
+        raise JobError("job \"group\" must be a string")
+    creds_file = raw.get("creds_file")
+    if creds_file is not None and not isinstance(creds_file, str):
+        raise JobError("job \"creds_file\" must be a string path")
+    groups_file = raw.get("groups_file")
+    if groups_file is not None and not isinstance(groups_file, str):
+        raise JobError("job \"groups_file\" must be a string path")
+
+    def _num(key, default, lo, hi):
+        value = raw.get(key, default)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise JobError(f"job \"{key}\" must be a number")
+        return max(lo, min(hi, float(value)))
+
+    workers = raw.get("workers", 4)
+    if isinstance(workers, bool) or not isinstance(workers, int):
+        raise JobError("job \"workers\" must be an integer")
+    workers = max(1, min(MAX_WORKERS, workers))
+
+    return {
+        "type": task_type,
+        "targets": targets,
+        "payload": payload,
+        "group": group,
+        "creds_file": creds_file,
+        "groups_file": groups_file,
+        "workers": workers,
+        "stagger_s": _num("stagger_s", 0.0, 0.0, 3600.0),
+        "timeout": _num("timeout", 3.0, 0.2, 120.0),
+        "http_port": int(_num("http_port", 80, 1, 65535)),
+        "cgminer_port": int(_num("cgminer_port", 4028, 1, 65535)),
+    }
+
+
+def load_job(path: str) -> dict:
+    """Read + validate a job file; JobError on any problem."""
+    try:
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise JobError(f"cannot read job file {path}: {exc}") from exc
+    return validate_job(raw)
+
+
+def resolve_creds(job: dict) -> list[dict] | None:
+    """The merged credential-set list for a job (v0.24 layering).
+
+    Group sets first, then the global creds-file sets; None when
+    neither layer exists (the probe then uses its legacy defaults).
+    An unknown group or an unreadable file is a JobError — raised
+    before any device is touched.
+    """
+    group_sets = None
+    if job.get("group"):
+        store = GroupStore(job.get("groups_file"))
+        try:
+            group = store.find(job["group"])
+        except ValueError as exc:
+            raise JobError(str(exc)) from exc
+        if group is None:
+            raise JobError(
+                f"group not found: {job['group']!r} (store: {store.path})")
+        if group["creds"]:
+            group_sets = _normalise_creds(
+                group["creds"], f"group {job['group']!r} creds")
+    global_sets = None
+    if job.get("creds_file"):
+        global_sets = _load_creds_file(job["creds_file"])
+    return effective_creds(group_sets, global_sets)
+
+
+# ---------------------------------------------------------------------------
+# per-device execution
+# ---------------------------------------------------------------------------
+
+def _action_creds(cand, merged: list[dict] | None,
+                  job: dict) -> dict:
+    """Translate a probe outcome into actions.execute's creds dict.
+
+    The winning set rides the candidate: stock keeps its user/password
+    pair; a vnish win is either the api key or the JWT the probe
+    minted. When the probe needed NO auth (anonymous dashd reads) but
+    sets exist, the first family-ordered set is the configured method
+    for that vendor — the write attempt uses it, and a wrong one
+    fails honestly per device, exactly like a mis-tagged scan set.
+    """
+    base = {"http_port": job["http_port"],
+            "cgminer_port": job["cgminer_port"],
+            "timeout": job["timeout"]}
+    if cand.source == "stock":
+        return {**base, "user": cand.username, "password": cand.password}
+    if cand.source == "vnish":
+        if cand.dashd_api_key:
+            return {**base, "api_key": cand.dashd_api_key}
+        if cand.dashd_token:
+            return {**base, "token": cand.dashd_token}
+        if merged:
+            for entry in ordered_creds(merged, "vnish"):
+                if entry.get("api_key"):
+                    return {**base, "api_key": entry["api_key"]}
+                if entry.get("password"):
+                    return {**base, "user": entry["user"],
+                            "password": entry["password"]}
+        return base
+    return base
+
+
+def _fetch_record(cand, timeout: float) -> dict:
+    """Full health record for one candidate (the cli fetch stage,
+    mirrored: the candidate carries the auth the probe won)."""
+    ip = cand.ip
+    fetch_timeout = max(timeout, 2.0)
+    if cand.source == "vnish":
+        client = DashdClient(ip, port=cand.http_port, timeout=fetch_timeout,
+                             api_key=cand.dashd_api_key,
+                             token=cand.dashd_token)
+        try:
+            record = client.fetch_record(ip)
+        except DashdError as exc:
+            record = report.error_record(ip, str(exc), source="vnish")
+    elif cand.source == "stock":
+        client = BitmainClient(ip, port=cand.http_port, timeout=fetch_timeout,
+                               username=cand.username,
+                               password=cand.password)
+        try:
+            record = client.fetch_record(
+                ip, status_data=cand.status_data or None)
+        except BitmainError as exc:
+            record = report.error_record(ip, str(exc), source="stock")
+    else:
+        client = CgminerClient(ip, port=cand.cgminer_port,
+                               timeout=fetch_timeout)
+        try:
+            summary = client.summary()
+            stats = client.stats()
+        except CgminerError as exc:
+            record = report.error_record(ip, str(exc), source="cgminer")
+        else:
+            record = report.build_record(ip, summary, stats,
+                                         source="cgminer")
+    if cand.cred_label and not any(
+            p.get("code") == "FETCH_ERROR" for p in record["problems"]):
+        record["cred_label"] = cand.cred_label
+    return record
+
+
+def _run_one(ip: str, job: dict, merged: list[dict] | None):
+    """One device: probe, then act. Returns (ok, message, record?).
+
+    The probe is guarded: a device answering with malformed HTTP
+    can raise outside the adapters' own error types (e.g.
+    http.client.BadStatusLine), and a task runner must turn that
+    into THIS device's failure — never let one sick device kill
+    the whole run (actions.execute already never raises).
+    """
+    try:
+        cand = probe_host(ip, timeout=job["timeout"],
+                          http_port=job["http_port"],
+                          cgminer_port=job["cgminer_port"],
+                          creds=merged)
+    except Exception as exc:  # noqa: BLE001 — per-device honesty
+        return False, f"probe of {ip} failed: {exc}", None
+    if cand is None or not cand.source:
+        return False, ("miner is not answering and its source could "
+                       "not be probed — action not executed"), None
+    if job["type"] == "rescan":
+        record = _fetch_record(cand, job["timeout"])
+        if any(p.get("code") == "FETCH_ERROR" for p in record["problems"]):
+            detail = record["problems"][0].get("detail") or "fetch failed"
+            return False, f"rescan: {detail}", record
+        return True, f"rescanned ({cand.source})", record
+    creds = _action_creds(cand, merged, job)
+    ok, message = actions.execute(ip, cand.source, job["type"],
+                                  job["payload"] or None, creds)
+    return ok, message, None
+
+
+# ---------------------------------------------------------------------------
+# the runner
+# ---------------------------------------------------------------------------
+
+def run_job(job: dict, emit, cancel: threading.Event | None = None) -> dict:
+    """Execute one validated job, emitting events; returns the summary.
+
+    *emit* receives each event dict (the start line, one result per
+    COMPLETED device, the final summary). Devices never started
+    because *cancel* was set are counted in the summary's
+    ``cancelled`` — they get no result event, so consumers account
+    them from the summary (the app does exactly that after a kill).
+    """
+    merged = resolve_creds(job)
+    emit_lock = threading.Lock()
+    raw_emit = emit
+
+    def emit(event: dict) -> None:  # noqa: F811 — serialised wrapper
+        with emit_lock:
+            raw_emit(event)
+
+    targets = job["targets"]
+    total = len(targets)
+    workers = max(1, min(job["workers"], total))
+    started = time.monotonic()
+    emit({"event": "start", "type": job["type"], "total": total})
+
+    results: dict[str, dict] = {}
+    lock = threading.Lock()
+    done_count = 0
+    # The stagger gate (mapping §4.5): device ACTIONS start at least
+    # stagger_s apart — executions may overlap, onsets don't pile up.
+    gate = {"next_at": 0.0}
+
+    def work(ip: str) -> None:
+        nonlocal done_count
+        if cancel is not None and cancel.is_set():
+            return
+        if job["stagger_s"]:
+            with lock:
+                now = time.monotonic()
+                wait = max(0.0, gate["next_at"] - now)
+                gate["next_at"] = max(now, gate["next_at"]) \
+                    + job["stagger_s"]
+            if wait:
+                time.sleep(wait)
+            if cancel is not None and cancel.is_set():
+                return
+        ok, message, record = _run_one(ip, job, merged)
+        with lock:
+            done_count += 1
+            entry = {"event": "result", "done": done_count, "total": total,
+                     "ip": ip, "ok": ok, "message": message}
+            if record is not None:
+                entry["record"] = record
+            results[ip] = entry
+        emit(entry)
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        list(pool.map(work, targets))
+
+    completed = len(results)
+    ok_n = sum(1 for e in results.values() if e["ok"])
+    failed = completed - ok_n
+    cancelled = total - completed
+    if cancelled and cancel is not None and cancel.is_set():
+        status = "cancelled"
+    elif failed == 0:
+        status = "success"
+    elif ok_n == 0:
+        status = "error"
+    else:
+        status = "hasErrors"
+    summary = {"event": "summary", "type": job["type"], "total": total,
+               "completed": completed, "ok": ok_n, "failed": failed,
+               "cancelled": cancelled, "status": status,
+               "elapsed_s": round(time.monotonic() - started, 3)}
+    emit(summary)
+    return summary

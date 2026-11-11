@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'models.dart';
+import 'ops.dart';
 
 /// The bridge between the Flutter shell and the BeeSky Python engine.
 ///
@@ -41,6 +42,13 @@ abstract class BeeSkyBridge {
 
   /// Exports repair tickets; returns a human-readable destination.
   Future<String> exportTickets(String target, {String? credsFile});
+
+  /// Starts ONE Operations task (v0.26): [job] is the core runner's
+  /// job document (type / targets / payload / group / creds_file —
+  /// VALUES travel inside the job FILE, never on argv; credential
+  /// sets are referenced by path). Returns the run handle: event
+  /// stream + summary future + Stop.
+  Future<OpsRun> startOps(Map<String, dynamic> job);
 }
 
 /// Opens [url] in the OS default browser — used for a miner's own
@@ -163,6 +171,42 @@ class SidecarBridge implements BeeSkyBridge {
     return args;
   }
 
+  /// Argument list for an ops run — the job travels as a FILE
+  /// (its path is the only ops argument; no secret value ever
+  /// appears in argv, the v0.23 rule applied to tasks).
+  static List<String> opsArgs(String jobPath) => ['ops', '--job', jobPath];
+
+  @override
+  Future<OpsRun> startOps(Map<String, dynamic> job) async {
+    final exeFile = File(exePath);
+    final baseDir =
+        exePath.contains(Platform.pathSeparator) ? exeFile.parent.path : '.';
+    final files = OpsFiles(
+      primaryDir: Directory(baseDir),
+      fallbackDir: OpsFiles.appDefault().fallbackDir,
+    );
+    var jobFile = files.jobFile;
+    try {
+      jobFile.writeAsStringSync(jsonEncode(job));
+    } on FileSystemException {
+      // Bundle dir refused the write (Program Files): the job
+      // file lands in the fallback dir, like every other store.
+      files.fallbackDir.createSync(recursive: true);
+      jobFile = File(
+        '${files.fallbackDir.path}${Platform.pathSeparator}'
+        '${OpsFiles.jobFileName}',
+      );
+      jobFile.writeAsStringSync(jsonEncode(job));
+    }
+    final Process process;
+    try {
+      process = await Process.start(exePath, opsArgs(jobFile.path));
+    } on ProcessException catch (e) {
+      throw SidecarException('Không chạy được beesky ($exePath): ${e.message}');
+    }
+    return _SidecarOpsRun(process, job, jobFile);
+  }
+
   @override
   Future<ScanResult> scan(String target, {String? credsFile}) async {
     final doc = await _runJson(scanArgs(target, credsFile: credsFile));
@@ -212,6 +256,97 @@ class SidecarBridge implements BeeSkyBridge {
     return '${dir.path} ($count phiếu)';
   }
 
+}
+
+/// One live `beesky ops` sidecar run: NDJSON lines in, [OpsEvent]s
+/// out (the summary LINE is consumed into the summary future, not
+/// forwarded as an event). When the process dies without a summary
+/// — the Windows Stop kills it outright — the summary is
+/// SYNTHESISED from the received results so every device is still
+/// accounted (mapping §4.7). The job file (which can carry a pool
+/// password) is deleted when the run ends.
+class _SidecarOpsRun implements OpsRun {
+  final Process _process;
+  final File _jobFile;
+  final int _total;
+  final Stopwatch _clock = Stopwatch()..start();
+  final StreamController<OpsEvent> _controller = StreamController<OpsEvent>();
+  final Completer<OpsSummary> _summary = Completer<OpsSummary>();
+  OpsSummary? _coreSummary;
+  bool _stopped = false;
+  int _results = 0;
+  int _ok = 0;
+
+  _SidecarOpsRun(this._process, Map<String, dynamic> job, this._jobFile)
+      : _total = ((job['targets'] as List<dynamic>?) ?? const []).length {
+    _process.stdout
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .listen(_onLine, onError: (_) {});
+    // Drain stderr so a chatty failure can't fill the pipe buffer.
+    _process.stderr.listen((_) {}, onError: (_) {});
+    _process.exitCode.then(_onExit);
+  }
+
+  void _onLine(String line) {
+    final trimmed = line.trim();
+    if (trimmed.isEmpty) return;
+    final Map<String, dynamic> doc;
+    try {
+      doc = jsonDecode(trimmed) as Map<String, dynamic>;
+    } on FormatException {
+      return; // bridge contract is NDJSON; a stray line is ignored
+    }
+    if (doc['event'] == 'summary') {
+      _coreSummary = OpsSummary.fromJson(doc);
+      return;
+    }
+    final event = OpsEvent.fromJson(doc);
+    if (event.kind == 'result') {
+      _results++;
+      if (event.ok == true) _ok++;
+    }
+    if (!_controller.isClosed) _controller.add(event);
+  }
+
+  void _onExit(int exitCode) {
+    _clock.stop();
+    try {
+      _jobFile.deleteSync();
+    } on FileSystemException {
+      // Already gone / never landed — nothing to clean.
+    }
+    final summary = _coreSummary ??
+        OpsSummary(
+          total: _total,
+          completed: _results,
+          ok: _ok,
+          failed: _results - _ok,
+          cancelled: _total - _results,
+          status: _stopped
+              ? OpsStatus.cancelled
+              : (exitCode != 0 && _results == 0)
+                  ? OpsStatus.error
+                  : (_results - _ok == 0
+                      ? OpsStatus.success
+                      : (_ok == 0 ? OpsStatus.error : OpsStatus.hasErrors)),
+          elapsedS: _clock.elapsedMilliseconds / 1000.0,
+        );
+    if (!_summary.isCompleted) _summary.complete(summary);
+    _controller.close();
+  }
+
+  @override
+  Stream<OpsEvent> get events => _controller.stream;
+
+  @override
+  Future<OpsSummary> get summary => _summary.future;
+
+  @override
+  Future<void> stop() async {
+    _stopped = true;
+    _process.kill();
+  }
 }
 
 /// Dev/demo bridge: canned data, no process. Enabled with the BEESKY_MOCK
@@ -270,7 +405,7 @@ class MockBridge implements BeeSkyBridge {
 
   @override
   Future<SysInfo> sysinfo() async =>
-      const SysInfo(version: '0.25.0', defaultTarget: '192.168.2.0/24');
+      const SysInfo(version: '0.26.0', defaultTarget: '192.168.2.0/24');
 
   @override
   Future<ScanResult> scan(String target, {String? credsFile}) async {
@@ -289,6 +424,133 @@ class MockBridge implements BeeSkyBridge {
   @override
   Future<String> exportTickets(String target, {String? credsFile}) async =>
       '(mock) không ghi file phiếu thật';
+
+  @override
+  Future<OpsRun> startOps(Map<String, dynamic> job) async =>
+      _MockOpsRun(job);
+}
+
+/// The mock ops path: simulates the core runner's lifecycle against
+/// the sample fleet — per-device progress events, the unreachable
+/// unit failing honestly, switch_pool failing on non-VNish sources
+/// exactly like the real executors, and Stop accounting the
+/// unstarted remainder as cancelled.
+class _MockOpsRun implements OpsRun {
+  final Map<String, dynamic> _job;
+  final StreamController<OpsEvent> _controller = StreamController<OpsEvent>();
+  final Completer<OpsSummary> _summary = Completer<OpsSummary>();
+  Timer? _timer;
+  bool _stopped = false;
+  int _done = 0;
+  int _ok = 0;
+
+  _MockOpsRun(this._job) {
+    final targets = ((_job['targets'] as List<dynamic>?) ?? const [])
+        .map((e) => '$e')
+        .toList();
+    _controller.onListen = () {
+      _controller.add(OpsEvent(kind: 'start', total: targets.length));
+      var idx = 0;
+      _timer = Timer.periodic(const Duration(milliseconds: 60), (timer) {
+        if (idx >= targets.length) {
+          _finish(cancelled: 0);
+          return;
+        }
+        final ip = targets[idx++];
+        final (ok, message, record) = _mockResult(ip);
+        _done++;
+        if (ok) _ok++;
+        _controller.add(OpsEvent(
+          kind: 'result',
+          done: _done,
+          total: targets.length,
+          ip: ip,
+          ok: ok,
+          message: message,
+          record: record,
+        ));
+        if (idx >= targets.length) _finish(cancelled: 0);
+      });
+    };
+  }
+
+  (bool, String, MinerRecord?) _mockResult(String ip) {
+    final fleet = ScanResult.fromJson(
+      jsonDecode(MockBridge._sampleJson) as Map<String, dynamic>,
+    ).records;
+    MinerRecord? rec;
+    for (final r in fleet) {
+      if (r.ip == ip) rec = r;
+    }
+    final type = _job['type'];
+    if (rec == null) {
+      return (
+        false,
+        'miner is not answering and its source could not be probed '
+            '— action not executed (mock)',
+        null,
+      );
+    }
+    if (type == 'rescan') {
+      return rec.hasFetchError
+          ? (false, 'rescan: không kết nối được (mock)', rec)
+          : (true, 'rescanned (${rec.source}) (mock)', rec);
+    }
+    if (rec.hasFetchError) {
+      return (false, 'không kết nối được (mock)', null);
+    }
+    if (type == 'switch_pool' && rec.source != 'vnish') {
+      return (
+        false,
+        'switch_pool is not supported for this source yet (mock)',
+        null,
+      );
+    }
+    return (
+      true,
+      type == 'switch_pool'
+          ? 'dashd switched the active pool (mock)'
+          : 'đã khởi động lại (mock)',
+      null,
+    );
+  }
+
+  void _finish({required int cancelled}) {
+    _timer?.cancel();
+    _timer = null;
+    final targets = ((_job['targets'] as List<dynamic>?) ?? const []).length;
+    final failed = _done - _ok;
+    if (!_summary.isCompleted) {
+      _summary.complete(OpsSummary(
+        total: targets,
+        completed: _done,
+        ok: _ok,
+        failed: failed,
+        cancelled: cancelled,
+        status: _stopped
+            ? OpsStatus.cancelled
+            : (failed == 0
+                ? OpsStatus.success
+                : (_ok == 0 ? OpsStatus.error : OpsStatus.hasErrors)),
+        elapsedS: 0,
+      ));
+    }
+    _controller.close();
+  }
+
+  @override
+  Stream<OpsEvent> get events => _controller.stream;
+
+  @override
+  Future<OpsSummary> get summary => _summary.future;
+
+  @override
+  Future<void> stop() async {
+    if (_summary.isCompleted) return;
+    _stopped = true;
+    final targets = ((_job['targets'] as List<dynamic>?) ?? const []).length;
+    _finish(cancelled: targets - _done);
+  }
 }
 
 /// Bridge selection for the real app: mock when BEESKY_MOCK is set in the

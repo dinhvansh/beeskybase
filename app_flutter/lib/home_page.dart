@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -9,6 +10,8 @@ import 'grid.dart';
 import 'grid_dialogs.dart';
 import 'groups.dart';
 import 'models.dart';
+import 'ops.dart';
+import 'ops_dialogs.dart';
 import 'sidecar.dart';
 import 'theme.dart';
 
@@ -62,6 +65,15 @@ class HomePage extends StatefulWidget {
   /// executable, the same folder as the other stores.
   final GridStore? gridStore;
 
+  /// Ops-history override (tests point it at a temp dir); the real
+  /// app uses [OpsHistoryStore.appDefault] — beesky-ops-history.json
+  /// beside the executable (v0.26).
+  final OpsHistoryStore? opsStore;
+
+  /// Ops-files override (job file + export dir); defaults to
+  /// [OpsFiles.appDefault] (beside the executable).
+  final OpsFiles? opsFiles;
+
   /// Row double-click opener override (tests record the URL instead
   /// of launching a browser); defaults to [openUrlInBrowser].
   final Future<void> Function(String url)? urlOpener;
@@ -72,6 +84,8 @@ class HomePage extends StatefulWidget {
     this.credStore,
     this.groupStore,
     this.gridStore,
+    this.opsStore,
+    this.opsFiles,
     this.urlOpener,
   });
 
@@ -136,6 +150,19 @@ class _HomePageState extends State<HomePage> {
   Timer? _autoscanTimer;
   final Map<String, DateTime> _lastAutoscanRun = {};
 
+  // Operations (v0.26): the persistent task history (written when
+  // a task STARTS, updated when it lands) and the live run's state
+  // — progress counts from the streamed per-device events.
+  late final OpsHistoryStore _opsStore =
+      widget.opsStore ?? OpsHistoryStore.appDefault();
+  late final OpsFiles _opsFiles = widget.opsFiles ?? OpsFiles.appDefault();
+  List<OpsTask> _opsHistory = const [];
+  OpsTask? _runningTask;
+  OpsRun? _opsRun;
+  StreamSubscription<OpsEvent>? _opsSub;
+  List<OpsDeviceResult> _opsResults = const [];
+  String? _opsCurrentIp;
+
   // Data grid (v0.25): the persisted view configuration, the
   // session filter/search state, and the SELECTION MODEL the
   // v0.26 Operations bar will consume (grid.dart MinerSelection).
@@ -161,6 +188,7 @@ class _HomePageState extends State<HomePage> {
     _loadCreds();
     _loadGroups();
     _loadGrid();
+    _loadOpsHistory();
     _autoscanTimer = Timer.periodic(
       const Duration(seconds: 30),
       (_) => _tickAutoscan(),
@@ -169,6 +197,8 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    _opsSub?.cancel();
+    _opsRun?.stop();
     _autoscanTimer?.cancel();
     _targetCtrl.dispose();
     _searchCtrl.dispose();
@@ -518,6 +548,316 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  // ------------------------------------------------------------------
+  // Operations (v0.26): the selection becomes work — run one task
+  // type over the selected miners through the core runner, stream
+  // its progress into the bar, and land it in the history. Only
+  // actions with a real core primitive exist (docs/operations-
+  // mapping.md §3); the rest are named gaps, not fake buttons.
+  // ------------------------------------------------------------------
+
+  Future<void> _loadOpsHistory() async {
+    final tasks = await _opsStore.load();
+    if (!mounted) return;
+    setState(() => _opsHistory = tasks);
+  }
+
+  Future<void> _saveOpsHistory() async {
+    try {
+      await _opsStore.save(_opsHistory);
+    } on FileSystemException {
+      // History stays in memory for this session.
+    }
+  }
+
+  /// The task's targets: the selected records, in table order.
+  List<String> _selectedTargets() => [
+        for (final rec in _records)
+          if (_selection.isSelected(rec.ip)) rec.ip,
+      ];
+
+  Future<void> _startOps(
+    OpsTaskType type, {
+    Map<String, dynamic>? payload,
+  }) async {
+    if (_runningTask != null || _busy) return;
+    final targets = _selectedTargets();
+    if (targets.isEmpty) return;
+    if (type.needsConfirm) {
+      final confirmed = await showOpsConfirmDialog(context, type, targets);
+      if (!confirmed || !mounted) return;
+    }
+    final now = DateTime.now();
+    final task = OpsTask(
+      id: 'ops-${now.millisecondsSinceEpoch}',
+      type: type,
+      createdAt: now,
+      finishedAt: null,
+      status: OpsStatus.running,
+      targets: targets,
+      results: const [],
+    );
+    setState(() {
+      _runningTask = task;
+      _opsResults = const [];
+      _opsCurrentIp = null;
+      _opsHistory = [..._opsHistory, task];
+      _status = '${type.label}: đang chạy trên ${targets.length} máy…';
+    });
+    _saveOpsHistory();
+
+    final credsFile = await _credsFileForScan();
+    if (!mounted) return;
+    final job = <String, dynamic>{
+      'type': type.wire,
+      'targets': targets,
+      if (payload != null) 'payload': payload,
+      // In a group's scope the job resolves creds through the
+      // group's own sets first (v0.24 layering), exactly like the
+      // group scan the user is looking at.
+      if (_activeGroup != null) 'group': _activeGroup!.name,
+      if (_activeGroup != null && _groupsFile != null)
+        'groups_file': _groupsFile!.path,
+      if (credsFile != null) 'creds_file': credsFile,
+    };
+    try {
+      final run = await widget.bridge.startOps(job);
+      if (!mounted) {
+        run.stop();
+        return;
+      }
+      _opsRun = run;
+      _opsSub = run.events.listen(_onOpsEvent, onError: (_) {});
+      final summary = await run.summary;
+      if (!mounted) return;
+      _finishOps(summary);
+    } on SidecarException catch (e) {
+      if (!mounted) return;
+      _finishOpsWithError('$e');
+    }
+  }
+
+  void _onOpsEvent(OpsEvent event) {
+    if (!mounted || event.kind != 'result' || event.ip == null) return;
+    setState(() {
+      _opsCurrentIp = event.ip;
+      _opsResults = [
+        ..._opsResults,
+        OpsDeviceResult(
+          ip: event.ip!,
+          ok: event.ok ?? false,
+          message: event.message ?? '',
+        ),
+      ];
+      // A rescan result carries the fresh record: the row updates
+      // in place (HashCore's refresh lands on the list the same
+      // way), and the detail panel follows if it shows this miner.
+      final fresh = event.record;
+      if (fresh != null) {
+        final idx = _records.indexWhere((r) => r.ip == fresh.ip);
+        if (idx >= 0) {
+          final next = [..._records];
+          next[idx] = fresh;
+          _records = next;
+          if (_selected?.ip == fresh.ip) _selected = fresh;
+        }
+      }
+    });
+  }
+
+  /// Land a finished run into the history: received results plus,
+  /// for a stopped task, a cancelled marker per unstarted device
+  /// (the core emits no event for those; the summary counts them).
+  void _finishOps(OpsSummary summary) {
+    final task = _runningTask;
+    if (task == null) return;
+    final results = [..._opsResults];
+    if (summary.cancelled > 0) {
+      final done = results.map((r) => r.ip).toSet();
+      for (final ip in task.targets) {
+        if (!done.contains(ip)) {
+          results.add(OpsDeviceResult(
+            ip: ip,
+            ok: false,
+            message: 'Đã hủy trước khi chạy',
+            cancelled: true,
+          ));
+        }
+      }
+    }
+    final landed = task.copyWith(
+      finishedAt: DateTime.now(),
+      status: summary.status,
+      results: results,
+    );
+    setState(() {
+      _opsHistory = [
+        for (final t in _opsHistory) t.id == landed.id ? landed : t,
+      ];
+      _runningTask = null;
+      _opsRun = null;
+      _opsCurrentIp = null;
+      _status = '${task.type.label}: xong ${summary.ok} · '
+          'lỗi ${summary.failed}'
+          '${summary.cancelled > 0 ? ' · đã hủy ${summary.cancelled}' : ''} '
+          '(${task.total} máy).';
+    });
+    _opsSub?.cancel();
+    _opsSub = null;
+    _saveOpsHistory();
+  }
+
+  void _finishOpsWithError(String message) {
+    final task = _runningTask;
+    if (task == null) return;
+    final landed = task.copyWith(
+      finishedAt: DateTime.now(),
+      status: OpsStatus.error,
+      results: [
+        for (final ip in task.targets)
+          OpsDeviceResult(ip: ip, ok: false, message: message),
+      ],
+    );
+    setState(() {
+      _opsHistory = [
+        for (final t in _opsHistory) t.id == landed.id ? landed : t,
+      ];
+      _runningTask = null;
+      _opsRun = null;
+      _opsCurrentIp = null;
+      _status = '${task.type.label}: lỗi — $message';
+    });
+    _saveOpsHistory();
+    _showSnack('${task.type.label}: lỗi — $message');
+  }
+
+  Future<void> _stopOps() async {
+    await _opsRun?.stop();
+    // The summary future now completes (the bridge synthesises
+    // one when the kill leaves no summary line) and _finishOps
+    // lands the task as cancelled.
+  }
+
+  /// "Xuất danh sách" — app-side (a BeeSky addition, not a
+  /// HashCore port): the selected records as a JSON file, plus a
+  /// history entry like any other task.
+  Future<void> _exportSelection() async {
+    if (_runningTask != null) return;
+    final selected = [
+      for (final rec in _records)
+        if (_selection.isSelected(rec.ip)) rec,
+    ];
+    if (selected.isEmpty) return;
+    String two(int v) => v.toString().padLeft(2, '0');
+    final now = DateTime.now();
+    final stamp = '${now.year}${two(now.month)}${two(now.day)}-'
+        '${two(now.hour)}${two(now.minute)}${two(now.second)}';
+    final dir = _opsFiles.exportDir();
+    final file = File(
+      '${dir.path}${Platform.pathSeparator}beesky-export-$stamp.json',
+    );
+    try {
+      file.writeAsStringSync(
+        const JsonEncoder.withIndent('  ')
+            .convert(selected.map((r) => r.toJson()).toList()),
+      );
+    } on FileSystemException catch (e) {
+      _showSnack('Xuất danh sách thất bại: $e');
+      return;
+    }
+    final task = OpsTask(
+      id: 'ops-${now.millisecondsSinceEpoch}',
+      type: OpsTaskType.export,
+      createdAt: now,
+      finishedAt: now,
+      status: OpsStatus.success,
+      targets: [for (final r in selected) r.ip],
+      results: [
+        for (final r in selected)
+          OpsDeviceResult(
+            ip: r.ip,
+            ok: true,
+            message: 'Đã xuất vào ${file.path}',
+          ),
+      ],
+    );
+    setState(() {
+      _opsHistory = [..._opsHistory, task];
+      _status = 'Đã xuất danh sách ${selected.length} máy vào: ${file.path}';
+    });
+    _saveOpsHistory();
+    _showSnack('Đã xuất danh sách vào: ${file.path}');
+  }
+
+  Future<void> _openOpsHistory() async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => OpsHistoryDialog(
+        tasks: _opsHistory,
+        onDelete: (task) {
+          setState(() {
+            _opsHistory = [
+              for (final t in _opsHistory)
+                if (t.id != task.id) t,
+            ];
+          });
+          _saveOpsHistory();
+        },
+        onClearAll: () {
+          setState(() => _opsHistory = const []);
+          _saveOpsHistory();
+        },
+        onIsolateErrors: (ips) {
+          setState(() {
+            _selection.selectedIps
+              ..clear()
+              ..addAll(ips);
+            _selection.isolate = IsolateMode.errors;
+          });
+        },
+      ),
+    );
+  }
+
+  /// The task progress bar (HashCore's header progress:
+  /// "{task} progress: N addresses" + Stop).
+  Widget _opsProgressBar() {
+    final task = _runningTask!;
+    final done = _opsResults.length;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
+      child: Row(
+        children: [
+          Icon(task.type.icon, size: 16, color: BeeSkyColors.accent),
+          const SizedBox(width: 8),
+          Text(
+            '${task.type.label}: $done/${task.total} địa chỉ',
+            style: const TextStyle(fontSize: 12.5),
+          ),
+          if (_opsCurrentIp != null) ...[
+            const SizedBox(width: 8),
+            Text(
+              '· đang xử lý $_opsCurrentIp',
+              style: const TextStyle(
+                  color: BeeSkyColors.muted, fontSize: 12.5),
+            ),
+          ],
+          const SizedBox(width: 12),
+          Expanded(
+            child: LinearProgressIndicator(
+              value: task.total == 0 ? null : done / task.total,
+              minHeight: 4,
+              backgroundColor: BeeSkyColors.panel2,
+              color: BeeSkyColors.accent,
+            ),
+          ),
+          const SizedBox(width: 12),
+          _miniButton('Dừng', _stopOps),
+        ],
+      ),
+    );
+  }
+
   /// Double-click a row: open that miner's own web admin in the OS
   /// browser (BTC Tools-style), and select the row as a single click
   /// would.
@@ -655,6 +995,7 @@ class _HomePageState extends State<HomePage> {
         _scanBar(),
         if (_scanned) _gridToolbar(),
         if (_scanned && _records.isNotEmpty) _selectionBar(),
+        if (_runningTask != null) _opsProgressBar(),
         if (_busy) const LinearProgressIndicator(minHeight: 3),
         Expanded(child: _content()),
         _statusLine(),
@@ -785,6 +1126,12 @@ class _HomePageState extends State<HomePage> {
             label: const Text('Cột'),
             style: _ghostBtnStyle,
           ),
+          OutlinedButton.icon(
+            onPressed: _openOpsHistory,
+            icon: const Icon(Icons.history, size: 16),
+            label: const Text('Lịch sử tác vụ'),
+            style: _ghostBtnStyle,
+          ),
         ],
       ),
     );
@@ -871,9 +1218,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   /// The selection bar: result count + HashCore's action_control
-  /// verbs (Select all / Invert / Isolate). The OPERATIONS that act
-  /// on the selection are v0.26 — this bar owns selection only,
-  /// and exposes it via the MinerSelection model.
+  /// verbs (Select all / Invert / Isolate) + — since v0.26 — the
+  /// OPERATIONS bar proper: the actions that run on the selection
+  /// (Quét lại / Khởi động lại / Đổi pool / Xuất danh sách).
   Widget _selectionBar() {
     final view = _gridView;
     final selCount = _selection.selectedIps.length;
@@ -913,12 +1260,49 @@ class _HomePageState extends State<HomePage> {
               _filters.isNotEmpty ||
               _searchCtrl.text.isNotEmpty)
             _miniButton('Xóa lọc / chọn', _clearGridModifiers),
+          // The OPERATIONS bar (v0.26): the selection becomes work.
+          // Only actions with a real core primitive are offered —
+          // the rest of HashCore's 27 types are named gaps in
+          // docs/operations-mapping.md, not greyed-out fakes.
+          if (selCount > 0) ...[
+            const Text(
+              'Thao tác:',
+              style: TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+            ),
+            _miniButton(
+              'Quét lại',
+              _runningTask == null
+                  ? () => _startOps(OpsTaskType.rescan)
+                  : null,
+            ),
+            _miniButton(
+              'Khởi động lại',
+              _runningTask == null
+                  ? () => _startOps(OpsTaskType.reboot)
+                  : null,
+            ),
+            _miniButton(
+              'Đổi pool',
+              _runningTask == null
+                  ? () async {
+                      final payload = await showSwitchPoolDialog(context);
+                      if (payload != null && mounted) {
+                        _startOps(OpsTaskType.switchPool, payload: payload);
+                      }
+                    }
+                  : null,
+            ),
+            _miniButton(
+              'Xuất danh sách',
+              _runningTask == null ? _exportSelection : null,
+            ),
+          ],
         ],
       ),
     );
   }
 
-  Widget _miniButton(String label, VoidCallback onPressed) {
+  Widget _miniButton(String label, VoidCallback? onPressed) {
     return OutlinedButton(
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(

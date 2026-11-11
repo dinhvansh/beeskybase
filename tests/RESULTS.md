@@ -2958,3 +2958,229 @@ build-flutter.yml):
     runner and the BeeSkyFlutter-<tag>-win64.zip asset.
     The app remains compile-verified only until the
     owner runs it on real Windows (as since v0.21).
+
+---
+
+# v0.26.0 — Operations task system (HashCore Toolkit Operations model, ported per the dissection)
+
+The parity push continues (owner's bar: 99% of HashCore
+Toolkit in one month). Following the dissect-before-
+porting rule, the Toolkit's task mechanism was dissected
+FIRST from the shipped materials (the ~1,500-key
+translation table — the 27-value task_type_action enum,
+the task_status enum, the operations_dialog keys — and
+the Dart file map: miners_task_service + queued_task,
+the task base classes, the per-implementation task
+files) and the behaviour mapping written to
+docs/operations-mapping.md BEFORE any code — including
+a full action inventory in which every HashCore task
+type is graded SHIP / GAP against a BeeSky primitive
+verified in code (file:line). No device action is faked:
+firmware-documented endpoints BeeSky has never
+implemented are gaps, not features.
+
+PYTHON CORE:
+
+  * beesky/core/ops.py (NEW): a stateless task runner.
+    `beesky ops --job FILE` executes ONE task described
+    by a JSON job file (secrets never ride argv; cred
+    sets are referenced by path) and streams NDJSON
+    progress: a start line, one result line per device
+    ({done, total, ip, ok, message} — rescan adds the
+    fresh `record`), and a final summary line (counts
+    + derived task status: success / hasErrors / error /
+    cancelled — HashCore's enum names). Malformed jobs
+    (bad type/targets/payload, unknown group, unreadable
+    creds file) exit 2 BEFORE any device I/O, like scan.
+  * Credential resolution is the v0.23/v0.24 mechanism
+    itself: the job references a group and/or a creds
+    file; the runner merges group -> global
+    (groups.effective_creds), probes each device with
+    the merged sets (discover.probe_host), and translates
+    the winning set into the single creds dict
+    core.actions.execute consumes — the same dict the
+    cloud agent passes. An unanswering device is an
+    honest per-device failure, never a guess.
+  * Concurrency: a bounded thread pool (job `workers`,
+    default 4, hard cap 8) + an optional `stagger_s`
+    gate between device starts (HashCore's batch pause).
+    Cancellation is cooperative: SIGTERM/SIGINT (wired
+    in cmd_ops) stops new devices starting; unstarted
+    devices are counted cancelled in the summary.
+  * Found while building (guarded, disclosed): the
+    probe can raise outside the adapters' error types
+    (http.client.BadStatusLine from a malformed-HTTP
+    device). The runner catches it as THAT device's
+    failure — one sick device can no longer kill a run.
+    discover() itself keeps its existing contract;
+    hardening it is a separate core change, not hidden
+    inside this release.
+
+ACTION INVENTORY (full table: docs/operations-mapping.md §3):
+
+  SHIPPED: rescan "Quét lại" (the scan pipeline;
+  HashCore's discover/refreshStats/updateStats); reboot
+  "Khởi động lại" (core/actions.py: cgminer privileged
+  restart RPC / dashd POST /system/reboot / stock
+  reboot.cgi — refusals surface verbatim); switch_pool
+  "Đổi pool" (actions.py's dashd path: pool_id ->
+  /mining/switch-pool, url/user -> GET+POST /settings
+  with its honest api-key requirement; other families
+  fail honestly); export "Xuất danh sách" (APP-SIDE
+  BeeSky addition: selected records -> JSON file + a
+  history entry; not a HashCore port).
+  MERGED: HashCore's restart (mining restart) folds
+  into reboot — BeeSky has no separate mining-restart
+  primitive and does not fake the distinction.
+  PRIMITIVE-EXISTS / DEFERRED: install/update firmware
+  (core/firmware.py install_dashd/install_stock exist;
+  a bulk run needs a per-task file + minutes-long
+  wait-back — stays with `beesky fw install`).
+  GAP-GATED: unlock (firmware.py behind the CLI's three
+  hard gates — never a bulk action).
+  GAP-UNIMPLEMENTED (dashd api-doc documents the
+  endpoint; BeeSky has no code path): pause, resume,
+  findMiner, resetFirmware, removeFirmware,
+  resetAutotuneProfiles, resetCurrentAutotuneProfile,
+  throttle, configureApiKey, diagnosticReport.
+  GAP-UNVERIFIED: changePassword, configureNetwork
+  (settings-write pieces exist; semantics unverified).
+  GAP: cloneSettings (v0.28 with pool presets),
+  conditionalRestart, updateNote (v0.27),
+  restoreCvFirmware (no Cvitek adapter), multi
+  (composite — the runner runs one type per job).
+
+FLUTTER APP (app_flutter/):
+
+  * lib/ops.dart (NEW): OpsTaskType / OpsStatus /
+    OpsDeviceResult / OpsTask (the history entry AND the
+    live run's state; copyable infoText in HashCore's
+    task_info shape), OpsEvent / OpsSummary, the OpsRun
+    handle (events stream + summary future + Stop),
+    OpsFiles (job file + export dir) and
+    OpsHistoryStore (beesky-ops-history.json beside the
+    exe, %APPDATA% fallback, corrupt = empty, retention
+    100). lib/ops_dialogs.dart (NEW): the Confirm
+    operation dialog (action + count + every target IP),
+    the switch-pool payload form (slot activation or
+    write-new-pool, with the api-key note), and the
+    history dialog (newest first; per-item started/
+    counts/duration; expandable per-device results;
+    isolate-errors / copy-info / delete-entry actions;
+    clear-all behind a confirmation; HashCore's empty
+    state text; a still-running entry renders as "Chưa
+    hoàn tất" — an app closed mid-run is not hidden).
+  * lib/sidecar.dart: BeeSkyBridge.startOps(job) ->
+    OpsRun. The sidecar writes the job file beside the
+    exe (values inside the FILE, argv carries only
+    `ops --job <path>` — the v0.23 rule applied to
+    tasks), streams the NDJSON, and SYNTHESISES the
+    summary when the process dies without one (a
+    Windows kill leaves no summary line) so every
+    device is still accounted; the job file is deleted
+    when the run ends. MockBridge.startOps simulates
+    the same lifecycle against the sample fleet
+    (per-device progress, the unreachable unit failing,
+    switch_pool failing on non-VNish sources, Stop
+    accounting the remainder as cancelled).
+  * home_page.dart: the Operations bar joins the
+    v0.25 selection bar when the selection is non-empty
+    (Thao tác: Quét lại / Khởi động lại / Đổi pool /
+    Xuất danh sách, gated while a task runs); the task
+    progress bar renders under it ("{task}: N/M địa
+    chỉ" + current device + Dừng); rescan results merge
+    their fresh records into the table in place; the
+    miners toolbar gains "Lịch sử tác vụ". In a
+    group's scope the job carries the group (the core
+    resolves its creds layer), off-scope just the
+    global creds file. models.dart gains
+    MinerRecord.toJson (+ Problem/ChainInfo/PoolInfo)
+    for the export. All v0.24/v0.25 behaviours intact.
+
+MATCH / DIVERGENCE vs HASHCORE (from the mapping doc):
+
+  MATCH: selection-raised Operations bar; a Confirm
+  operation dialog before device-mutating tasks; one
+  task = iterations over devices with per-device
+  ok/fail outcomes; the task-status set (success /
+  hasErrors / error / cancelled); streamed progress
+  "{task}: N/M addresses" + Stop; the history dialog's
+  shape (info block, iterations/errors/duration line,
+  expandable per-device results, isolate-errors,
+  copy-info, delete entry, clear-all with confirms,
+  operations count, empty state); app-owned history.
+
+  DIVERGENCE (named, in the mapping): the core runner
+  is stateless per run (sidecar process + NDJSON)
+  where HashCore queues tasks in an in-app service +
+  isolates — one task at a time from the app;
+  compatibility is resolved per device by probing
+  instead of HashCore's pre-run filter, so an
+  unsupported family fails honestly per device rather
+  than excluding the device (an empty selection still
+  never starts); parallel-iterations / stagger /
+  timeout ride the JOB (defaults 4 / 0 / 3 s) instead
+  of global Settings; no one-shot per-task unlock-
+  method override (the group/global cred layers are
+  the method selection); Waiting/Processing collapse
+  into `running`; Stop is a process kill on Windows
+  (POSIX gets the runner's cooperative SIGTERM summary
+  too) with the cancelled remainder accounted from the
+  summary either way; history retention caps at 100
+  entries (HashCore's cap is UNKNOWN); confirm covers
+  reboot + switch_pool only — rescan is read-only and
+  runs immediately, like HashCore's own Rescan button.
+
+(a) VERIFIED LOCALLY (this sandbox):
+
+  * Python suites at the v0.26.0 pins:
+
+    mock_ops_test: 32 PASS / 0 FAIL (standalone)
+    mock_agent_bg_test: 52 PASS / 0 FAIL (standalone)
+    mock_bridge_test: 24 PASS / 0 FAIL (standalone)
+    mock_creds_test: 32 PASS / 0 FAIL (standalone)
+    mock_groups_test: 39 PASS / 0 FAIL (standalone)
+    mock_units_test: 50 PASS / 0 FAIL (standalone)
+
+    mock_ops_test covers: the exit-2 job contract
+    (9 malformed-job cases, stdout empty); reboot per
+    family against the real mocks (dashd password +
+    api-key sets recorded by the mock, wrong password
+    -> verbatim 401 failure and NO reboot recorded,
+    stock reboot.cgi hit, cgminer restart recorded,
+    read-only RPC refusal verbatim, unreachable ->
+    not-answering); switch_pool (slot activation,
+    url/user rewrite via /settings, the password-only
+    api-key failure, stock not-supported); rescan
+    (record rides the event; unreachable fails without
+    one); the group -> global cred resolution (winner
+    label + the mock's unlock-attempt log proving
+    group-first order and global rescue); the stream
+    shape + hasErrors derivation; cooperative
+    cancellation (unstarted counted, status cancelled);
+    the subprocess NDJSON contract end to end.
+
+  * Flutter (SDK 3.47.9 at ~/workspace/flutter-sdk):
+    flutter analyze: clean; flutter test: 78 PASS / 0 FAIL (local SDK 3.47.9; 63 pre-existing + 15 new ops tests) — task/history JSON round-trips
+    (incl. cancelled results + the 100-entry cap),
+    OpsEvent/OpsSummary parsing, MinerRecord.toJson
+    round-trip; the mock lifecycle (event order, the
+    .104 failure, switch_pool honesty, rescan records,
+    stop accounting); the sidecar argv contract.
+    Widget level: selection raises the Operations bar;
+    reboot -> confirm dialog -> progress bar -> history
+    entry with counts + expandable per-device results
+    + the history file on disk; history reloaded by a
+    fresh HomePage (restart round-trip); export writes
+    the records file + its history entry; rescan runs
+    unconfirmed. All 63 pre-existing tests still pass
+    — the only pre-existing test touched is the version
+    pin in widget_test.dart (v0.26.0).
+
+(b) VERIFIED ONLY BY CI (.github/workflows/
+build-flutter.yml):
+
+  * flutter build windows --release on a real Windows
+    runner and the BeeSkyFlutter-<tag>-win64.zip asset.
+    The app remains compile-verified only until the
+    owner runs it on real Windows (as since v0.21).

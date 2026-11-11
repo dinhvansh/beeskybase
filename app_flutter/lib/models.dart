@@ -52,6 +52,9 @@ class Problem {
         severity: (json['severity'] ?? '') as String,
         detail: (json['detail'] ?? '') as String,
       );
+
+  Map<String, dynamic> toJson() =>
+      {'code': code, 'severity': severity, 'detail': detail};
 }
 
 class ChainInfo {
@@ -73,6 +76,13 @@ class ChainInfo {
         chipsTotal: (json['chips_total'] as num).toInt(),
       );
 
+  Map<String, dynamic> toJson() => {
+        'index': index,
+        'temp_c': tempC,
+        'chips_alive': chipsAlive,
+        'chips_total': chipsTotal,
+      };
+
   /// At/over the core's TEMP_LIMIT_C — the board renders red wherever
   /// per-board temps are shown (table NHIỆT cell, detail board lines).
   bool get isHot => tempC != null && tempC! >= tempLimitC;
@@ -91,6 +101,8 @@ class PoolInfo {
         url: (json['url'] ?? '') as String,
         worker: (json['worker'] ?? json['user'] ?? '') as String,
       );
+
+  Map<String, dynamic> toJson() => {'url': url, 'worker': worker};
 }
 
 class MinerRecord {
@@ -192,6 +204,31 @@ class MinerRecord {
           .toList(),
     );
   }
+
+  /// The wire shape back (v0.26: the Operations "Xuất danh sách"
+  /// export serialises selected records with it). Mirrors
+  /// [MinerRecord.fromJson]'s keys exactly.
+  Map<String, dynamic> toJson() => {
+        'ip': ip,
+        'model': model,
+        'source': source,
+        'chains': chains.map((c) => c.toJson()).toList(),
+        'fans_rpm': fansRpm,
+        'chips_alive': chipsAlive,
+        'chips_total': chipsTotal,
+        'max_temp_c': maxTempC,
+        'problems': issues.map((p) => p.toJson()).toList(),
+        'status': status,
+        'rate_value': rateValue,
+        'rate_unit': rateUnit,
+        'ths': legacyThs,
+        'cred_label': credLabel,
+        'elapsed_s': elapsedS,
+        'ghs_5s': ghs5s,
+        'power_w': powerW,
+        'mac': mac,
+        'pools': pools.map((p) => p.toJson()).toList(),
+      };
 
   bool get hasFetchError => issues.any((p) => p.code == 'FETCH_ERROR');
   bool get isOk => status == 'OK';
