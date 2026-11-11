@@ -91,7 +91,7 @@ export function mount(host,api){
     block(scene,x,hallHeight/2,back+.12,.08,hallHeight,.08,trimMat);
     block(scene,x,hallHeight-.25,back+.5,.12,.22,1,trimMat);
     block(scene,x,hallHeight-.45,back+.7,1.8,.06,.32,lampMat);
-    
+
   }
   for(const z of [back,floorDepth/2])for(const x of [-floorWidth/2,floorWidth/2])block(scene,x,hallHeight/2,z,.22,hallHeight,.22,trimMat);
   block(scene,0,hallHeight,back,floorWidth,.2,.25,trimMat);block(scene,-floorWidth/2,hallHeight,0,.25,.2,floorDepth,trimMat);
