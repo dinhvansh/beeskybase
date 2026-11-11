@@ -3952,3 +3952,155 @@ perf-summary reply on a locked unit, the partial
 the document. The handlers surface device replies and
 refusals verbatim, so a dialect difference shows up
 as an honest per-device failure, never a fake success.
+
+---
+
+# v0.30.0 — Vendor coverage (HashCore's per-vendor adapters, dissected then ported)
+
+Following the dissect-before-porting rule, every vendor
+was dissected FIRST from the extracted Toolkit materials
+(~/workspace/asic-os-s19pro/research/hashcore/toolkit-x64/:
+the AOT string pool, en.json, package paths) and the
+mapping written to docs/vendor-coverage-mapping.md with
+per-vendor VERIFIED / INFERRED / UNKNOWN grading BEFORE
+any code. Method note: the Dart AOT pool is hash-consed
+(no library clustering), so attribution rests on
+distinctive literals only (DTO names, verbatim request
+fragments, the pool's single LuCI HTML-regex family).
+A vendor whose contract could not be verified ships as
+detection-only or a named gap — no dialect was invented.
+
+PER-VENDOR TABLE (detect · read · actions — verdict +
+evidence grade; gap ids live in the mapping doc):
+
+  MicroBT Whatsminer (cred family "whatsminer")
+    detect: socket dialect on :4028 answered in the
+      Msg envelope + the summary fingerprint keys
+      "Fan Speed In"/"Fan Speed Out" (VERIFIED literals;
+      Antminer cgminer SUMMARY carries no fan fields)
+      SHIPPED — probe step runs BEFORE the plain cgminer
+      read of the same summary, so neither side can
+      swallow the other.
+    read: summary/devs/pools/version socket DTOs
+      (VERIFIED names; read cmd names INFERRED from the
+      DTO family, only {"cmd": "get_token"} is verbatim)
+      SHIPPED read-only: rate from the MHS pair (native
+      rate_value in TH/s, MHS/1e6), fans In/Out, per-
+      board temps, pools verbatim. Chips 0/0 — the DTO
+      family evidences no per-chip counts (G-W2, mirrors
+      the open L9 caveat). Power NOT read — the socket
+      "Power" key is not attributable in the pool (G-W4).
+    actions: NONE. Every privileged call needs the
+      token scheme (get_token VERIFIED to exist; its
+      computation UNKNOWN) — reboot/switch_pool return
+      the honest NOT_SUPPORTED naming G-W1. The LuCI
+      HTTP transport (VERIFIED paths/regexes) is not
+      built (G-W3).
+  Canaan Avalon (cred family "avalon")
+    detect: cgminer-RPC device whose STATS carry
+      "MM ID<n>" keys (literal "MM ID0" VERIFIED) or a
+      Type starting "Avalon" SHIPPED — a refinement of
+      the cgminer claim, never a separate transport.
+    read: HashCore's own model is the shared one
+      (CgminerCommonStatsDto.fromAvalonJson VERIFIED)
+      SHIPPED via the existing cgminer read path:
+      GHS pair -> native TH/s, pools enrichment, fans.
+      No chains/chips — no chain_acs in the evidenced
+      dialect (G-A1: field semantics beyond the
+      fingerprint UNKNOWN).
+    actions: reboot rides the cgminer `restart` RPC
+      (the common model's verb) SHIPPED; switch_pool
+      keeps the cgminer-family gap.
+  IceRiver (cred family "iceriver")
+    Structure only in the pool (IceRiverApiSession,
+    DTO family, scheme "iceRiverApi://") — endpoints,
+    field keys, auth, detection ALL UNKNOWN.
+    GAP G-I1: cred tag ships so sets can be pre-staged;
+    devices are not detected or read as IceRiver.
+  SunLune / Jasminer (cred family "jasminer")
+    Structure only (full JSON DTO family incl.
+    HashLine/AvgHashLine/RejectLine) — contract
+    UNKNOWN. GAP G-S1: cred tag only, same terms.
+  Braiins OS (cred family "braiins") / LuxOS ("luxos")
+    Structure only (Braiins*/Luxor* DTO families; the
+    SHARED BraiinsLuxorTempDto shows near-identical
+    HTTP surfaces) — the detection marker is UNKNOWN
+    ("bosminer" appears nowhere in the pool).
+    GAPS G-B1/G-L1: cred tags only; devices keep
+    reading through the existing cgminer/stock chain
+    and are deliberately NOT reclassified on a guess.
+
+VENDOR SCOREBOARD vs HashCore's enum (en.json
+enum.firmware_vendor_enum — 15 keys verified this
+pass; UI-ANALYSIS said 16):
+  real read adapters (6): unknown/"CG Miner" (generic
+    cgminer), hashcore + oldVnish (dashd), bitmain
+    (stock), canaan NEW, microBt NEW (deepest of the
+    new two: dedicated transport).
+  cred-tag-only families (4): iceRiver, sunLune,
+    braiins, luxor.
+  absent (4): auradine, epic, pitBit, bitdeer — no
+    VN-farm relevance and zero contract evidence.
+  mock: HashCore's internal test double, n/a.
+
+DETECTION NON-COLLISION (the hard requirement): the
+new suite runs all five dialect mocks at once — the
+pre-existing dashd/stock/cgminer claims are asserted
+unchanged, the cgminer client is asserted UNABLE to
+read the Whatsminer mock (STATUS E), the Whatsminer
+client reads it exactly, the Avalon mock refines to
+avalon while the Antminer mock stays plain cgminer,
+and the Whatsminer mock's request log proves the
+scanner NEVER sends get_token (read-only discipline).
+
+(a) VERIFIED LOCALLY (this machine):
+
+  * Python (tests/run_mock_test_v30.sh, standalone
+    tallies): mock_vendors_test 51 PASS / 0 FAIL (NEW:
+    whatsminer client reads + fingerprint ±, record
+    fields incl. native TH/s + OVER_TEMP on the 87 °C
+    board + pools verbatim + power None, dialect
+    isolation both ways, the token refusal surfacing
+    verbatim, all five probe claims, cli/ops twin
+    fetches, inspect sections, avalon reboot landing
+    in the mock's log, whatsminer action gaps, the
+    six cred tags round-tripping + family-first
+    ordering + groups keeping the braiins tag);
+    regressions at established counts: pin/agent_bg
+    52 (under xvfb), bridge 24, creds 32, groups 39,
+    units 50, ops 32, ops2 34, inspect 33, pools 43 —
+    all 0 FAIL.
+  * Flutter (SDK 3.47.9 at ~/workspace/flutter-sdk):
+    flutter analyze clean; flutter test 125 PASS /
+    0 FAIL (117 pre-existing + 8 new vendor tests:
+    the six cred tags round-trip, the label map, the
+    cred editor showing "Whatsminer (MicroBT)", group
+    creds keeping braiins, the avalon source label,
+    the mock fleet's whatsminer record + firmware
+    grouping bucket + inspect shape). The mock fleet
+    grew a fifth record (WhatsMiner M30S, one board
+    at 87 °C), so fleet-count expectations in
+    widget/grid/groups/ops tests moved 4 -> 5 with
+    it; the demo group's stored last-scan matches.
+
+(b) VERIFIED ONLY BY CI (.github/workflows/
+build-flutter.yml):
+
+  * flutter build windows --release on a real Windows
+    runner and the BeeSkyFlutter-<tag>-win64.zip
+    asset. The app remains compile-verified only
+    until the owner runs it on real Windows (as
+    since v0.21).
+
+(c) HARDWARE-UNCONFIRMED (everything new): no real
+Whatsminer or Avalon has answered BeeSky yet. The
+read cmd names beyond get_token are INFERRED from
+DTO names — a real unit whose dialect differs will
+fail the fingerprint and fall back to the existing
+families or FETCH_ERROR, never a fake record. The
+Avalon fingerprint rests on one literal ("MM ID0")
+plus the Type prefix; field semantics beyond it
+(G-A1) and every G-W/G-I/G-S/G-B/G-L gap need a real
+device session to close. Whatsminer token actions
+stay unbuilt until the token computation is
+evidenced (a farm session or a fuller dissection).

@@ -15,7 +15,8 @@ import 'theme.dart';
 /// passwords never travel on a command line:
 ///
 ///   [{"label": "...", "user": "...", "password": "...",
-///     "type": "any" | "stock" | "vnish"}, ...]
+///     "type": "any" | "stock" | "vnish" | "whatsminer" | "avalon" |
+///      "iceriver" | "jasminer" | "braiins" | "luxos"}, ...]
 ///
 /// "type" is the machine-family tag: the core tries sets tagged for
 /// the detected family first, then "any", then the rest (a wrong tag
@@ -29,7 +30,7 @@ class CredSet {
   String label;
   String user;
   String secret;
-  String type; // 'any' | 'stock' | 'vnish'
+  String type; // a credTypeLabels key ('any' = every family)
   String apiKey;
 
   CredSet({
@@ -44,7 +45,7 @@ class CredSet {
         label: (json['label'] ?? '') as String,
         user: (json['user'] ?? '') as String,
         secret: (json['password'] ?? '') as String,
-        type: const ['stock', 'vnish'].contains(json['type'])
+        type: credTypeLabels.containsKey(json['type'])
             ? json['type'] as String
             : 'any',
         apiKey: (json['api_key'] ?? '') as String,
@@ -68,10 +69,20 @@ class CredSet {
 }
 
 /// Type tag -> the label the creds dialog's dropdown shows.
+/// The family set is HashCore's vendor universe as ported in
+/// docs/vendor-coverage-mapping.md §6 (v0.30): detection exists
+/// for whatsminer + avalon; iceriver / jasminer / braiins / luxos
+/// are tag-only families until their contracts are evidenced.
 const credTypeLabels = <String, String>{
   'any': 'Mọi loại máy',
   'stock': 'Antminer gốc',
   'vnish': 'VNish',
+  'whatsminer': 'Whatsminer (MicroBT)',
+  'avalon': 'Avalon (Canaan)',
+  'iceriver': 'IceRiver',
+  'jasminer': 'Jasminer (SunLune)',
+  'braiins': 'Braiins OS',
+  'luxos': 'LuxOS',
 };
 
 /// Persistence for the creds file.

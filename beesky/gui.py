@@ -48,6 +48,8 @@ SOURCE_LABEL = {
     "cgminer": "cgminer RPC",
     "vnish": "VNish",
     "stock": "Bitmain gốc",
+    "whatsminer": "Whatsminer",
+    "avalon": "Avalon (Canaan)",
 }
 
 WEB_PORT = 8787

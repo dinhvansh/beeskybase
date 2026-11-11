@@ -528,7 +528,7 @@ void main() {
       expect(exports, hasLength(1));
       final records =
           jsonDecode(exports.single.readAsStringSync()) as List<dynamic>;
-      expect(records, hasLength(4));
+      expect(records, hasLength(5));
       await tester.tap(find.text('Lịch sử tác vụ'));
       await tester.pumpAndSettle();
       expect(find.textContaining('Xuất danh sách — Thành công'),

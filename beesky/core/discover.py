@@ -3,7 +3,12 @@
 Discovery recipe (same shape as mature fleet tools): for every host in the
 target, walk the adapter chain in a fixed order —
 
-  1. cgminer RPC on TCP 4028 (Bitmain & most forks; richest data)
+  1. socket APIs on TCP 4028: the MicroBT Whatsminer dialect
+     ({"cmd": ...} envelopes + the Fan Speed In/Out fingerprint)
+     first, then cgminer RPC (Bitmain & most forks; richest data) —
+     with a Canaan Avalon refinement on the cgminer claim (the
+     STATS "MM ID" module fingerprint; v0.30, see
+     docs/vendor-coverage-mapping.md)
   2. VNish/HashCore dashd HTTP API on :80 (GET /api/v1/summary signature)
   3. Bitmain stock web CGI on :80 (digest auth, /cgi-bin/get_miner_status.cgi)
 
@@ -12,9 +17,13 @@ with bounded workers and short timeouts so a /24 scans in seconds.
 
 Multi-credential scans (v0.23): fleets run several machine lines with
 different web logins, so the authenticated steps (dashd /unlock, stock
-digest) accept a list of credential sets — each tagged "any" / "stock"
-/ "vnish" — and try them family-first (see ordered_creds). The winning
+digest) accept a list of credential sets — each tagged with a machine
+family — and try them family-first (see ordered_creds). The winning
 set's label is carried on the candidate into the record (cred_label).
+Family tags (v0.30): the HashCore vendor set ported in
+docs/vendor-coverage-mapping.md §6 — detection exists for whatsminer
+and avalon; iceriver / jasminer / braiins / luxos are tag-only
+families (their contracts are named gaps in the mapping).
 """
 
 from __future__ import annotations
@@ -27,6 +36,7 @@ from dataclasses import dataclass, field
 from .bitmain import BitmainClient
 from .cgminer import CgminerClient
 from .dashd import DashdClient, DashdError
+from .whatsminer import WhatsminerClient, is_whatsminer_summary
 
 HTTP_PORT = 80
 CGMINER_PORT = 4028
@@ -81,13 +91,17 @@ class Candidate:
     """One host that looks like a miner, with the adapter that claimed it."""
 
     ip: str
-    source: str | None = None  # "cgminer" | "vnish" | "stock"
+    source: str | None = None  # "cgminer" | "vnish" | "stock" |
+    #                            "whatsminer" | "avalon"
     http_open: bool = False
     cgminer_open: bool = False
     cgminer_ok: bool = False  # answered a real `summary` command
     model: str | None = None
     summary: dict = field(default_factory=dict)
     status_data: dict = field(default_factory=dict)  # stock probe payload cache
+    stats_data: dict = field(default_factory=dict)  # cgminer-family stats
+    # cache (v0.30: the probe's Avalon-refinement fetch, reused by
+    # the fetch stage so a scan pays for the stats call once)
     http_port: int = HTTP_PORT
     cgminer_port: int = CGMINER_PORT
     # Multi-credential results (v0.23): which saved set authenticated,
@@ -155,17 +169,44 @@ def _port_open(ip: str, port: int, timeout: float) -> bool:
         return False
 
 
-CRED_TYPES = ("any", "stock", "vnish")
+CRED_TYPES = ("any", "stock", "vnish", "whatsminer", "avalon",
+              "iceriver", "jasminer", "braiins", "luxos")
 
 
 def cred_type(entry: dict) -> str:
     """A credential set's machine-type tag, normalised (v0.23).
 
-    Only "stock" / "vnish" are family tags; a missing or unknown tag
+    The family tags are CRED_TYPES (v0.30: the HashCore vendor set —
+    docs/vendor-coverage-mapping.md §6); a missing or unknown tag
     means "any" (back-compat with untyped sets).
     """
     tag = entry.get("type")
-    return tag if tag in ("stock", "vnish") else "any"
+    return tag if tag in CRED_TYPES else "any"
+
+
+def _avalon_fingerprint(stats: dict, summary: dict) -> bool:
+    """Canaan Avalon fingerprint on a cgminer claim (v0.30).
+
+    HashCore parses Avalon STATS from cgminer STATS JSON with a
+    dedicated factory (docs/vendor-coverage-mapping.md §2); the
+    distinguishing marks in the payload are the module keys
+    "MM ID<n>" (Avalon hash-module entries — stock Antminer STATS
+    carries none) or a Type naming the Avalon line. Positive-only:
+    no mark, no reclassification.
+    """
+    if not isinstance(stats, dict):
+        stats = {}
+    entries = stats.get("stats_entries")
+    dicts = [e for e in entries if isinstance(e, dict)] \
+        if isinstance(entries, list) else []
+    dicts.append(stats)
+    for entry in dicts:
+        for key in entry:
+            if str(key).startswith("MM ID"):
+                return True
+        if str(entry.get("Type") or "").startswith("Avalon"):
+            return True
+    return str((summary or {}).get("Type") or "").startswith("Avalon")
 
 
 def ordered_creds(creds: list[dict], family: str) -> list[dict]:
@@ -209,17 +250,44 @@ def probe_host(ip: str, timeout: float = 1.5, http_port: int = HTTP_PORT,
     cand.http_open = _port_open(ip, http_port, timeout)
     cand.cgminer_open = _port_open(ip, cgminer_port, timeout)
 
-    # 1) cgminer RPC — richest data, try first whenever the port is open.
+    # 1) Socket APIs on 4028, whenever the port is open.
     if cand.cgminer_open:
+        # 1a) MicroBT Whatsminer dialect (v0.30): a modern Whatsminer
+        # does not answer the cgminer envelope at all, and a cgminer
+        # device answers this dialect with a STATUS-E error — the
+        # fan-pair fingerprint can therefore never mis-claim a
+        # cgminer miner (docs/vendor-coverage-mapping.md §1.2).
         try:
-            cand.summary = CgminerClient(
-                ip, port=cgminer_port, timeout=timeout).summary()
+            wm_item = WhatsminerClient(
+                ip, port=cgminer_port, timeout=timeout).summary_item()
+        except Exception:  # noqa: BLE001 — a probe must never raise
+            wm_item = {}
+        if is_whatsminer_summary(wm_item):
+            cand.source = "whatsminer"
+            cand.summary = wm_item
+            cand.cgminer_ok = True
+            cand.model = wm_item.get("Type") or wm_item.get("Model")
+            return cand
+
+        # 1b) cgminer RPC — richest data for the cgminer family.
+        try:
+            client = CgminerClient(ip, port=cgminer_port, timeout=timeout)
+            cand.summary = client.summary()
             cand.cgminer_ok = bool(cand.summary)
         except Exception:
             cand.cgminer_ok = False
         if cand.cgminer_ok:
             cand.source = "cgminer"
             cand.model = cand.summary.get("Type") or cand.summary.get("Model")
+            # Canaan Avalon refinement (v0.30): Avalon is a cgminer
+            # device with its own STATS flavour — one stats fetch
+            # (cached for the fetch stage) checks the fingerprint.
+            try:
+                cand.stats_data = client.stats()
+            except Exception:
+                cand.stats_data = {}
+            if _avalon_fingerprint(cand.stats_data, cand.summary):
+                cand.source = "avalon"
             return cand
 
     # 2) + 3) HTTP adapters need the web port.

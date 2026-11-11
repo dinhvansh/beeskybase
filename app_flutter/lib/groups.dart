@@ -298,7 +298,7 @@ class GroupStore {
 
 /// Demo groups for the MOCK shell only: the owner's farm shape —
 /// the main hall already scanned once (counts matching the mock
-/// fleet: 4 found, 1 OK, 2 CHECK, 1 ERROR), the second hall never
+/// fleet: 5 found, 1 OK, 3 CHECK, 1 ERROR), the second hall never
 /// scanned (the MỚI tag shows). In-memory; persisted only if the
 /// user edits and saves them.
 List<NetGroup> demoGroups() => [
@@ -319,9 +319,9 @@ List<NetGroup> demoGroups() => [
         lastScan: const GroupLastScan(
           at: '2026-11-11T08:15:00+07:00',
           scanned: 254,
-          found: 4,
+          found: 5,
           ok: 1,
-          check: 2,
+          check: 3,
           error: 1,
         ),
       ),

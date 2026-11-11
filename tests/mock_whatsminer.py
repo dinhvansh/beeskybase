@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+"""Fake MicroBT Whatsminer — the API v2 socket dialect on TCP 4028.
+
+Speaks the contract dissected in docs/vendor-coverage-mapping.md
+§1: requests are {"cmd": "<name>"} envelopes, replies wrap their
+payload in a "Msg" envelope (a list for summary/devs/pools, a
+dict for version). The summary item carries the Whatsminer fan
+pair ("Fan Speed In" / "Fan Speed Out") — the detection
+fingerprint. Board 2 runs at 87 C so the record builder flags
+OVER_TEMP. Privileged commands refuse without a token:
+`restart_btminer` answers STATUS-E "token required" (the auth
+fixture — BeeSky must never even try it, G-W1). cgminer-envelope
+requests ({"command": ...}) are refused like the real dialect
+boundary.
+
+Every received request's cmd/command name is appended to the
+file named by env MOCK_WM_LOG (when set) so tests can assert
+what the scanner did and did NOT ask (notably: get_token).
+
+Run:  python3 tests/mock_whatsminer.py [host] [port]
+"""
+
+import json
+import os
+import socketserver
+import sys
+
+HOST = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
+PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 4028
+LOG = os.environ.get("MOCK_WM_LOG")
+
+
+def _log(name: str) -> None:
+    if LOG:
+        with open(LOG, "a", encoding="utf-8") as fh:
+            fh.write(name + "\n")
+
+
+def _ok(msg, code=131):
+    return {"STATUS": [{"STATUS": "S", "When": 1700000000,
+                        "Code": code, "Msg": "ok",
+                        "Description": "mockwhatsminer 1.0"}],
+            "Msg": msg, "id": 1}
+
+
+def _err(message: str):
+    return {"STATUS": [{"STATUS": "E", "When": 1700000000,
+                        "Code": 14, "Msg": message,
+                        "Description": "mockwhatsminer 1.0"}], "id": 1}
+
+
+def summary_reply() -> dict:
+    return _ok([{
+        "Elapsed": 90061,
+        "Type": "WhatsMiner M30S",
+        "MHS 5s": 111800000.0,
+        "MHS av": 112000000.0,
+        "Fan Speed In": 4560,
+        "Fan Speed Out": 4620,
+        "Accepted": 123456,
+        "Rejected": 123,
+        "Hardware Errors": 4,
+        "Stratum URL": "stratum+tcp://btc.pool.example:3333",
+    }])
+
+
+def devs_reply() -> dict:
+    return _ok([
+        {"Slot": 0, "Status": "Alive", "Temperature": 62.0,
+         "MHS av": 37300000.0},
+        {"Slot": 1, "Status": "Alive", "Temperature": 87.0,
+         "MHS av": 37100000.0},
+        {"Slot": 2, "Status": "Alive", "Temperature": 65.0,
+         "MHS av": 37600000.0},
+    ])
+
+
+def pools_reply() -> dict:
+    return _ok([{
+        "POOL": 0,
+        "URL": "stratum+tcp://btc.pool.example:3333",
+        "Status": "Alive",
+        "User": "wmworker.001",
+        "Accepted": 123456,
+        "Rejected": 123,
+    }])
+
+
+def version_reply() -> dict:
+    return _ok({"Type": "WhatsMiner M30S", "BMMiner": "2.0.0",
+                "API": "2.0"})
+
+
+def token_reply() -> dict:
+    return _ok({"token": "mocktoken"})
+
+
+_REPLIES = {"summary": summary_reply, "devs": devs_reply,
+            "pools": pools_reply, "version": version_reply,
+            "get_token": token_reply}
+
+
+class Handler(socketserver.BaseRequestHandler):
+    def handle(self):
+        self.request.settimeout(5)
+        data = b""
+        try:
+            while b"\n" not in data and len(data) < 65536:
+                chunk = self.request.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+        except OSError:
+            return
+        if not data.strip():
+            return  # bare port probe — nothing to answer
+        try:
+            request = json.loads(data.decode("utf-8", errors="replace"))
+        except json.JSONDecodeError:
+            request = {}
+        cmd = request.get("cmd")
+        if cmd is None:
+            # The cgminer envelope is a different dialect — refused.
+            _log(f"command:{request.get('command', '')}")
+            payload = _err("Invalid command")
+        else:
+            _log(cmd)
+            if cmd == "restart_btminer":
+                payload = _err("token required")
+            elif cmd in _REPLIES:
+                payload = _REPLIES[cmd]()
+            else:
+                payload = _err(f"Invalid cmd: {cmd}")
+        try:
+            self.request.sendall(json.dumps(payload).encode() + b"\x00")
+        except OSError:
+            pass
+
+
+def main():
+    socketserver.ThreadingTCPServer.allow_reuse_address = True
+    with socketserver.ThreadingTCPServer((HOST, PORT), Handler) as server:
+        print(f"mock whatsminer listening on {HOST}:{PORT}", flush=True)
+        server.serve_forever()
+
+
+if __name__ == "__main__":
+    main()

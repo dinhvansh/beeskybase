@@ -98,8 +98,9 @@ from .core import updater
 from .core.bitmain import BitmainClient, BitmainError
 from .core.cgminer import CgminerClient, CgminerError
 from .core.dashd import DashdClient, DashdError
-from .core.discover import (Candidate, default_scan_target, discover,
-                            parse_targets, probe_host)
+from .core.discover import (CRED_TYPES, Candidate, default_scan_target,
+                            discover, parse_targets, probe_host)
+from .core.whatsminer import WhatsminerClient, WhatsminerError
 from .core.events import EventEngine
 from .web.server import MonitorService, run_server
 
@@ -136,7 +137,7 @@ def _normalise_creds(data: list, source: str) -> list[dict]:
             "user": user if isinstance(user, str) else "",
             "password": secret if isinstance(secret, str) else "",
             "api_key": api_key if has_key else None,
-            "type": raw_type if raw_type in ("stock", "vnish") else "any",
+            "type": raw_type if raw_type in CRED_TYPES else "any",
         })
     return creds
 
@@ -145,9 +146,10 @@ def _load_creds_file(path: str) -> list[dict]:
     """Read a --creds-file: a JSON list of credential sets (v0.23).
 
     Schema: [{"label": "...", "user": "...", "password": "...",
-    "type": "any"|"stock"|"vnish", "api_key": "..."}, ...]. Raises
-    ValueError with an operator-readable message — a typo'd file
-    must fail loud, never silently scan with wrong logins.
+    "type": <family tag — discover.CRED_TYPES>, "api_key": "..."},
+    ...]. Raises ValueError with an operator-readable message — a
+    typo'd file must fail loud, never silently scan with wrong
+    logins.
     """
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -193,7 +195,19 @@ def _validate_creds(args: argparse.Namespace, command: str) -> int | None:
 def _fetch_record(cand: Candidate, args: argparse.Namespace) -> dict:
     """Pull full health data for one candidate via its claiming adapter."""
     ip, timeout = cand.ip, max(args.timeout, 2.0)
-    if cand.source == "vnish":
+    if cand.source == "whatsminer":
+        # MicroBT socket dialect (v0.30) — anonymous reads, so
+        # never a cred_label (the probe may have set one only if a
+        # set was tagged for the family; the label rule below is
+        # generic and stays).
+        client = WhatsminerClient(ip, port=cand.cgminer_port,
+                                  timeout=timeout)
+        try:
+            record = client.fetch_record(ip)
+        except WhatsminerError as exc:
+            record = report.error_record(ip, str(exc),
+                                         source="whatsminer")
+    elif cand.source == "vnish":
         client = DashdClient(ip, port=cand.http_port, timeout=timeout,
                              api_key=args.api_key or cand.dashd_api_key,
                              token=args.token or cand.dashd_token)
@@ -215,15 +229,18 @@ def _fetch_record(cand: Candidate, args: argparse.Namespace) -> dict:
             record = report.error_record(ip, str(exc), source="stock")
     else:
         # cgminer RPC (also the fallback for port-open-but-silent
-        # candidates) — no auth, so never a cred_label.
+        # candidates; "avalon" is the same wire with the Canaan
+        # refinement the probe applied) — no auth, so never a
+        # cred_label.
+        source = cand.source if cand.source == "avalon" else "cgminer"
         client = CgminerClient(ip, port=cand.cgminer_port, timeout=timeout)
         try:
             summary = client.summary()
-            stats = client.stats()
+            stats = cand.stats_data or client.stats()
         except CgminerError as exc:
-            record = report.error_record(ip, str(exc), source="cgminer")
+            record = report.error_record(ip, str(exc), source=source)
         else:
-            record = report.build_record(ip, summary, stats, source="cgminer")
+            record = report.build_record(ip, summary, stats, source=source)
             # Pool enrichment (v0.28): one extra RPC call of the
             # same class/timeout as summary+stats; its failure
             # omits the field, never the record (docs/presets-

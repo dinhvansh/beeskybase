@@ -140,7 +140,7 @@ void main() {
       final (loaded, source) = await store.load();
       expect(source?.path, written.path);
       expect(loaded.map((g) => g.name), ['Trại chính', 'Kho phụ']);
-      expect(loaded.first.lastScan?.found, 4);
+      expect(loaded.first.lastScan?.found, 5);
       expect(loaded.last.isNew, isTrue);
     });
   });
@@ -233,7 +233,7 @@ void main() {
         expect(find.text('Tự quét: mỗi 30 phút'), findsOneWidget);
         expect(find.text('Tài khoản riêng: 1 bộ'), findsOneWidget);
         expect(
-          find.textContaining('4 máy • OK 1 • Kiểm tra 2 • Lỗi 1'),
+          find.textContaining('5 máy • OK 1 • Kiểm tra 3 • Lỗi 1'),
           findsOneWidget,
         );
 
@@ -257,7 +257,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('Đã quét 1'), findsOneWidget);
         expect(
-          find.textContaining('4 máy • OK 1 • Kiểm tra 2 • Lỗi 1'),
+          find.textContaining('5 máy • OK 1 • Kiểm tra 3 • Lỗi 1'),
           findsOneWidget,
         );
       },

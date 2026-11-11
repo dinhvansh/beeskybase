@@ -318,6 +318,8 @@ class MinerRecord {
         'cgminer' => 'cgminer RPC',
         'vnish' => 'VNish',
         'stock' => 'Bitmain gốc',
+        'whatsminer' => 'Whatsminer',
+        'avalon' => 'Avalon (Canaan)',
         _ => source,
       };
 

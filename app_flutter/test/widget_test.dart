@@ -30,7 +30,7 @@ void main() {
       expect(find.text('Sự kiện'), findsOneWidget);
       expect(find.text('Cài đặt'), findsOneWidget);
       expect(find.text('SAU'), findsNWidgets(5));
-      expect(find.text('BeeSky v0.29.0'), findsOneWidget);
+      expect(find.text('BeeSky v0.30.0'), findsOneWidget);
       expect(find.text('Ruột quét: dữ liệu mẫu'), findsOneWidget);
 
       // v0.24: the app OPENS on network groups (the HashCore home
@@ -42,7 +42,7 @@ void main() {
       expect(find.text('Kho phụ'), findsOneWidget);
       expect(find.text('MỚI'), findsOneWidget);
       expect(find.text('Chưa quét'), findsOneWidget);
-      expect(find.textContaining('4 máy • OK 1'), findsOneWidget);
+      expect(find.textContaining('5 máy • OK 1'), findsOneWidget);
 
       // The miners view is one sidebar click away.
       await tester.tap(find.text('Máy đào'));
@@ -86,25 +86,31 @@ void main() {
       expect(find.text('330/369'), findsOneWidget);
       expect(find.text('ERROR'), findsOneWidget);
 
-      // Header chips updated: 4 machines — 1 OK, 2 CHECK, 1 ERROR —
-      // grouped hashrate, hottest board 88 °C (the Z15's hot board).
-      expect(find.text('Tổng 4 máy'), findsOneWidget);
+      // Header chips updated: 5 machines — 1 OK, 3 CHECK, 1 ERROR —
+      // grouped hashrate (the Whatsminer joins the TH/s group),
+      // hottest board 88 °C (the Z15's hot board).
+      expect(find.text('Tổng 5 máy'), findsOneWidget);
       expect(find.text('OK 1'), findsOneWidget);
-      expect(find.text('Cần kiểm tra 2'), findsOneWidget);
+      expect(find.text('Cần kiểm tra 3'), findsOneWidget);
       expect(find.text('Lỗi 1'), findsOneWidget);
       expect(
-        find.text('110.50 TH/s · 14.54 MH/s · 1,101.00 ksol/s'),
+        find.text('222.30 TH/s · 14.54 MH/s · 1,101.00 ksol/s'),
         findsOneWidget,
       );
       expect(find.text('Max 88 °C'), findsOneWidget);
 
       // The NHIỆT column shows EVERY board's temp, in chain order —
-      // the S19's three boards, the Z15's three boards.
+      // the S19's three boards, the Z15's three boards, and the
+      // Whatsminer's (62/87/65 — the 65° pill is shared with the
+      // S19's second board).
       expect(find.text('61°'), findsOneWidget);
-      expect(find.text('65°'), findsOneWidget);
+      expect(find.text('65°'), findsNWidgets(2));
       expect(find.text('63°'), findsOneWidget);
       expect(find.text('71°'), findsOneWidget);
       expect(find.text('73°'), findsOneWidget);
+      expect(find.text('62°'), findsOneWidget);
+      expect(find.text('87°'), findsOneWidget);
+      expect(find.text('111.80 TH/s'), findsOneWidget);
       // The board at/over 85 °C is bold red; its neighbours stay muted.
       final hot = tester.widget<Text>(find.text('88°'));
       expect(hot.style!.color, BeeSkyColors.hotTemp);
@@ -125,7 +131,7 @@ void main() {
       // First row auto-selected (v0.19.7): the detail PANEL opened —
       // its sub line is "ip • source", unique to the panel.
       expect(find.text('192.168.2.101 • VNish'), findsOneWidget);
-      expect(find.textContaining('Quét xong: tìm thấy 4 máy'), findsOneWidget);
+      expect(find.textContaining('Quét xong: tìm thấy 5 máy'), findsOneWidget);
 
       // The mock S19 authenticated with a saved set: the panel names
       // the winning login (v0.23 cred_label).
@@ -155,6 +161,16 @@ void main() {
         find.text('Board 2: 24/24 chip • 88°C'),
       );
       expect(hotLine.style!.color, BeeSkyColors.hotTemp);
+
+      // Selecting the Whatsminer (v0.30): the panel names the new
+      // family, its OVER_TEMP box shows, and its boards carry temps
+      // with the honest 0/0 chip counts of the socket contract.
+      await tester.tap(find.text('192.168.2.105'));
+      await tester.pumpAndSettle();
+      expect(find.text('192.168.2.105 • Whatsminer'), findsOneWidget);
+      expect(find.textContaining('[OVER_TEMP]'), findsOneWidget);
+      expect(find.text('Board 1: 0/0 chip • 62°C'), findsOneWidget);
+      expect(find.text('Board 3: 0/0 chip • 65°C'), findsOneWidget);
 
       // Closing the panel gives the table the full width again.
       await tester.tap(find.byIcon(Icons.close));

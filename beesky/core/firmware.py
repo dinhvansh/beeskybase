@@ -199,7 +199,8 @@ def identify(ip: str, *, http_port: int = 80, cgminer_port: int = 4028,
         return info
     if cand.source != "stock":
         info["notes"].append(
-            "chỉ thấy cgminer RPC — không đủ thông tin để kết luận firmware")
+            f"chỉ thấy nguồn {cand.source} — không đủ thông tin để "
+            "kết luận firmware")
         return info
 
     client = BitmainClient(ip, port=http_port, timeout=max(timeout, 2.0),

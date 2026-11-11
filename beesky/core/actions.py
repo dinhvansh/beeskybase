@@ -14,6 +14,9 @@ Per-source reality (checked against the firmwares' own documents):
     APIs are provisioned read-only (no ``W:`` grant in ``api-allow``)
     and refuse it with ``STATUS E`` / "Access denied"; that refusal is
     surfaced verbatim as the failure message.
+  * avalon (v0.30) — the same cgminer ``restart`` RPC; Avalon is the
+    cgminer wire with a Canaan claim (docs/vendor-coverage-mapping.md
+    §2).
   * dashd (VNish/HashCore) — ``POST /api/v1/system/reboot`` from the
     firmware's OpenAPI doc (``api-doc.json``). Write endpoints need a
     bearer JWT or an ``x-api-key`` header; with only a password the
@@ -21,6 +24,9 @@ Per-source reality (checked against the firmwares' own documents):
     first.
   * stock Bitmain — ``GET /cgi-bin/reboot.cgi`` behind the usual
     digest auth.
+  * whatsminer (v0.30) — NOT SUPPORTED: privileged calls ride the
+    MicroBT token session and the token computation is not in the
+    dissected contract (docs/vendor-coverage-mapping.md G-W1).
 
 ``switch_pool``
   * dashd ONLY, via two documented mechanisms:
@@ -457,12 +463,22 @@ def execute(ip: str, source: str | None, command_type: str,
     payload = payload or {}
     try:
         if command_type == "reboot":
-            if source == "cgminer":
+            if source in ("cgminer", "avalon"):
+                # Avalon is the cgminer wire with a Canaan claim —
+                # the privileged restart RPC is the family mechanism
+                # (v0.30, docs/vendor-coverage-mapping.md §2).
                 return _reboot_cgminer(ip, cfg)
             if source == "vnish":
                 return _reboot_dashd(ip, cfg)
             if source == "stock":
                 return _reboot_stock(ip, cfg)
+            if source == "whatsminer":
+                # Whatsminer privileged calls ride its token
+                # session; the token computation is not in the
+                # dissected contract (mapping G-W1) — honest gap,
+                # never a pretend attempt.
+                return False, (f"reboot is {NOT_SUPPORTED} "
+                               f"(source: 'whatsminer')")
             return False, f"reboot: unknown miner source {source!r}"
         if command_type == "switch_pool":
             if source == "vnish":

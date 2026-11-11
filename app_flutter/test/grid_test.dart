@@ -665,21 +665,35 @@ void registerGridWidgetTests() {
       '192.168.2.102',
       '192.168.2.103',
       '192.168.2.104',
+      '192.168.2.105',
     ];
     expect(_ipOrder(tester, ips), ips); // default: IP ascending
 
     await tester.tap(find.text('NHIỆT'));
     await tester.pumpAndSettle();
-    // maxTemp: L9 59 < S19 65 < Z15 88 < dead (null, last).
+    // maxTemp: L9 59 < S19 65 < Whatsminer 87 < Z15 88 < dead
+    // (null, last).
     expect(
       _ipOrder(tester, ips),
-      ['192.168.2.102', '192.168.2.101', '192.168.2.103', '192.168.2.104'],
+      [
+        '192.168.2.102',
+        '192.168.2.101',
+        '192.168.2.105',
+        '192.168.2.103',
+        '192.168.2.104',
+      ],
     );
     await tester.tap(find.text('NHIỆT'));
     await tester.pumpAndSettle();
     expect(
       _ipOrder(tester, ips),
-      ['192.168.2.103', '192.168.2.101', '192.168.2.102', '192.168.2.104'],
+      [
+        '192.168.2.103',
+        '192.168.2.105',
+        '192.168.2.101',
+        '192.168.2.102',
+        '192.168.2.104',
+      ],
     );
   });
 
@@ -689,11 +703,11 @@ void registerGridWidgetTests() {
     addTearDown(() => _deleteDir(tmp));
     await _pumpHome(tester, tmp: tmp);
     await _runScan(tester);
-    expect(find.text('Đang hiển thị 4 / 4 máy'), findsOneWidget);
+    expect(find.text('Đang hiển thị 5 / 5 máy'), findsOneWidget);
 
     await tester.enterText(find.byType(TextField).at(1), 'z15');
     await tester.pumpAndSettle();
-    expect(find.text('Đang hiển thị 1 / 4 máy'), findsOneWidget);
+    expect(find.text('Đang hiển thị 1 / 5 máy'), findsOneWidget);
     expect(find.text('192.168.2.103'), findsOneWidget);
     expect(find.text('192.168.2.102'), findsNothing);
   });
@@ -711,17 +725,17 @@ void registerGridWidgetTests() {
 
     await tester.tap(find.text('Cô lập: đã chọn'));
     await tester.pumpAndSettle();
-    expect(find.text('Đang hiển thị 1 / 4 máy'), findsOneWidget);
+    expect(find.text('Đang hiển thị 1 / 5 máy'), findsOneWidget);
     expect(find.text('192.168.2.102'), findsOneWidget);
     expect(find.text('192.168.2.101'), findsNothing);
 
     await tester.tap(find.text('Cô lập: lỗi'));
     await tester.pumpAndSettle();
-    expect(find.text('Đang hiển thị 3 / 4 máy'), findsOneWidget);
+    expect(find.text('Đang hiển thị 4 / 5 máy'), findsOneWidget);
 
     await tester.tap(find.text('Cô lập: lỗi'));
     await tester.pumpAndSettle();
-    expect(find.text('Đang hiển thị 4 / 4 máy'), findsOneWidget);
+    expect(find.text('Đang hiển thị 5 / 5 máy'), findsOneWidget);
 
     // Ctrl+A selects everything visible; Esc clears it again.
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
@@ -729,11 +743,11 @@ void registerGridWidgetTests() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.keyA);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pumpAndSettle();
-    expect(find.text('Đã chọn 4'), findsOneWidget);
+    expect(find.text('Đã chọn 5'), findsOneWidget);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.escape);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    expect(find.text('Đã chọn 4'), findsNothing);
+    expect(find.text('Đã chọn 5'), findsNothing);
 
     // Ctrl+F puts the keyboard in the search field.
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
@@ -765,8 +779,9 @@ void registerGridWidgetTests() {
     await tester.enterText(dialogFields.first, '100');
     await tester.tap(find.text('Áp dụng'));
     await tester.pumpAndSettle();
-    // Native-unit values over 100: the S19 (110.5) + the Z15 (1101).
-    expect(find.text('Đang hiển thị 2 / 4 máy'), findsOneWidget);
+    // Native-unit values over 100: the S19 (110.5), the Z15
+    // (1101) and the Whatsminer (111.8).
+    expect(find.text('Đang hiển thị 3 / 5 máy'), findsOneWidget);
     expect(find.text('Bộ lọc (1)'), findsOneWidget);
 
     // Save the rows as a named preset, then clear and re-apply.
@@ -781,7 +796,7 @@ void registerGridWidgetTests() {
     // the dialog's action is the last one.
     await tester.tap(find.text('Áp dụng').last);
     await tester.pumpAndSettle();
-    expect(find.text('Đang hiển thị 4 / 4 máy'), findsOneWidget);
+    expect(find.text('Đang hiển thị 5 / 5 máy'), findsOneWidget);
 
     await tester.tap(find.text('Bộ lọc'));
     await tester.pumpAndSettle();
@@ -789,7 +804,7 @@ void registerGridWidgetTests() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Áp dụng').last); // the dialog's button
     await tester.pumpAndSettle();
-    expect(find.text('Đang hiển thị 2 / 4 máy'), findsOneWidget);
+    expect(find.text('Đang hiển thị 3 / 5 máy'), findsOneWidget);
 
     // The preset is durable: it is in the grid file on disk.
     await _flushIo(tester);

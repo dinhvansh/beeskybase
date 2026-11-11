@@ -37,6 +37,14 @@ What each family genuinely exposes (evidence in the mapping):
     fan speeds work like cgminer; pools have NO CGI source, so
     the RPC `pools` command is attempted and its failure is the
     section's stated reason.
+  * whatsminer (v0.30, docs/vendor-coverage-mapping.md §1): the
+    socket dialect's own reads — boards from `devs` (board
+    temperatures; chip counts are NOT in the evidenced contract,
+    so the section carries counts 0/0 rather than inventing them),
+    pools from `pools`, fans from the summary's Fan Speed In/Out
+    pair.
+  * avalon (v0.30): the cgminer wire with a Canaan claim — the
+    cgminer sections below serve it unchanged.
 """
 
 from __future__ import annotations
@@ -49,6 +57,7 @@ from .bitmain import BitmainClient, BitmainError, _to_cgminer_shape
 from .cgminer import CgminerClient, CgminerError
 from .dashd import DashdClient, DashdError, _temp_max
 from .discover import probe_host
+from .whatsminer import WhatsminerClient, WhatsminerError
 
 
 def _unsupported(reason: str) -> dict:
@@ -261,6 +270,63 @@ def _dashd_sections(client: DashdClient) -> tuple[dict, dict, dict]:
 
 
 # ---------------------------------------------------------------------------
+# whatsminer (socket dialect) sections
+# ---------------------------------------------------------------------------
+
+def _whatsminer_sections(client: WhatsminerClient) -> tuple[dict, dict, dict]:
+    """(boards, pools, fans) from the dialect's own reads."""
+    # --- boards: devs entries; temps only, counts stay 0/0 (G-W2)
+    try:
+        boards_list = client.devs()
+    except WhatsminerError as exc:
+        boards = _unsupported(str(exc))
+    else:
+        if boards_list:
+            boards = {"supported": True, "boards": [{
+                "index": idx,
+                "chips_total": 0,
+                "chips_ok": 0,
+                "dead_positions": [],
+                "other_chars": {},
+                "temp_c": report._num(entry.get("Temperature")),
+            } for idx, entry in enumerate(boards_list, start=1)]}
+        else:
+            boards = _unsupported("devs read carries no boards")
+
+    # --- pools: the pools read, inspect-shaped like the RPC one
+    try:
+        pool_entries = client.pools_list()
+    except WhatsminerError as exc:
+        pools = _unsupported(str(exc))
+    else:
+        pools = {"supported": True, "pools": [{
+            "id": entry.get("POOL"),
+            "url": entry.get("URL"),
+            "user": entry.get("User"),
+            "status": entry.get("Status"),
+            "accepted": entry.get("Accepted"),
+            "rejected": entry.get("Rejected"),
+        } for entry in pool_entries]}
+
+    # --- fans: the summary's Fan Speed In/Out pair
+    try:
+        summary = client.summary_item()
+    except WhatsminerError as exc:
+        fans = _unsupported(str(exc))
+    else:
+        speeds = [report._num(summary.get(key))
+                  for key in ("Fan Speed In", "Fan Speed Out")]
+        speeds = [s for s in speeds if s is not None]
+        if speeds:
+            fans = {"supported": True, "mode": None,
+                    "fans": [{"id": i + 1, "rpm": int(rpm)}
+                             for i, rpm in enumerate(speeds)]}
+        else:
+            fans = _unsupported("summary carries no fan speeds")
+    return boards, pools, fans
+
+
+# ---------------------------------------------------------------------------
 # entry point
 # ---------------------------------------------------------------------------
 
@@ -303,6 +369,13 @@ def inspect_device(ip: str, *, timeout: float = 3.0,
             api_key=api_key or cand.dashd_api_key,
             token=token or cand.dashd_token)
         boards, pools, fans = _dashd_sections(client)
+        doc.update({"boards": boards, "pools": pools, "fans": fans})
+        return doc
+
+    if cand.source == "whatsminer":
+        client = WhatsminerClient(ip, port=cand.cgminer_port,
+                                  timeout=fetch_timeout)
+        boards, pools, fans = _whatsminer_sections(client)
         doc.update({"boards": boards, "pools": pools, "fans": fans})
         return doc
 

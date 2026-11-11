@@ -77,8 +77,9 @@ from . import actions, inspect as inspect_mod, patterns, report
 from .bitmain import BitmainClient, BitmainError
 from .cgminer import CgminerClient, CgminerError
 from .dashd import DashdClient, DashdError
-from .discover import ordered_creds, probe_host
+from .discover import CRED_TYPES, ordered_creds, probe_host
 from .groups import GroupStore, effective_creds
+from .whatsminer import WhatsminerClient, WhatsminerError
 
 TASK_TYPES = ("rescan", "reboot", "switch_pool",
               # v0.29 VNish tail (docs/vnish-ops-mapping.md): the
@@ -127,7 +128,7 @@ def _normalise_creds(data: list, source: str) -> list[dict]:
             "user": user if isinstance(user, str) else "",
             "password": secret if isinstance(secret, str) else "",
             "api_key": api_key if has_key else None,
-            "type": raw_type if raw_type in ("stock", "vnish") else "any",
+            "type": raw_type if raw_type in CRED_TYPES else "any",
         })
     return creds
 
@@ -440,7 +441,15 @@ def _fetch_record(cand, timeout: float) -> dict:
     mirrored: the candidate carries the auth the probe won)."""
     ip = cand.ip
     fetch_timeout = max(timeout, 2.0)
-    if cand.source == "vnish":
+    if cand.source == "whatsminer":
+        client = WhatsminerClient(ip, port=cand.cgminer_port,
+                                  timeout=fetch_timeout)
+        try:
+            record = client.fetch_record(ip)
+        except WhatsminerError as exc:
+            record = report.error_record(ip, str(exc),
+                                         source="whatsminer")
+    elif cand.source == "vnish":
         client = DashdClient(ip, port=cand.http_port, timeout=fetch_timeout,
                              api_key=cand.dashd_api_key,
                              token=cand.dashd_token)
@@ -458,16 +467,19 @@ def _fetch_record(cand, timeout: float) -> dict:
         except BitmainError as exc:
             record = report.error_record(ip, str(exc), source="stock")
     else:
+        # cgminer family ("avalon" is the same wire, refined by
+        # the probe; the stats cache rides the candidate, v0.30).
+        source = cand.source if cand.source == "avalon" else "cgminer"
         client = CgminerClient(ip, port=cand.cgminer_port,
                                timeout=fetch_timeout)
         try:
             summary = client.summary()
-            stats = client.stats()
+            stats = cand.stats_data or client.stats()
         except CgminerError as exc:
-            record = report.error_record(ip, str(exc), source="cgminer")
+            record = report.error_record(ip, str(exc), source=source)
         else:
             record = report.build_record(ip, summary, stats,
-                                         source="cgminer")
+                                         source=source)
             # Pool enrichment (v0.28) — the cli fetch's twin
             # (docs/presets-ipreport-mapping.md §4).
             pools = client.pools_normalised()

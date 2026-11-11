@@ -449,14 +449,25 @@ class MockBridge implements BeeSkyBridge {
    "max_temp_c": null,
    "problems": [{"code": "FETCH_ERROR", "severity": "error",
                  "detail": "không kết nối được (cổng 4028/80)"}],
-   "status": "CHECK", "rate_value": null, "rate_unit": null, "ths": null}
+   "status": "CHECK", "rate_value": null, "rate_unit": null, "ths": null},
+  {"ip": "192.168.2.105", "model": "WhatsMiner M30S", "source": "whatsminer",
+   "chains": [{"index": 0, "temp_c": 62.0, "chips_alive": 0, "chips_total": 0},
+              {"index": 1, "temp_c": 87.0, "chips_alive": 0, "chips_total": 0},
+              {"index": 2, "temp_c": 65.0, "chips_alive": 0, "chips_total": 0}],
+   "fans_rpm": [4560, 4620], "chips_alive": 0, "chips_total": 0,
+   "max_temp_c": 87.0,
+   "problems": [{"code": "OVER_TEMP", "severity": "warn",
+                 "detail": "chain 2: 87 C >= 85 C limit"}],
+   "pools": [{"url": "stratum+tcp://btc.pool.example:3333",
+              "worker": "wmworker.001", "status": "Alive"}],
+   "status": "CHECK", "rate_value": 111.8, "rate_unit": "TH/s", "ths": 111.8}
  ],
- "scanned": 254, "found": 4, "elapsed_s": 3.42}
+ "scanned": 254, "found": 5, "elapsed_s": 3.42}
 ''';
 
   @override
   Future<SysInfo> sysinfo() async =>
-      const SysInfo(version: '0.29.0', defaultTarget: '192.168.2.0/24');
+      const SysInfo(version: '0.30.0', defaultTarget: '192.168.2.0/24');
 
   @override
   Future<ScanResult> scan(String target, {String? credsFile}) async {
@@ -665,6 +676,66 @@ class MockBridge implements BeeSkyBridge {
       'ip': '192.168.2.104',
       'source': null,
       'error': 'không kết nối được (cổng 4028/80) (mock)',
+    },
+    // Whatsminer (v0.30): boards carry temps with chip counts
+    // 0/0 — per-chip data is not in the evidenced socket contract
+    // (docs/vendor-coverage-mapping.md G-W2), exactly like the
+    // real core's inspect document.
+    '192.168.2.105': {
+      'ip': '192.168.2.105',
+      'source': 'whatsminer',
+      'model': 'WhatsMiner M30S',
+      'cred_label': null,
+      'boards': {
+        'supported': true,
+        'boards': [
+          {
+            'index': 1,
+            'chips_total': 0,
+            'chips_ok': 0,
+            'dead_positions': <int>[],
+            'other_chars': <String, int>{},
+            'temp_c': 62.0,
+          },
+          {
+            'index': 2,
+            'chips_total': 0,
+            'chips_ok': 0,
+            'dead_positions': <int>[],
+            'other_chars': <String, int>{},
+            'temp_c': 87.0,
+          },
+          {
+            'index': 3,
+            'chips_total': 0,
+            'chips_ok': 0,
+            'dead_positions': <int>[],
+            'other_chars': <String, int>{},
+            'temp_c': 65.0,
+          },
+        ],
+      },
+      'pools': {
+        'supported': true,
+        'pools': [
+          {
+            'id': 0,
+            'url': 'stratum+tcp://btc.pool.example:3333',
+            'user': 'wmworker.001',
+            'status': 'Alive',
+            'accepted': 123456,
+            'rejected': 123,
+          },
+        ],
+      },
+      'fans': {
+        'supported': true,
+        'mode': null,
+        'fans': [
+          {'id': 1, 'rpm': 4560},
+          {'id': 2, 'rpm': 4620},
+        ],
+      },
     },
   };
 }
