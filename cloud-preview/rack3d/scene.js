@@ -18,6 +18,7 @@ export function mount(host,api){
   scene.background=new T.Color(c.bg);
   const renderer=new T.WebGLRenderer({antialias:true});
   renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  renderer.shadowMap.enabled=true;renderer.shadowMap.type=T.PCFSoftShadowMap;renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=1.15;
   host.prepend(renderer.domElement);
   const canvas=renderer.domElement;
   canvas.tabIndex=0;canvas.setAttribute('aria-label','Xưởng 3D: kéo nền để xoay, cuộn để zoom. Dùng sơ đồ 2D để thao tác bằng bàn phím.');
@@ -25,20 +26,21 @@ export function mount(host,api){
   const controls=new OrbitControls(camera,canvas);
   controls.maxPolarAngle=Math.PI*.49;controls.minDistance=3;controls.maxDistance=120;
   scene.add(new T.HemisphereLight(0xffffff,0x657080,2.4));
-  const light=new T.DirectionalLight(0xffffff,3);light.position.set(5,12,8);scene.add(light);
+  const light=new T.DirectionalLight(0xffffff,3);light.position.set(5,16,8);light.castShadow=true;light.shadow.mapSize.set(2048,2048);Object.assign(light.shadow.camera,{left:-26,right:26,top:20,bottom:-20,far:65});light.shadow.bias=-.001;scene.add(light);
+  const fill=new T.DirectionalLight(0xd9ecff,1.8);fill.position.set(-12,8,-8);scene.add(fill);
   const slots=[],groups=[],rackMeshes=[],ray=new T.Raycaster(),pointer=new T.Vector2();
   const modelLoads=[];let loadedModels=0;
   const frameMat=new T.MeshStandardMaterial({color:c.frame,roughness:.65,metalness:.35});
   const shelfMat=new T.MeshStandardMaterial({color:c.shelf,roughness:.8});
   const fanMat=new T.MeshStandardMaterial({color:c.fan,roughness:.9});
   const box=new T.BoxGeometry(1,1,1),fanGeo=new T.CylinderGeometry(.28,.28,.025,12),hubGeo=new T.CylinderGeometry(.095,.095,.03,10);
-  function block(group,x,y,z,w,h,d,mat){const m=new T.Mesh(box,mat);m.position.set(x,y,z);m.scale.set(w,h,d);group.add(m);return m}
+  function block(group,x,y,z,w,h,d,mat){const m=new T.Mesh(box,mat);m.position.set(x,y,z);m.scale.set(w,h,d);m.receiveShadow=true;m.castShadow=h>.15;group.add(m);return m}
   function label(text,x,y,z,width,parent=scene){
     const el=document.createElement('canvas');el.width=512;el.height=96;
     const ctx=el.getContext('2d');ctx.fillStyle=c.labelBg;ctx.fillRect(0,0,512,96);
     ctx.fillStyle=c.text;ctx.font='600 48px Inter, Arial';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(text,256,48,488);
     const texture=new T.CanvasTexture(el);texture.colorSpace=T.SRGBColorSpace;
-    const s=new T.Sprite(new T.SpriteMaterial({map:texture,depthTest:false}));s.position.set(x,y,z);s.scale.set(width,width/5.33,1);parent.add(s);
+    const s=new T.Sprite(new T.SpriteMaterial({map:texture,depthTest:true}));s.position.set(x,y,z);s.scale.set(width,width/5.33,1);parent.add(s);
   }
   const racks=api.racks(),columns=Math.min(3,racks.length||1);
   const span=Math.max(8,...racks.map(r=>r.cols*1.18+1)),height=Math.max(5,...racks.map(r=>r.rows*1.12+1));
@@ -62,7 +64,7 @@ export function mount(host,api){
           const clone=template.clone(true),holder=new T.Group();
           holder.scale.set(1/m.scale.x,1/m.scale.y,1/m.scale.z);
           const materials=[];
-          clone.traverse(o=>{if(o.isMesh){o.material=(Array.isArray(o.material)?o.material:[o.material]).map(mat=>{const owned=mat.clone();owned.transparent=true;materials.push(owned);return owned});if(o.material.length===1)o.material=o.material[0]}});
+          clone.traverse(o=>{if(o.isMesh){o.material=(Array.isArray(o.material)?o.material:[o.material]).map(mat=>{const owned=mat.clone();owned.transparent=true;o.castShadow=true;o.receiveShadow=true;materials.push(owned);return owned});if(o.material.length===1)o.material=o.material[0]}});
           holder.add(clone);m.add(holder);m.userData.hasModel=true;m.userData.modelMaterials=materials;
           const strip=new T.Mesh(box,new T.MeshBasicMaterial({color}));strip.position.set(0,.45,.53);strip.scale.set(.85,.035,.03);m.add(strip);
           loadedModels++;host.dataset.loadedModels=String(loadedModels);reset();draw();
@@ -70,30 +72,65 @@ export function mount(host,api){
       }
     }
     g.traverse(o=>{if(o.isMesh){o.userData.rackGroup=g;rackMeshes.push(o)}});
-    label(r.name+' · '+r.slots.filter(Boolean).length+'/'+r.slots.length,0,h+.65,0,Math.min(w,7),g);
+    label(r.name+' · '+r.slots.filter(Boolean).length+'/'+r.slots.length,0,h+.65,0,Math.min(w*.65,4.2),g);
     label(r.zone,0,.03,1.5,Math.min(w,5),g);
   });
   const floorWidth=api.floor.width,floorDepth=api.floor.depth;
   block(scene,0,-.08,0,floorWidth,.12,floorDepth,new T.MeshStandardMaterial({color:c.floor,roughness:1}));
-  // A cutaway hall keeps all rack fronts visible.
-  block(scene,0,.7,-floorDepth/2,floorWidth,1.4,.15,shelfMat);
-  block(scene,-floorWidth/2,.7,0,.15,1.4,floorDepth,shelfMat);
-  const safetyMat=new T.MeshStandardMaterial({color:c.brand,roughness:1});
-  for(let lane=0;lane<Math.max(1,Math.floor(floorDepth/6));lane++){
-    const z=-floorDepth/2+lane*6+3;
-    block(scene,0,.015,z,floorWidth-2,.025,.07,safetyMat);
-    block(scene,0,.015,z+1.25,floorWidth-2,.025,.07,safetyMat);
-    for(let x=-floorWidth/2+1;x<floorWidth/2-1;x+=2)block(scene,x,.015,z+.63,.65,.025,.08,safetyMat);
+  // Open front and roof: architecture frames the layout without hiding machines.
+  const wallMat=new T.MeshStandardMaterial({color:c.shelf,roughness:.85});
+  const trimMat=new T.MeshStandardMaterial({color:c.frame,roughness:.55,metalness:.5});
+  const hydroMat=new T.MeshStandardMaterial({color:c.selected,roughness:.45,metalness:.25});
+  const supplyMat=new T.MeshStandardMaterial({color:c.normal,roughness:.45,metalness:.25});
+  const lampMat=new T.MeshBasicMaterial({color:0xfff4dc});
+  const hallHeight=Math.max(height+2,8),back=-floorDepth/2;
+  block(scene,0,hallHeight/2,back,floorWidth,hallHeight,.18,wallMat);
+  block(scene,-floorWidth/2,hallHeight/2,0,.18,hallHeight,floorDepth,wallMat);
+  // Wall panels, steel columns and overhead service beams.
+  for(let x=-floorWidth/2+2;x<floorWidth/2;x+=4){
+    block(scene,x,hallHeight/2,back+.12,.08,hallHeight,.08,trimMat);
+    block(scene,x,hallHeight-.25,back+.5,.12,.22,1,trimMat);
+    block(scene,x,hallHeight-.45,back+.7,1.8,.06,.32,lampMat);
+    
   }
-  for(const x of [-floorWidth/2,floorWidth/2])for(const z of [-floorDepth/2,floorDepth/2])block(scene,x,height/2,z,.2,height,.2,frameMat);
-  const grid=new T.GridHelper(floorWidth,Math.ceil(floorWidth),c.grid,c.grid);grid.scale.z=floorDepth/floorWidth;grid.position.y=.001;scene.add(grid);
+  for(const z of [back,floorDepth/2])for(const x of [-floorWidth/2,floorWidth/2])block(scene,x,hallHeight/2,z,.22,hallHeight,.22,trimMat);
+  block(scene,0,hallHeight,back,floorWidth,.2,.25,trimMat);block(scene,-floorWidth/2,hallHeight,0,.25,.2,floorDepth,trimMat);
+  // A perimeter cooling skid is illustrative, independent of manually assigned groups.
+  const skid=new T.Group();skid.position.set(floorWidth/2-3,0,back+2);scene.add(skid);
+  block(skid,0,.2,0,3.6,.3,1.8,trimMat);
+  block(skid,0,1,0,3.2,1.3,1.5,wallMat);
+  for(const x of [-.85,.85]){
+    const fan=new T.Mesh(new T.CylinderGeometry(.52,.52,.1,24),fanMat);fan.position.set(x,1.7,0);skid.add(fan);
+    for(let i=0;i<4;i++){const blade=block(skid,x,1.77,0,.8,.025,.1,trimMat);blade.rotation.y=i*Math.PI/4;}
+  }
+  label('BỘ TẢN · MINH HỌA',0,2.4,0,3.5,skid);
+  for(const [offset,material] of [[0,hydroMat],[.25,supplyMat]]){
+    block(scene,0,2.2+offset,back+.4,floorWidth-4,.09,.09,material);
+    block(scene,floorWidth/2-3,1.3,back+.45,.09,1.8,.09,material);
+  }
+  // Ventilation bank and power cabinet on the rear wall.
+  for(let x=-floorWidth/2+3;x<-floorWidth/2+11;x+=2.5){
+    block(scene,x,3,back+.18,1.8,1.8,.25,trimMat);
+    const vent=new T.Mesh(new T.CylinderGeometry(.68,.68,.12,20),fanMat);vent.rotation.x=Math.PI/2;vent.position.set(x,3,back+.36);scene.add(vent);
+    for(let v=-.5;v<=.5;v+=.25)block(scene,x,3+v,back+.45,1.3,.035,.04,wallMat);
+  }
+  block(scene,-floorWidth/2+1,1.1,back+3,1.2,2.2,.8,trimMat);
+  label('BEESKY · MINING WORKSHOP',0,hallHeight-1,back+.3,9);
+  const safetyMat=new T.MeshBasicMaterial({color:c.brand});
+  // Mark the perimeter service route; the central floor stays free for rack layout.
+  for(const z of [-floorDepth/2+3,floorDepth/2-3]){
+    block(scene,0,.012,z,floorWidth-4,.02,.055,safetyMat);
+    for(let x=-floorWidth/2+2;x<floorWidth/2-2;x+=2)block(scene,x,.014,z+.5,.7,.02,.07,safetyMat);
+  }
+  const grid=new T.GridHelper(floorWidth,Math.ceil(floorWidth),c.grid,c.grid);grid.scale.z=floorDepth/floorWidth;grid.position.y=.001;grid.material.transparent=true;grid.material.opacity=.22;scene.add(grid);
   const extent=new T.Box3();groups.forEach(g=>extent.expandByObject(g));
   const center=extent.isEmpty()?new T.Vector3(0,1.5,0):extent.getCenter(new T.Vector3());center.y=height*.4;
   const size=extent.isEmpty()?new T.Vector3(20,5,12):extent.getSize(new T.Vector3());
   const selection=new T.BoxHelper(new T.Object3D(),c.selected);selection.visible=false;scene.add(selection);
-  function selectRack(id){const g=groups.find(g=>g.userData.r.id===id);selection.visible=!!g&&api.mode()==='racks';if(g)selection.setFromObject(g);draw()}
+  function selectRack(id){const g=groups.find(g=>g.userData.r.id===id);selection.visible=!!g;if(g)selection.setFromObject(g);draw()}
   function draw(){renderer.render(scene,camera)}
-  function view(mode='overview'){
+  function view(mode='hall'){
+    if(mode==='hall'){controls.target.set(0,1.5,0);const dist=Math.max(floorWidth*1.05,floorDepth*1.5)*Math.max(1,1.25/camera.aspect);camera.position.set(dist*.58,dist*.65,dist*.85);controls.update();draw();return}
     controls.target.copy(center);const dist=Math.max(12,size.x*.95,size.z*.95,height*2)*Math.max(1,1.6/camera.aspect);
     if(mode==='front')camera.position.set(center.x,center.y,center.z+dist);
     else if(mode==='top')camera.position.set(center.x,dist*1.2,center.z+.01);
@@ -125,7 +162,7 @@ export function mount(host,api){
   canvas.addEventListener('pointerleave',()=>{if(!drag&&!rackDrag)api.hover(null)});
   const escape=e=>{if(e.key==='Escape'){cancel();api.status('Đã hủy thao tác kéo.')}if(e.code==='KeyR'&&document.activeElement===canvas&&api.mode()==='racks'&&!rackDrag){const r=racks.find(r=>r.id===api.selectedRack());if(r){e.preventDefault();api.moveRack(r,{...r.placement,rotation:r.placement.rotation+90})}}};window.addEventListener('keydown',escape);
   function focusDevice(id){const m=slots.find(s=>s.userData.d?.id===id);if(!m)return;const pos=new T.Vector3();m.getWorldPosition(pos);controls.target.copy(pos);camera.position.copy(pos).add(new T.Vector3(1.8,1.5,7));controls.update();describe(m);reset();draw()}
-  resize();view(api.mode()==='racks'?'top':'overview');selectRack(api.selectedRack());
+  resize();view(api.mode()==='racks'?'top':'hall');selectRack(api.selectedRack());
   if(api.camera){camera.position.fromArray(api.camera.position);controls.target.fromArray(api.camera.target);controls.update()}
   reset();draw();
   modelLoads.forEach(load=>load());
