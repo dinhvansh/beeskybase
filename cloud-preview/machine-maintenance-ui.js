@@ -4,13 +4,18 @@ const maintenanceNames={active:'Sẵn sàng vận hành',broken:'Hỏng / chờ 
 function maintenanceLabel(d){return maintenanceNames[d.maintenanceState||'active']}
 const beforeMaintenanceIssue=layoutIssue;
 layoutIssue=function(d){return d.maintenanceState&&d.maintenanceState!=='active'?maintenanceLabel(d):beforeMaintenanceIssue(d)};
-function maintenanceSection(d){return `<section class="machine-device-meta"><strong>${esc(maintenanceLabel(d))}</strong>${d.maintenanceNotes?`<p>${esc(d.maintenanceNotes)}</p>`:''}<div class="machine-manager-actions"><button class="btn small" data-maintenance="edit" data-device="${d.id}">Tình trạng & sửa chữa</button>${locationOf(d.id)?`<button class="btn small" data-maintenance="detach" data-device="${d.id}">Tháo khỏi kệ</button>`:''}</div></section>`}
+function maintenanceSection(d){return `<section class="machine-device-meta"><strong>${esc(maintenanceLabel(d))}</strong>${d.maintenanceNotes?`<p>${esc(d.maintenanceNotes)}</p>`:''}<div class="machine-manager-actions"><button type="button" class="btn small" data-maintenance="edit" data-device="${d.id}">Tình trạng & sửa chữa</button>${locationOf(d.id)?`<button type="button" class="btn small" data-maintenance="detach" data-device="${d.id}">Tháo khỏi kệ</button>`:''}</div></section>`}
 const beforeMaintenanceAssign=assign;
 assign=function(r,i,id){const d=id&&layout.devices.find(d=>d.id===id);if(d?.maintenanceState==='retired')throw Error('Máy đã ngừng sử dụng. Cập nhật tình trạng trước khi xếp lại.');return beforeMaintenanceAssign(r,i,id)};
 const beforeMaintenanceRackHtml=rackHtml;
 rackHtml=function(r){return beforeMaintenanceRackHtml(r).replace(/<button class="rack-slot[\s\S]*?<\/button>/g,html=>{const index=+(html.match(/data-slot="(\d+)"/)||[])[1],d=layout.devices.find(d=>d.id===r.slots[index]);return d?.maintenanceState&&d.maintenanceState!=='active'?html.replace('class="rack-slot','class="rack-slot maintenance-fault').replace('</button>',`<small class="machine-slot-tags">${esc(maintenanceLabel(d))}</small></button>`):html})};
 const beforeMaintenanceInspect=inspectSlot;
 inspectSlot=function(r,i){beforeMaintenanceInspect(r,i);const d=layout.devices.find(d=>d.id===r.slots[i]);if(d)document.querySelector('#modal .detail-grid')?.insertAdjacentHTML('afterend',maintenanceSection(d))};
+// 2D arrangement opens editSlot instead of inspectSlot; expose the same actions there.
+const beforeMaintenanceEditSlot=editSlot;
+editSlot=function(r,i){beforeMaintenanceEditSlot(r,i);const d=layout.devices.find(d=>d.id===r.slots[i]);if(d)document.querySelector('#slot-form')?.insertAdjacentHTML('afterbegin',maintenanceSection(d))};
+const beforeMaintenanceFarmView=farmsView;
+farmsView=function(){const html=beforeMaintenanceFarmView();return layout.depth===false?html.replace('<div class="rack-toolbar">','<p class="maintenance-2d-hint">Bấm máy trong kệ để xem chi tiết, tháo khỏi kệ hoặc cập nhật tình trạng sửa chữa.</p><div class="rack-toolbar">'):html};
 const beforeMaintenanceCards=placementCards;
 placementCards=function(){return beforeMaintenanceCards().replace(/<div class="unplaced-device[\s\S]*?<\/div><p>[\s\S]*?<\/div>/g,html=>{const id=html.match(/data-drag-device="([^"]+)"/)?.[1],d=machineGroups.device(currentSite(),id);if(!d)return html;if(d.maintenanceState==='retired')html=html.replace('draggable="true"','draggable="false"').replace('data-place-device=','disabled title="Cập nhật tình trạng trước khi xếp lại" data-place-device=');return html.replace('</small>',`</small><p class="${d.maintenanceState&&d.maintenanceState!=='active'?'key-warn':'muted'}">${esc(maintenanceLabel(d))}</p>`).replace(/<\/div>$/,`<button class="btn small full" data-maintenance="edit" data-device="${d.id}">Tình trạng & sửa chữa</button></div>`)})};
 const beforeMaintenanceHover=warehouseHover;
