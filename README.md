@@ -216,6 +216,11 @@ Thanh chọn kệ luôn có **Xoay trái / Xoay phải** theo bước 90°, **V�
 
 ### Hiệu ứng hoạt động trong xưởng
 
-Nút **Hiệu ứng: Bật/Tắt** điều khiển coin Bitcoin / `+ HASH` nổi lên, rotor minh họa ở máy gió, dòng hạt nước ở máy hydro và LED hoạt động. Máy offline không phát coin hay chạy rotor. Hiệu ứng theo máy khi đổi bố trí và theo bộ lọc đang dùng; coin/hash chỉ là trang trí, không phải số dư hay thu nhập thật.
+Nút **Hiệu ứng: Bật/Tắt** điều khiển coin Bitcoin / `+ HASH` nổi lên, dòng hạt nước ở máy hydro và LED hoạt động. Máy offline không phát coin. Hiệu ứng theo máy khi đổi bố trí và theo bộ lọc đang dùng; coin/hash chỉ là trang trí, không phải số dư hay thu nhập thật.
 
 Cảnh giới hạn 30 khung/giây, tối đa 27 sprite coin/hash, dừng vòng vẽ khi tắt hiệu ứng, ra ngoài vùng xem hoặc ẩn tab. Tôn trọng cài đặt giảm chuyển động của hệ thống. Dọn vòng hoạt ảnh và listener khi chuyển tầng, đổi cảnh hoặc đóng 3D.
+
+
+### Sửa model và nhãn kệ
+
+Model hydro loại bỏ phông nền studio đi kèm file gốc và quay mặt kết nối ra phía trước. Hai model giữ nhiều chi tiết hơn, sửa hướng mặt và triangulate khi chuyển đổi. Bỏ cánh quạt trang trí chồng lên quạt gốc. Nhãn kệ dùng lớp chữ trên màn hình, có tên, sức chứa và khu vực; giữ cỡ chữ khi zoom, theo vị trí kệ và giới hạn trong vùng xem.

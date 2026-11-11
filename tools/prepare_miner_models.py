@@ -4,6 +4,7 @@ Inputs are the user-supplied archives extracted under work/miner-models.
 Exports static, normalized GLBs; no scripts from the source blend are run.
 """
 import bpy
+import bmesh
 import json
 import math
 from pathlib import Path
@@ -40,8 +41,8 @@ for kind in ['s21', 's19']:
                         path = textures.get(filename) or textures.get(old_image.name.lower())
                         if path:
                             image = bpy.data.images.load(str(path), check_existing=True)
-                            if max(image.size) > 512:
-                                factor = 512 / max(image.size)
+                            if max(image.size) > 1024:
+                                factor = 1024 / max(image.size)
                                 image.scale(max(1, int(image.size[0] * factor)), max(1, int(image.size[1] * factor)))
             name = original.name.lower()
             if not image and any(s in name for s in ['black', 'dark', 'rubber']):
@@ -62,14 +63,26 @@ for kind in ['s21', 's19']:
                 material.node_tree.links.new(tex.outputs['Color'], node.inputs['Base Color'])
             palette[key] = material
         return palette[key]
+    if kind == 's21':
+        for source_object in bpy.context.scene.objects:
+            for source_modifier in source_object.modifiers:
+                if source_modifier.type == 'SUBSURF':
+                    source_modifier.show_viewport = False
+                    source_modifier.show_render = False
     deps = bpy.context.evaluated_depsgraph_get()
     objects = []
-    rotate = Matrix.Rotation(math.pi / 2, 4, 'X') if kind == 's21' else Matrix.Identity(4)
+    rotate = Matrix.Rotation(math.pi / 2, 4, 'Y') if kind == 's21' else Matrix.Identity(4)
     for original in list(bpy.context.scene.objects):
-        if original.type != 'MESH':
+        # The supplied hydro scene includes a 135-unit studio backdrop, not hardware.
+        if original.type != 'MESH' or (kind == 's21' and max(original.dimensions) > 20):
             continue
         mesh = bpy.data.meshes.new_from_object(original.evaluated_get(deps), depsgraph=deps)
-        mesh.transform(rotate @ original.matrix_world)
+        transform = rotate @ original.matrix_world
+        mesh.transform(transform)
+        if transform.determinant() < 0:
+            mesh.flip_normals()
+        mesh.validate(clean_customdata=False)
+        mesh.update()
         mats = [simple_material(m) for m in mesh.materials] or [simple_material(None)]
         mesh.materials.clear()
         for material in mats:
@@ -84,9 +97,9 @@ for kind in ['s21', 's19']:
     for obj in objects:
         bpy.context.view_layer.objects.active = obj
         tris = sum(max(1, len(p.vertices) - 2) for p in obj.data.polygons)
-        if tris > 100:
+        if tris > (3000 if kind == 's21' else 100):
             modifier = obj.modifiers.new('web-decimate', 'DECIMATE')
-            modifier.ratio = min(1, max(36 / tris, 14000 / max(before, 1)))
+            modifier.ratio = min(1, max((300 if kind == 's21' else 120) / tris, (90000 if kind == 's19' else 80000) / max(before, 1)))
             bpy.ops.object.modifier_apply(modifier=modifier.name)
     bpy.ops.object.select_all(action='DESELECT')
     for obj in objects:
@@ -94,6 +107,15 @@ for kind in ['s21', 's19']:
     bpy.context.view_layer.objects.active = objects[0]
     bpy.ops.object.join()
     obj = bpy.context.object
+    # Triangulate concave source polygons before glTF export; repair winding.
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
+    bmesh.ops.triangulate(bm, faces=list(bm.faces))
+    bm.to_mesh(obj.data)
+    bm.free()
+    obj.data.validate(clean_customdata=True)
+    obj.data.update(calc_edges=True)
     points = [v.co for v in obj.data.vertices]
     low = Vector(tuple(min(v[i] for v in points) for i in range(3)))
     high = Vector(tuple(max(v[i] for v in points) for i in range(3)))

@@ -6,7 +6,7 @@ import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 const minerTemplates=new Map();
 function minerTemplate(kind){
   if(!minerTemplates.has(kind)){
-    const url=kind==='hydro'?'assets/models/s21-hydro.glb':'assets/models/s19-pro-air.glb';
+    const url=kind==='hydro'?'assets/models/s21-hydro.glb?v=5':'assets/models/s19-pro-air.glb?v=5';
     const promise=new GLTFLoader().loadAsync(url).then(gltf=>{gltf.scene.traverse(o=>{if(o.geometry)o.geometry.userData.minerShared=true;for(const mat of Array.isArray(o.material)?o.material:[o.material])if(mat)for(const value of Object.values(mat))if(value?.isTexture)value.userData.minerShared=true});return gltf.scene}).catch(error=>{minerTemplates.delete(kind);throw error});
     minerTemplates.set(kind,promise);
   }
@@ -29,6 +29,8 @@ export function mount(host,api){
   scene.add(new T.HemisphereLight(0xffffff,0x657080,2.4));
   const light=new T.DirectionalLight(0xffffff,3);light.position.set(5,16,8);light.castShadow=true;light.shadow.mapSize.set(2048,2048);Object.assign(light.shadow.camera,{left:-26,right:26,top:20,bottom:-20,far:65});light.shadow.bias=-.001;scene.add(light);
   const fill=new T.DirectionalLight(0xd9ecff,1.8);fill.position.set(-12,8,-8);scene.add(fill);
+  const rackLabels=[],labelPosition=new T.Vector3();
+  const labelLayer=document.createElement('div');labelLayer.className='warehouse-label-layer';labelLayer.setAttribute('aria-hidden','true');host.append(labelLayer);
   const slots=[],groups=[],rackMeshes=[],ray=new T.Raycaster(),pointer=new T.Vector2();
   const modelLoads=[];let loadedModels=0;
   const frameMat=new T.MeshStandardMaterial({color:c.frame,roughness:.65,metalness:.35});
@@ -73,8 +75,9 @@ export function mount(host,api){
       }
     }
     g.traverse(o=>{if(o.isMesh){o.userData.rackGroup=g;rackMeshes.push(o)}});
-    label(r.name+' · '+r.slots.filter(Boolean).length+'/'+r.slots.length,0,h+.65,0,Math.min(w*.65,4.2),g);
-    label(r.zone,0,.03,1.5,Math.min(w,5),g);
+    const tag=document.createElement('div');tag.className='warehouse-rack-label';
+    const name=document.createElement('strong');name.textContent=r.name+' · '+r.slots.filter(Boolean).length+'/'+r.slots.length;
+    const zone=document.createElement('small');zone.textContent=r.zone;tag.append(name,zone);labelLayer.append(tag);rackLabels.push({tag,g,height:h});
   });
   const floorWidth=api.floor.width,floorDepth=api.floor.depth;
   block(scene,0,-.08,0,floorWidth,.12,floorDepth,new T.MeshStandardMaterial({color:c.floor,roughness:1}));
@@ -129,7 +132,22 @@ export function mount(host,api){
   const size=extent.isEmpty()?new T.Vector3(20,5,12):extent.getSize(new T.Vector3());
   const selection=new T.BoxHelper(new T.Object3D(),c.selected);selection.visible=false;scene.add(selection);
   function selectRack(id){const g=groups.find(g=>g.userData.r.id===id);selection.visible=!!g;if(g)selection.setFromObject(g);draw()}
-  function draw(){renderer.shadowMap.needsUpdate=true;renderer.render(scene,camera)}
+  function updateRackLabels(){
+    const width=host.clientWidth,height=host.clientHeight,placed=[];
+    camera.updateMatrixWorld();
+    for(const {tag,g,height:rackHeight} of rackLabels){
+      labelPosition.set(0,rackHeight+.3,0);g.localToWorld(labelPosition);labelPosition.project(camera);
+      const selected=g.userData.r.id===api.selectedRack();
+      const outside=labelPosition.z>1||labelPosition.z< -1||(!selected&&(Math.abs(labelPosition.x)>1.4||Math.abs(labelPosition.y)>1.8));
+      tag.hidden=outside;if(outside)continue;
+      const half=Math.min(tag.offsetWidth/2,width/2-8),tagHeight=tag.offsetHeight;
+      const x=T.MathUtils.clamp((labelPosition.x+1)*width/2,half+8,width-half-8);
+      let y=T.MathUtils.clamp((1-labelPosition.y)*height/2,tagHeight+8,height-12);
+      for(const box of placed)if(Math.abs(x-box.x)<half+box.half+6&&Math.abs(y-box.y)<tagHeight+6)y=Math.min(height-12,box.y+tagHeight+8);
+      placed.push({x,y,half});tag.style.left=x+'px';tag.style.top=y+'px';tag.classList.toggle('selected',selected);
+    }
+  }
+  function draw(){renderer.shadowMap.needsUpdate=true;renderer.render(scene,camera);updateRackLabels()}
   function view(mode='hall'){
     if(mode==='hall'){controls.target.set(0,1.5,0);const dist=Math.max(floorWidth*1.05,floorDepth*1.5)*Math.max(1,1.25/camera.aspect);camera.position.set(dist*.58,dist*.65,dist*.85);controls.update();draw();return}
     controls.target.copy(center);const dist=Math.max(12,size.x*.95,size.z*.95,height*2)*Math.max(1,1.6/camera.aspect);
@@ -168,5 +186,5 @@ export function mount(host,api){
   reset();draw();
   const effects=miningEffects(scene,slots,host,{...api,enabled:api.effects},()=>renderer.render(scene,camera));
   modelLoads.forEach(load=>load());
-  return {view,selectRack,focusDevice,setEffects(value){effects.setEnabled(value)},highlight(){reset();effects.refresh();draw()},cameraState(){return{position:camera.position.toArray(),target:controls.target.toArray()}},dispose(){if(disposed)return;disposed=true;effects.dispose();observer.disconnect();controls.dispose();window.removeEventListener('keydown',escape);api.hover(null);const geometries=new Set(),materials=new Set();scene.traverse(o=>{if(o.geometry&&!o.geometry.userData.minerShared)geometries.add(o.geometry);for(const material of Array.isArray(o.material)?o.material:[o.material])if(material)materials.add(material)});materials.forEach(m=>{for(const texture of Object.values(m))if(texture?.isTexture&&!texture.userData.minerShared)texture.dispose();m.dispose()});geometries.forEach(g=>g.dispose());renderer.dispose();renderer.forceContextLoss();canvas.remove()}};
+  return {view,selectRack,focusDevice,setEffects(value){effects.setEnabled(value)},highlight(){reset();effects.refresh();draw()},cameraState(){return{position:camera.position.toArray(),target:controls.target.toArray()}},dispose(){if(disposed)return;disposed=true;effects.dispose();observer.disconnect();controls.dispose();window.removeEventListener('keydown',escape);api.hover(null);const geometries=new Set(),materials=new Set();scene.traverse(o=>{if(o.geometry&&!o.geometry.userData.minerShared)geometries.add(o.geometry);for(const material of Array.isArray(o.material)?o.material:[o.material])if(material)materials.add(material)});materials.forEach(m=>{for(const texture of Object.values(m))if(texture?.isTexture&&!texture.userData.minerShared)texture.dispose();m.dispose()});geometries.forEach(g=>g.dispose());renderer.dispose();renderer.forceContextLoss();labelLayer.remove();canvas.remove()}};
 }

@@ -2,27 +2,20 @@ import * as T from 'three';
 
 // Decorative activity only: no balances, payouts or mining commands are generated.
 export function miningEffects(scene,slots,host,api,render){
-  const rotors=[],leds=[],coins=[],water=[];
+  const leds=[],coins=[],water=[];
   const blue=new T.Color(api.colors.selected);
   const coinCanvas=document.createElement('canvas');coinCanvas.width=128;coinCanvas.height=128;
   const ctx=coinCanvas.getContext('2d');ctx.fillStyle='#facc15';ctx.beginPath();ctx.arc(64,64,55,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#fff0a3';ctx.lineWidth=4;ctx.stroke();ctx.fillStyle='#694d08';ctx.font='bold 76px Arial';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('₿',64,67);
   const coinMap=new T.CanvasTexture(coinCanvas);coinMap.colorSpace=T.SRGBColorSpace;
   const hashCanvas=document.createElement('canvas');hashCanvas.width=256;hashCanvas.height=80;const hashCtx=hashCanvas.getContext('2d');hashCtx.fillStyle=api.colors.normal;hashCtx.font='bold 38px monospace';hashCtx.textAlign='center';hashCtx.fillText('+ HASH',128,52);const hashMap=new T.CanvasTexture(hashCanvas);hashMap.colorSpace=T.SRGBColorSpace;
-  const bladeGeo=new T.BoxGeometry(.28,.045,.012),dotGeo=new T.SphereGeometry(.028,6,4);
-  const bladeMat=new T.MeshBasicMaterial({color:api.colors.shelf,transparent:true,opacity:.65,depthWrite:false});
+  const dotGeo=new T.SphereGeometry(.028,6,4);
   const byRack=new Map();
   slots.forEach((slot,index)=>{
     const d=slot.userData.d;if(!d)return;
     const led=new T.Mesh(dotGeo,new T.MeshBasicMaterial({color:d.offline?api.colors.offline:api.colors.normal,transparent:true}));led.position.set(.4,.36,.59);slot.add(led);leds.push({mesh:led,online:!d.offline,phase:index*.7,slot});
     if(d.offline)return;
     if(!byRack.has(slot.userData.r.id))byRack.set(slot.userData.r.id,[]);byRack.get(slot.userData.r.id).push(slot);
-    if(api.visualModel(d)==='air'){
-      for(const y of [-.18,.18]){
-        const rotor=new T.Group();rotor.position.set(0,y,.59);
-        for(let j=0;j<3;j++){const blade=new T.Mesh(bladeGeo,bladeMat);blade.rotation.z=j*Math.PI/3;rotor.add(blade)}
-        slot.add(rotor);rotors.push({mesh:rotor,slot});
-      }
-    }else if(api.visualModel(d)==='hydro'){
+    if(api.visualModel(d)==='hydro'){
       for(let j=0;j<3;j++){const dot=new T.Mesh(dotGeo,new T.MeshBasicMaterial({color:blue,transparent:true,opacity:.8}));slot.add(dot);water.push({mesh:dot,phase:j/3,slot})}
     }
   });
@@ -33,12 +26,11 @@ export function miningEffects(scene,slots,host,api,render){
       const sprite=new T.Sprite(new T.SpriteMaterial({map:j===1?hashMap:coinMap,color:0xffffff,transparent:true,opacity:0,depthWrite:false}));sprite.scale.set(j===1 ? 1.3 : .65,j===1 ? .4 : .65,1);slot.parent.add(sprite);coins.push({mesh:sprite,slot,phase:j/3});
     }
   }
-  if(!rotors.length){bladeGeo.dispose();bladeMat.dispose()}if(!leds.length)dotGeo.dispose();if(!coins.length){coinMap.dispose();hashMap.dispose()}
+  if(!leds.length)dotGeo.dispose();if(!coins.length){coinMap.dispose();hashMap.dispose()}
   const reduced=matchMedia('(prefers-reduced-motion: reduce)');
   let enabled=api.enabled(),visible=true,disposed=false,raf=0,last=0,elapsed=0;
   function update(t){
     const ids=api.query()?api.matches():null,show=slot=>!ids||ids.has(slot.userData.d.id);
-    rotors.forEach(({mesh,slot})=>{mesh.visible=enabled&&show(slot);mesh.rotation.z=t*11});
     leds.forEach(({mesh,online,phase,slot})=>{mesh.material.opacity=online&&enabled&&show(slot) ? .65+.35*Math.sin(t*2+phase) : 1});
     water.forEach(({mesh,phase,slot})=>{mesh.visible=enabled&&show(slot);const p=(t*.35+phase)%1;mesh.position.set(.34,p*.65-.3,.6);mesh.material.opacity=Math.sin(p*Math.PI)});
     coins.forEach(({mesh,slot,phase})=>{const p=(t*.23+phase)%1;mesh.visible=enabled&&show(slot);mesh.position.copy(slot.position);mesh.position.y+=.6+p*2.2;mesh.position.x+=Math.sin(p*Math.PI*2+phase)*.12;mesh.position.z+=.75;mesh.material.opacity=Math.sin(p*Math.PI)*.95;mesh.material.rotation=Math.sin(t+phase)*.12});
