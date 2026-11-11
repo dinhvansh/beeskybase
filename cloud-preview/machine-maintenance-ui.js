@@ -1,0 +1,28 @@
+'use strict';
+const machineLifecycle=new MachineLifecycle(()=>layout.devices,()=>layout.racks);
+const maintenanceNames={active:'Sẵn sàng vận hành',broken:'Hỏng / chờ sửa',repair:'Đang sửa chữa',retired:'Hỏng hẳn / ngừng sử dụng'};
+function maintenanceLabel(d){return maintenanceNames[d.maintenanceState||'active']}
+const beforeMaintenanceIssue=layoutIssue;
+layoutIssue=function(d){return d.maintenanceState&&d.maintenanceState!=='active'?maintenanceLabel(d):beforeMaintenanceIssue(d)};
+function maintenanceSection(d){return `<section class="machine-device-meta"><strong>${esc(maintenanceLabel(d))}</strong>${d.maintenanceNotes?`<p>${esc(d.maintenanceNotes)}</p>`:''}<div class="machine-manager-actions"><button class="btn small" data-maintenance="edit" data-device="${d.id}">Tình trạng & sửa chữa</button>${locationOf(d.id)?`<button class="btn small" data-maintenance="detach" data-device="${d.id}">Tháo khỏi kệ</button>`:''}</div></section>`}
+const beforeMaintenanceAssign=assign;
+assign=function(r,i,id){const d=id&&layout.devices.find(d=>d.id===id);if(d?.maintenanceState==='retired')throw Error('Máy đã ngừng sử dụng. Cập nhật tình trạng trước khi xếp lại.');return beforeMaintenanceAssign(r,i,id)};
+const beforeMaintenanceRackHtml=rackHtml;
+rackHtml=function(r){return beforeMaintenanceRackHtml(r).replace(/<button class="rack-slot[\s\S]*?<\/button>/g,html=>{const index=+(html.match(/data-slot="(\d+)"/)||[])[1],d=layout.devices.find(d=>d.id===r.slots[index]);return d?.maintenanceState&&d.maintenanceState!=='active'?html.replace('class="rack-slot','class="rack-slot maintenance-fault').replace('</button>',`<small class="machine-slot-tags">${esc(maintenanceLabel(d))}</small></button>`):html})};
+const beforeMaintenanceInspect=inspectSlot;
+inspectSlot=function(r,i){beforeMaintenanceInspect(r,i);const d=layout.devices.find(d=>d.id===r.slots[i]);if(d)document.querySelector('#modal .detail-grid')?.insertAdjacentHTML('afterend',maintenanceSection(d))};
+const beforeMaintenanceCards=placementCards;
+placementCards=function(){return beforeMaintenanceCards().replace(/<div class="unplaced-device[\s\S]*?<\/div><p>[\s\S]*?<\/div>/g,html=>{const id=html.match(/data-drag-device="([^"]+)"/)?.[1],d=machineGroups.device(currentSite(),id);if(!d)return html;if(d.maintenanceState==='retired')html=html.replace('draggable="true"','draggable="false"').replace('data-place-device=','disabled title="Cập nhật tình trạng trước khi xếp lại" data-place-device=');return html.replace('</small>',`</small><p class="${d.maintenanceState&&d.maintenanceState!=='active'?'key-warn':'muted'}">${esc(maintenanceLabel(d))}</p>`).replace(/<\/div>$/,`<button class="btn small full" data-maintenance="edit" data-device="${d.id}">Tình trạng & sửa chữa</button></div>`)})};
+const beforeMaintenanceHover=warehouseHover;
+warehouseHover=function(data){beforeMaintenanceHover(data);if(data){const el=document.querySelector('#warehouse-hover');el?.querySelector('dl')?.insertAdjacentHTML('beforeend',`<div><dt>Vận hành</dt><dd>${esc(maintenanceLabel(data.d))}</dd></div>`);if(el)el.style.top=Math.max(8,Math.min(data.y+18,el.parentElement.clientHeight-el.offsetHeight-8))+'px'}};
+function maintenanceDialog(id,detach){
+  const d=machineGroups.device(currentSite(),id);if(!d)return;const p=locationOf(id);
+  if(detach&&!p){toast('Máy đã được tháo khỏi kệ.');return}
+  modal(detach?'Tháo máy · '+esc(d.ip):'Tình trạng · '+esc(d.ip),detach?'Ô kệ sẽ trống; máy trở về danh sách chưa xếp. Giữ nguyên danh tính, nhãn và nhóm.':'Ghi nhận thủ công trong phiên xem, chưa gửi lệnh dừng/chạy tới máy.',`<input type="hidden" name="deviceId" value="${d.id}"><input type="hidden" name="rackId" value="${p?.rack.id||''}"><input type="hidden" name="slotIndex" value="${p?.index??''}"><div class="field"><label for="maintenance-state">Tình trạng máy</label><select id="maintenance-state" name="status">${Object.entries(maintenanceNames).map(([value,label])=>`<option value="${value}" ${(d.maintenanceState||'active')===value?'selected':''}>${label}</option>`).join('')}</select></div><div class="field"><label for="maintenance-notes">Lý do / ghi chú sửa chữa</label><textarea id="maintenance-notes" name="notes" rows="3" maxlength="500" placeholder="Ví dụ: hỏng nguồn, gửi sửa; hoặc hỏng hẳn, chờ thanh lý">${esc(d.maintenanceNotes||'')}</textarea></div>${!detach&&p?'<label class="machine-member-row"><input type="checkbox" name="detach"><span>Tháo máy khỏi kệ sau khi cập nhật</span></label>':''}<p class="muted">Hỏng hẳn / ngừng sử dụng vẫn giữ hồ sơ máy để đối chiếu. Khi sửa xong, chọn Sẵn sàng vận hành rồi xếp lại vào kệ.</p>`,detach?'machine-detach-form':'machine-maintenance-form',detach?'Xác nhận tháo máy':'Lưu tình trạng');
+}
+document.addEventListener('click',e=>{const button=e.target.closest('[data-maintenance]');if(button)maintenanceDialog(button.dataset.device,button.dataset.maintenance==='detach')});
+document.addEventListener('submit',e=>{
+  const form=e.target;if(!['machine-detach-form','machine-maintenance-form'].includes(form.id))return;e.preventDefault();const f=form.elements;
+  try{const detach=form.id==='machine-detach-form'||!!f.namedItem('detach')?.checked;const result=machineLifecycle.update(currentSite(),f.deviceId.value,{status:f.status.value,notes:f.notes.value,detach,expected:{rackId:f.rackId.value,index:+f.slotIndex.value}});if(layout.pending===result.device.id)layout.pending=null;layout.suggestions=null;clearDrag();document.querySelector('#modal').close();render();toast(result.removed?'Đã tháo máy về danh sách chưa xếp.':'Đã cập nhật tình trạng máy trong phiên xem.')}catch(error){toast(error.message)}
+});
+if(route==='farms')render();

@@ -234,3 +234,10 @@ Mặc định chỉ hiện thanh chọn tầng và các nút Bố trí, Lọc & 
 
 
 Nhãn kệ hiện là bảng gắn phẳng lên tường sau, gồm tên kệ, sức chứa, tầng và khu vực; không còn danh sách nhãn nổi bên trái. Mỗi tầng có bảng riêng. Bấm bảng để tìm kệ trong chế độ khám phá.
+
+
+### Tháo máy và sửa chữa
+
+Bấm máy → **Tháo khỏi kệ** để trả máy về danh sách chưa xếp, chọn tình trạng và ghi lý do. Có bốn trạng thái thủ công: Sẵn sàng vận hành, Hỏng / chờ sửa, Đang sửa chữa, Hỏng hẳn / ngừng sử dụng. Có thể cập nhật lại từ chi tiết máy hoặc thẻ máy chưa xếp.
+
+Tháo chỉ làm trống ô kệ, giữ ID, serial, nhãn, nhóm và vị trí cuối cùng để đối chiếu. Máy ngừng sử dụng không được xếp lại cho đến khi cập nhật tình trạng; gợi ý xếp theo IP chỉ lấy máy sẵn sàng. Máy đang hỏng/sửa/ngừng sử dụng không phát hiệu ứng đào. Tình trạng nhập thủ công không thay đổi kết nối báo về và không gửi lệnh tới thiết bị. Dữ liệu hiện chỉ lưu trong phiên xem.

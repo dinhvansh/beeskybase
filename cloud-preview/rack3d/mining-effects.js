@@ -12,8 +12,8 @@ export function miningEffects(scene,slots,host,api,render){
   const byRack=new Map();
   slots.forEach((slot,index)=>{
     const d=slot.userData.d;if(!d)return;
-    const led=new T.Mesh(dotGeo,new T.MeshBasicMaterial({color:d.offline?api.colors.offline:api.colors.normal,transparent:true}));led.position.set(.4,.36,.59);slot.add(led);leds.push({mesh:led,online:!d.offline,phase:index*.7,slot});
-    if(d.offline)return;
+    const led=new T.Mesh(dotGeo,new T.MeshBasicMaterial({color:d.offline?api.colors.offline:api.colors.normal,transparent:true}));led.position.set(.4,.36,.59);slot.add(led);leds.push({mesh:led,online:!d.offline&&(!d.maintenanceState||d.maintenanceState==='active'),phase:index*.7,slot});
+    if(d.offline||(d.maintenanceState&&d.maintenanceState!=='active'))return;
     if(!byRack.has(slot.userData.r.id))byRack.set(slot.userData.r.id,[]);byRack.get(slot.userData.r.id).push(slot);
     if(api.visualModel(d)==='hydro'){
       for(let j=0;j<3;j++){const dot=new T.Mesh(dotGeo,new T.MeshBasicMaterial({color:blue,transparent:true,opacity:.8}));slot.add(dot);water.push({mesh:dot,phase:j/3,slot})}

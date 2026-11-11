@@ -25,6 +25,7 @@ function moveRackDevice(id,r,i){
   if(!r||r.site!==currentSite()||!Number.isInteger(i)||i<0||i>=r.slots.length)throw Error('Vị trí không hợp lệ.');
   if(r.slots[i])throw Error('Ô đã có máy. Hãy chọn ô trống.');
   if(!devicesFor(r.site).some(d=>d.id===id))throw Error('Máy không thuộc xưởng này.');
+  if(layout.devices.find(d=>d.id===id)?.maintenanceState==='retired')throw Error('Máy đã ngừng sử dụng. Cập nhật tình trạng trước khi xếp lại.');
   const old=locationOf(id);
   rackMoves.push({id,site:r.site,from:old?{rack:old.rack.id,index:old.index}:null,to:{rack:r.id,index:i}});
   assign(r,i,id);layout.pending=null;clearDrag();render();
@@ -68,7 +69,7 @@ render=function(){
     if(panel){const overlay=warehouseOverlay();overlay.replaceChildren(panel)}else warehouseCloseFullscreen(false);
   }
   const host=document.getElementById('rack-world-canvas');if(!host)return;
-  import('./rack-scene.js?v=16e8d95ca8').then(module=>{
+  import('./rack-scene.js?v=54dd61c80a').then(module=>{
     if(version!==rackSceneVersion||!host.isConnected)return;
     const style=getComputedStyle(document.documentElement),token=(name,fallback)=>style.getPropertyValue(name).trim()||fallback;
     const dark=document.documentElement.dataset.theme==='dark';

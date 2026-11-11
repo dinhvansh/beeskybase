@@ -57,7 +57,7 @@ export function mount(host,api){
     for(let row=0;row<=r.rows;row++)block(g,0,row*1.12+.15,0,w+.1,.1,1.4,shelfMat);
     for(let row=0;row<r.rows;row++)for(let col=0;col<r.cols;col++){
       const i=row*r.cols+col,d=api.device(r.slots[i]);
-      const color=d?(d.offline?c.offline:d.temp>=85?c.critical:d.temp>=75?c.warm:c.normal):c.empty;
+      const color=d?(d.maintenanceState&&d.maintenanceState!=='active'?c.critical:d.offline?c.offline:d.temp>=85?c.critical:d.temp>=75?c.warm:c.normal):c.empty;
       const mat=new T.MeshStandardMaterial({color,roughness:.6,metalness:d ? .2 : 0,transparent:true,opacity:d?1:.3});
       const m=block(g,(col-(r.cols-1)/2)*1.18,(r.rows-row-.5)*1.12+.2,.08,1,.86,1.1,mat);
       m.userData={r,i,d,original:color};slots.push(m);
