@@ -2592,3 +2592,201 @@ build-flutter.yml):
     runner and the BeeSkyFlutter-<tag>-win64.zip asset.
     The app remains compile-verified only until the
     owner runs it on real Windows (as since v0.21).
+
+---
+
+# v0.24.0 — network groups (HashCore Toolkit home screen, ported per the dissection)
+
+The owner set the parity bar (2026-11-11): "không được 100
+cũng ráng được 99%" vs HashCore Toolkit, and named network
+groups as the first gap to close. Following the standing
+dissect-before-porting rule, the Toolkit's group mechanism
+was dissected FIRST from the shipped materials (translation
+table, AOT string pools, Dart file map) and the behaviour
+mapping written to docs/network-groups-mapping.md BEFORE
+any code — every behaviour graded VERIFIED / INFERRED /
+UNKNOWN, divergences named, unknowns never invented.
+
+PYTHON CORE (beesky/core/groups.py NEW, cli.py):
+
+  * Group = {id, name, targets, creds, autoscan{enabled,
+    interval_min}, last_scan{at, scanned, found, ok, check,
+    error} | null}, persisted as {"version": 1, "groups":
+    [...]} in beesky-groups.json — located with the SAME
+    strategy as the v0.23 creds file (beside the executable,
+    %APPDATA%\BeeSky fallback; --groups-file / env
+    BEESKY_GROUPS_FILE override). Loading fails loud
+    (GroupError -> exit 2): malformed JSON, a nameless entry,
+    invalid targets (validated via parse_targets), a bad
+    creds shape, a zero autoscan interval.
+  * `beesky groups list|add|remove|show` (add takes
+    --name/--targets and mirrors the JSON; duplicate names
+    rejected) and `groups export <file>` / `import <file>`.
+    Import merges BY NAME — a same-name group replaces the
+    stored one in place, others are kept — the stated
+    BeeSky policy (HashCore's own import policy is UNKNOWN,
+    see the mapping). An invalid import file exits 2 and
+    changes nothing.
+  * `beesky scan --group NAME` (the positional target
+    becomes optional): the core resolves the group's
+    targets and merges credentials — group sets BEFORE the
+    --creds-file (global) sets — and ordered_creds' stable
+    tiers then try, per miner: group family -> global family
+    -> group "any" -> global "any" -> the rest. This is
+    the port of HashCore's global -> per-group override
+    layering onto BeeSky's v0.23 list model. Unknown group
+    = clean exit 2 before any scanning. After ANY successful
+    scan with --group (CLI or bridge --json), last_scan is
+    persisted into the store (best-effort: a refused write
+    warns on stderr and never fails the scan). No --group
+    = byte-identical v0.23 behaviour.
+
+FLUTTER APP (app_flutter/):
+
+  * Launch lands on a real NETWORK GROUPS screen (sidebar
+    "Nhóm mạng" active): stat chips (total groups / scanned
+    / total errors), group cards — name (+ MỚI tag while
+    never scanned, mirroring HashCore's "new"), targets
+    summary, last-scan line ("Chưa quét" or time + counts),
+    autoscan state, [Quét nhóm] [Sửa] [Xóa] (delete asks
+    first, naming the group). Empty state mirrors HashCore's
+    (icon + line + [Thêm nhóm]).
+  * "＋ Thêm nhóm" / [Sửa] opens the editor dialog: name,
+    targets, autoscan toggle + interval (minutes), and the
+    group's own credential sets — the v0.23 creds editor
+    widget FACTORED OUT of the creds dialog
+    (CredSetsEditor in creds.dart) and reused, not redrawn.
+    Duplicate group names are refused app-side too.
+  * Quét nhóm switches to the miners view scoped to the
+    group (header chip "Nhóm: <name>") and runs
+    `scan --group <name>` — the core owns resolution; the
+    app passes the global creds file path AND its groups
+    file path, so merging and last_scan persistence happen
+    core-side; the app reloads the store to refresh the
+    card. The miners view keeps its ad-hoc scan bar;
+    editing the target away from the group's ranges leaves
+    the group scope. Mock mode: two demo groups ("Trại
+    chính" with a last_scan, "Kho phụ" never scanned).
+  * Autoscan (DIVERGENCE, pre-approved): app-side only — a
+    timer re-runs the ACTIVE group's scan at its interval
+    while the app is open; state visible on the card. (The
+    mapping notes HashCore's autoscan also runs app-side in
+    the Toolkit; BeeSky's always-on equivalent remains the
+    farm agent.)
+
+MATCH / DIVERGENCE vs HASHCORE (from the mapping doc):
+
+  MATCH: groups as the home screen; named group objects in
+  a farms-style JSON store; card facts (name, ranges, last
+  scan, autoscan state); "new" tag for never-scanned
+  groups; empty state shape; delete confirmation naming
+  the group; per-group credential override layer over the
+  global sets; per-group autoscan flag + interval; JSON
+  export/import.
+
+  DIVERGENCE (pre-approved, in the mapping): targets are
+  one multi-range string (parse_targets), not typed named
+  range objects with per-range enable/DNS/port ranges; no
+  group description field; credential layers MERGE as
+  lists (multiple sets per vendor survive — v0.23's model)
+  instead of HashCore's one-method-per-vendor replacement;
+  autoscan interval in minutes, app-side only, no global
+  master switch (BeeSky has no settings screen yet);
+  last_scan is a counts subset (no hashrate/unlocked totals
+  — native-unit totals would mislead, the v0.20 lesson).
+
+  NOT PORTED (named gaps): group merge, combined view,
+  group search, reset-statistics command, rescan-all /
+  remove-all / multi-select, per-group custom timeout,
+  IP-Report -> group, the editor's "Save and scan" chain.
+
+  UNKNOWN (never invented): farms.json field names;
+  HashCore's import conflict policy; its autoscan interval
+  unit/range/default; the exact persisted shape of its
+  last-scan statistics; whether its autoscan is full
+  discovery or statistics-only.
+
+(a) VERIFIED LOCALLY (this sandbox):
+
+  * mock_groups_test — store CRUD + persistence round-trip
+    (incl. bare-list load + fail-loud validation),
+    merge-order units (the six-tier sequence asserted),
+    CLI groups CRUD/export/import (merge-by-name policy),
+    and subprocess bridge scans against the mock dashd
+    fleet: group set beats global same-family set (the
+    global wrong password is never attempted), global set
+    rescues a failed group set (attempt log order proves
+    it), a cred-less group falls back to the global file,
+    last_scan persisted with the right counts, a groupless
+    scan never touches the store, unknown group exits 2.
+    Full output:
+
+```
+PASS: store: a missing file loads as no groups
+PASS: store: round-trip keeps both groups
+PASS: store: round-trip keeps creds + autoscan + last_scan
+PASS: store: defaults fill in (id minted, autoscan off, no scan)
+PASS: store: the document is versioned
+PASS: store: a bare-list document loads too
+PASS: store: malformed JSON fails loud (GroupError)
+PASS: store: a nameless entry fails loud
+PASS: store: invalid targets fails loud
+PASS: store: a bad creds shape fails loud
+PASS: store: a zero autoscan interval fails loud
+PASS: merge: order = group family, global family, group any, global any, group rest, global rest
+PASS: merge: no sets anywhere -> None (legacy behaviour)
+PASS: merge: one layer only -> that layer, in order
+PASS: import merge: same name replaced in place, new appended
+PASS: cli: empty store lists cleanly
+PASS: cli: add creates a group
+PASS: cli: a duplicate name exits 2
+PASS: cli: invalid targets exit 2
+PASS: cli: list shows both groups with their targets
+PASS: cli: show prints the group as JSON
+PASS: cli: show of an unknown group exits 2
+PASS: cli: remove deletes the group
+PASS: cli: removing an unknown group exits 2
+PASS: cli: scan --group with an unknown name exits 2
+PASS: cli: export writes the versioned document
+PASS: cli: import adds new groups and keeps existing ones
+PASS: cli: import replaces a same-name group, keeps the rest
+PASS: cli: a malformed import file exits 2
+PASS: cli: an invalid import exits 2 and changes nothing
+PASS: live: group scan finds the locked miner via the group
+PASS: live: the GROUP set wins (cred_label)
+PASS: live: the global set was never tried after the group win
+PASS: live: last_scan persisted with the scan's counts
+PASS: live: the other group's last_scan stays null
+PASS: live: the GLOBAL set rescues a failed group set
+PASS: live: group set tried first, global rescue second
+PASS: live: a cred-less group falls back to the global sets
+PASS: live: an unknown group exits 2 with the store named
+
+GROUPS TEST PASSED
+```
+
+  * Regression spot-checks at the v0.24.0 code:
+
+    mock_creds_test: 32 PASS / 0 FAIL (standalone)
+    mock_bridge_test: 24 PASS / 0 FAIL (standalone)
+    mock_units_test: 50 PASS / 0 FAIL (standalone)
+    mock_agent_bg_test: 52 PASS / 0 FAIL (standalone)
+
+  * Flutter (SDK 3.47.9 at ~/workspace/flutter-sdk):
+    flutter analyze: clean; flutter test: 35 PASS / 0 FAIL (local SDK 3.47.9) — NetGroup/GroupStore round-trips,
+    autoscan-due rule, the scanGroup argv contract, the
+    groups home rendering both demo cards, group scan
+    scoping the miners view (+ header chip), editor create
+    with a per-group cred set persisted to the store file,
+    rename, and the confirm-then-delete flow. The two
+    pre-existing suites were adapted only where the flow
+    itself changed (the app now opens on groups: one
+    sidebar tap reaches the miners view).
+
+(b) VERIFIED ONLY BY CI (.github/workflows/
+build-flutter.yml):
+
+  * flutter build windows --release on a real Windows
+    runner and the BeeSkyFlutter-<tag>-win64.zip asset.
+    The app remains compile-verified only until the
+    owner runs it on real Windows (as since v0.21).

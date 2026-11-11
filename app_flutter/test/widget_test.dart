@@ -30,8 +30,23 @@ void main() {
       expect(find.text('Sự kiện'), findsOneWidget);
       expect(find.text('Cài đặt'), findsOneWidget);
       expect(find.text('SAU'), findsNWidgets(5));
-      expect(find.text('BeeSky v0.23.0'), findsOneWidget);
+      expect(find.text('BeeSky v0.24.0'), findsOneWidget);
       expect(find.text('Ruột quét: dữ liệu mẫu'), findsOneWidget);
+
+      // v0.24: the app OPENS on network groups (the HashCore home
+      // screen) — the mock shell seeds two demo groups: the main
+      // hall with a last-scan summary, the second hall never
+      // scanned (MỚI tag, "Chưa quét").
+      expect(find.text('Tổng 2 nhóm'), findsOneWidget);
+      expect(find.text('Trại chính'), findsOneWidget);
+      expect(find.text('Kho phụ'), findsOneWidget);
+      expect(find.text('MỚI'), findsOneWidget);
+      expect(find.text('Chưa quét'), findsOneWidget);
+      expect(find.textContaining('4 máy • OK 1'), findsOneWidget);
+
+      // The miners view is one sidebar click away.
+      await tester.tap(find.text('Máy đào'));
+      await tester.pumpAndSettle();
 
       // v0.23 scan bar: the local-web button is GONE (a miner row
       // double-click opens the miner's own web instead), and the

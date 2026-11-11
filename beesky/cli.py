@@ -9,6 +9,16 @@
                                    (--json with no FILE prints one JSON
                                     document to stdout — the Flutter
                                     shell's sidecar bridge, v0.21)
+    python -m beesky scan --group NAME [--creds-file sets.json]
+                                   [--groups-file beesky-groups.json]
+                                   (the group's targets + credential
+                                    sets lead; last_scan is persisted)
+    python -m beesky groups [--groups-file FILE]
+                                   list | add --name N --targets T |
+                                   remove NAME | show NAME |
+                                   export FILE | import FILE
+                                   (network groups, v0.24 —
+                                    docs/network-groups-mapping.md)
 
     python -m beesky sysinfo [--json]  (version + auto-detected default
                                         scan target; --json for machines)
@@ -55,6 +65,7 @@ import os
 import secrets
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 from . import __version__
@@ -62,6 +73,7 @@ from .agent import AgentService
 from .cloud.server import run_cloud_server
 from .cloud.store import CloudStore
 from .core import firmware as firmware_mod
+from .core import groups as groups_mod
 from .core import notify as notify_mod
 from .core import report
 from .core import updater
@@ -74,31 +86,21 @@ from .core.events import EventEngine
 from .web.server import MonitorService, run_server
 
 
-def _load_creds_file(path: str) -> list[dict]:
-    """Read a --creds-file: a JSON list of credential sets (v0.23).
+def _normalise_creds(data: list, source: str) -> list[dict]:
+    """Normalise raw credential-set entries (v0.23 schema).
 
-    Schema: [{"label": "...", "user": "...", "password": "...",
-    "type": "any"|"stock"|"vnish", "api_key": "..."}, ...]. An entry
-    needs a login+password pair OR an "api_key" (the VNish API-key
-    unlock method — HashCore keys methods per vendor the same way).
+    Shared by --creds-file loading and by network-group creds
+    (v0.24 — a group's embedded sets are the same schema, checked
+    with the same rules and the same messages). An entry needs a
+    login+password pair OR an "api_key" (the VNish API-key unlock
+    method — HashCore keys methods per vendor the same way).
     "label" defaults to the user name (or "api_key"); a
-    missing/unknown "type" normalises to "any". Raises ValueError
-    with an operator-readable message — a typo'd file must fail
-    loud, never silently scan with wrong logins.
+    missing/unknown "type" normalises to "any".
     """
-    try:
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"cannot read creds file {path}: {exc}") from exc
-    if not isinstance(data, list):
-        raise ValueError(
-            f"creds file {path}: top level must be a JSON list of "
-            "{\"label\", \"user\", \"password\", \"type\"} objects")
     creds: list[dict] = []
     for idx, item in enumerate(data):
         if not isinstance(item, dict):
-            raise ValueError(
-                f"creds file {path}: entry {idx} must be an object")
+            raise ValueError(f"{source}: entry {idx} must be an object")
         user = item.get("user")
         secret = item.get("password")
         api_key = item.get("api_key")
@@ -106,7 +108,7 @@ def _load_creds_file(path: str) -> list[dict]:
         has_key = isinstance(api_key, str) and bool(api_key)
         if not has_login and not has_key:
             raise ValueError(
-                f"creds file {path}: entry {idx} needs string "
+                f"{source}: entry {idx} needs string "
                 "\"user\" + \"password\", or an \"api_key\"")
         label = item.get("label")
         raw_type = item.get("type")
@@ -119,6 +121,25 @@ def _load_creds_file(path: str) -> list[dict]:
             "type": raw_type if raw_type in ("stock", "vnish") else "any",
         })
     return creds
+
+
+def _load_creds_file(path: str) -> list[dict]:
+    """Read a --creds-file: a JSON list of credential sets (v0.23).
+
+    Schema: [{"label": "...", "user": "...", "password": "...",
+    "type": "any"|"stock"|"vnish", "api_key": "..."}, ...]. Raises
+    ValueError with an operator-readable message — a typo'd file
+    must fail loud, never silently scan with wrong logins.
+    """
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot read creds file {path}: {exc}") from exc
+    if not isinstance(data, list):
+        raise ValueError(
+            f"creds file {path}: top level must be a JSON list of "
+            "{\"label\", \"user\", \"password\", \"type\"} objects")
+    return _normalise_creds(data, f"creds file {path}")
 
 
 def _scan_creds(args: argparse.Namespace) -> list[dict] | None:
@@ -241,6 +262,60 @@ def _jsonable(value):
     return str(value)
 
 
+def _apply_group(args: argparse.Namespace):
+    """Resolve `scan --group NAME` (v0.24) onto the args namespace.
+
+    The group's targets replace the scan target, and the credential
+    layers merge core-side: the group's own sets first, then the
+    --creds-file (global) sets, pre-seeded into the _scan_creds
+    cache so _scan_records consumes the merged list.
+    discover.ordered_creds partitions that list stably, so its
+    tiers try group-family → global-family → group-any →
+    global-any → the rest. Returns (store, group) so cmd_scan can
+    persist last_scan afterwards; None without --group. Raises
+    ValueError (unknown group, unreadable store, malformed creds
+    anywhere) — cmd_scan turns it into exit 2 before scanning.
+    """
+    name = getattr(args, "group", None)
+    if not name:
+        return None
+    store = groups_mod.GroupStore(getattr(args, "groups_file", None))
+    group = store.find(name)
+    if group is None:
+        raise ValueError(
+            f"group not found: {name!r} (store: {store.path})")
+    group_sets = _normalise_creds(
+        group["creds"], f"group {name!r} creds") if group["creds"] else None
+    merged = groups_mod.effective_creds(group_sets, _scan_creds(args))
+    if merged is not None:
+        args._creds_cache = merged
+        args._creds_loaded = True
+    args.target = group["targets"]
+    return store, group
+
+
+def _persist_group_scan(store: groups_mod.GroupStore, group: dict,
+                        records: list[dict]) -> None:
+    """Write the group's last_scan summary after a successful scan.
+
+    Best-effort: a store that refuses the write must not fail a
+    scan that already succeeded — the warning goes to stderr,
+    which bridge mode keeps off stdout by design.
+    """
+    try:
+        scanned = len(parse_targets(group["targets"]))
+    except ValueError:
+        scanned = len(records)
+    summary = groups_mod.scan_summary(
+        records, scanned,
+        datetime.now().astimezone().isoformat(timespec="seconds"))
+    try:
+        store.record_scan(group["name"], summary)
+    except (ValueError, OSError) as exc:
+        print(f"scan: warning: could not save last_scan for group "
+              f"{group['name']!r}: {exc}", file=sys.stderr)
+
+
 def cmd_scan(args: argparse.Namespace) -> int:
     # --json with no FILE ("-" sentinel from argparse) selects the
     # sidecar bridge mode (v0.21): stdout carries ONE JSON document
@@ -249,6 +324,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
     bridge = getattr(args, "json", None) == "-"
     started = time.monotonic()
     try:
+        group_ctx = _apply_group(args)
         records = _scan_records(args)
     except ValueError as exc:
         print(f"scan: {exc}", file=sys.stderr)
@@ -279,6 +355,8 @@ def cmd_scan(args: argparse.Namespace) -> int:
                 json.dumps(records, indent=2, ensure_ascii=False),
                 encoding="utf-8")
             print(f"JSON written to {args.json}")
+    if group_ctx is not None:
+        _persist_group_scan(group_ctx[0], group_ctx[1], records)
     if args.tickets:
         written = report.write_tickets(records, args.tickets)
         for path in written:
@@ -302,6 +380,117 @@ def cmd_sysinfo(args: argparse.Namespace) -> int:
         print(f"BeeSky {info['version']}")
         print(f"Default scan target: {info['default_target']}")
     return 0
+
+
+# ---------------------------------------------------------------------------
+# groups — network groups (v0.24): named scan targets with their own
+# credential sets, autoscan settings and last-scan summaries, stored
+# in beesky-groups.json (docs/network-groups-mapping.md)
+# ---------------------------------------------------------------------------
+
+def _group_store(args: argparse.Namespace) -> groups_mod.GroupStore:
+    return groups_mod.GroupStore(getattr(args, "groups_file", None))
+
+
+def _groups_fail(message: str) -> int:
+    print(f"groups: {message}", file=sys.stderr)
+    return 2
+
+
+def cmd_groups(args: argparse.Namespace) -> int:
+    store = _group_store(args)
+    action = args.groups_command
+    try:
+        groups = store.load()
+    except ValueError as exc:
+        return _groups_fail(str(exc))
+
+    if action == "list":
+        if not groups:
+            print(f"No groups defined (store: {store.path}).")
+            return 0
+        for g in groups:
+            last = g["last_scan"]
+            last_text = ("never scanned" if last is None else
+                         f"last scan {last['at']}: {last['found']} found, "
+                         f"{last['ok']} ok, {last['check']} check, "
+                         f"{last['error']} error")
+            auto = (f"autoscan {g['autoscan']['interval_min']}m"
+                    if g["autoscan"]["enabled"] else "autoscan off")
+            print(f"{g['name']}  [{g['targets']}]  "
+                  f"{len(g['creds'])} cred set(s), {auto}, {last_text}")
+        return 0
+
+    if action == "add":
+        if groups_mod.find_group(groups, args.name.strip()) is not None:
+            return _groups_fail(f"group already exists: {args.name!r}")
+        try:
+            group = groups_mod.normalise_group(
+                {"name": args.name, "targets": args.targets},
+                "groups add")
+        except ValueError as exc:
+            return _groups_fail(str(exc))
+        groups.append(group)
+        store.save(groups)
+        print(f"Added group {group['name']!r} [{group['targets']}] "
+              f"(store: {store.path}).")
+        return 0
+
+    if action == "remove":
+        group = groups_mod.find_group(groups, args.name)
+        if group is None:
+            return _groups_fail(f"group not found: {args.name!r}")
+        store.save([g for g in groups if g["name"] != group["name"]])
+        print(f"Removed group {group['name']!r}.")
+        return 0
+
+    if action == "show":
+        group = groups_mod.find_group(groups, args.name)
+        if group is None:
+            return _groups_fail(f"group not found: {args.name!r}")
+        print(json.dumps(group, indent=2, ensure_ascii=False))
+        return 0
+
+    if action == "export":
+        payload = {"version": groups_mod.STORE_VERSION, "groups": groups}
+        try:
+            Path(args.file).write_text(
+                json.dumps(payload, indent=2, ensure_ascii=False),
+                encoding="utf-8")
+        except OSError as exc:
+            return _groups_fail(f"cannot write {args.file}: {exc}")
+        print(f"Exported {len(groups)} group(s) to {args.file}.")
+        return 0
+
+    if action == "import":
+        try:
+            data = json.loads(Path(args.file).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            return _groups_fail(f"cannot read import file {args.file}: {exc}")
+        if isinstance(data, list):
+            raw_groups = data
+        elif isinstance(data, dict) and isinstance(data.get("groups"), list):
+            raw_groups = data["groups"]
+        else:
+            return _groups_fail(
+                f"import file {args.file}: expected the groups document "
+                "({\"version\": 1, \"groups\": [...]}) or a bare list")
+        try:
+            imported = [groups_mod.normalise_group(
+                item, f"{args.file} entry {idx}")
+                for idx, item in enumerate(raw_groups)]
+        except ValueError as exc:
+            return _groups_fail(str(exc))
+        before = {g["name"] for g in groups}
+        merged = groups_mod.merge_import(groups, imported)
+        store.save(merged)
+        replaced = sum(1 for g in imported if g["name"] in before)
+        print(f"Imported {len(imported)} group(s) from {args.file}: "
+              f"{replaced} replaced, {len(imported) - replaced} added, "
+              f"{len(merged)} total.")
+        return 0
+
+    return _groups_fail(f"unknown groups command: {action}")
 
 
 # ---------------------------------------------------------------------------
@@ -725,6 +914,22 @@ def main(argv: list[str] | None = None) -> int:
 
     scan = sub.add_parser("scan", help="scan a target for miners and report health")
     _add_common_args(scan)
+    # A --group scan takes its target from the group (v0.24), so the
+    # positional becomes optional for scan alone; main() re-checks
+    # that a target or a group was given.
+    for _action in scan._actions:
+        if _action.dest == "target":
+            _action.nargs = "?"
+    scan.add_argument("--group", metavar="NAME",
+                      help="scan a saved network group: its targets "
+                           "replace the positional target and its own "
+                           "credential sets merge ahead of "
+                           "--creds-file's (v0.24; see `beesky groups`)")
+    scan.add_argument("--groups-file", metavar="FILE",
+                      help="groups store file for --group (default: "
+                           "beesky-groups.json beside the executable, "
+                           "fallback %%APPDATA%%\\BeeSky; or env "
+                           "BEESKY_GROUPS_FILE)")
     scan.add_argument("--json", nargs="?", const="-", metavar="FILE",
                       help="write status records as JSON to FILE; with no "
                            "FILE, print ONE JSON document to stdout "
@@ -732,6 +937,36 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--tickets", metavar="DIR",
                       help="write one repair ticket per problem miner into DIR")
     scan.set_defaults(func=cmd_scan)
+
+    groups = sub.add_parser(
+        "groups", help="network groups: named scan targets with "
+                       "their own credential sets, autoscan settings "
+                       "and last-scan summaries (v0.24)")
+    groups.add_argument("--groups-file", metavar="FILE",
+                        help="groups store file (default: "
+                             "beesky-groups.json beside the executable, "
+                             "fallback %%APPDATA%%\\BeeSky; or env "
+                             "BEESKY_GROUPS_FILE)")
+    groups_sub = groups.add_subparsers(dest="groups_command", required=True)
+    groups_sub.add_parser("list", help="list all groups")
+    g_add = groups_sub.add_parser("add", help="add a group")
+    g_add.add_argument("--name", required=True, help="group name")
+    g_add.add_argument("--targets", required=True,
+                       help="scan targets: CIDR / range / comma mix "
+                            "(same syntax as the scan target)")
+    g_remove = groups_sub.add_parser("remove", help="remove a group")
+    g_remove.add_argument("name", help="group name")
+    g_show = groups_sub.add_parser("show", help="print one group as JSON")
+    g_show.add_argument("name", help="group name")
+    g_export = groups_sub.add_parser(
+        "export", help="export all groups as JSON")
+    g_export.add_argument("file", help="destination file")
+    g_import = groups_sub.add_parser(
+        "import", help="import groups from a JSON file, merging BY "
+                       "NAME (a same-name group replaces the stored "
+                       "one, others are kept)")
+    g_import.add_argument("file", help="file written by `groups export`")
+    groups.set_defaults(func=cmd_groups)
 
     sysinfo = sub.add_parser(
         "sysinfo", help="print version + auto-detected default scan "
@@ -895,4 +1130,7 @@ def main(argv: list[str] | None = None) -> int:
     fw_unlock.set_defaults(func=cmd_fw_unlock)
 
     args = parser.parse_args(argv)
+    if getattr(args, "command", None) == "scan" and not args.target \
+            and not getattr(args, "group", None):
+        parser.error("scan: a target is required (or use --group NAME)")
     return args.func(args)

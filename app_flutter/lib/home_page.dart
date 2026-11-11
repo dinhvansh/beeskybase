@@ -1,11 +1,18 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 
 import 'creds.dart';
+import 'groups.dart';
 import 'models.dart';
 import 'sidecar.dart';
 import 'theme.dart';
+
+/// The two content views: the app OPENS on network groups (the
+/// HashCore Toolkit's home screen, v0.24); the miners table is the
+/// per-group / ad-hoc scan view behind it.
+enum _View { groups, miners }
 
 /// The main window — v0.22 layout, restructured after the owner rejected
 /// the v0.21 hero-card layout ("card to để làm gì, người ta muốn thấy
@@ -24,6 +31,11 @@ class HomePage extends StatefulWidget {
   /// the executable.
   final CredStore? credStore;
 
+  /// Group-store override (tests point it at a temp dir); the real
+  /// app uses [GroupStore.appDefault] — beesky-groups.json beside
+  /// the executable, the same folder as the creds file.
+  final GroupStore? groupStore;
+
   /// Row double-click opener override (tests record the URL instead
   /// of launching a browser); defaults to [openUrlInBrowser].
   final Future<void> Function(String url)? urlOpener;
@@ -32,6 +44,7 @@ class HomePage extends StatefulWidget {
     super.key,
     required this.bridge,
     this.credStore,
+    this.groupStore,
     this.urlOpener,
   });
 
@@ -79,6 +92,23 @@ class _HomePageState extends State<HomePage> {
   List<CredSet> _creds = const [];
   File? _credsFile;
 
+  // Network groups (v0.24): the app opens on the groups view; a
+  // group scan scopes the miners view to that group until the user
+  // edits the target away from the group's ranges.
+  _View _view = _View.groups;
+  late final GroupStore _groupStore =
+      widget.groupStore ?? GroupStore.appDefault();
+  List<NetGroup> _groups = const [];
+  File? _groupsFile;
+  NetGroup? _activeGroup;
+
+  // App-side autoscan (pre-approved divergence — HashCore's runs
+  // app-side too): a slow timer re-scans the ACTIVE group when its
+  // own interval has elapsed. The always-on equivalent is the
+  // farm agent, not this timer.
+  Timer? _autoscanTimer;
+  final Map<String, DateTime> _lastAutoscanRun = {};
+
   @override
   void initState() {
     super.initState();
@@ -87,13 +117,20 @@ class _HomePageState extends State<HomePage> {
     // them when a real creds file exists.
     if (widget.bridge.isMock) {
       _creds = _demoCreds.map((c) => c.copy()).toList();
+      _groups = demoGroups();
     }
     _loadSysinfo();
     _loadCreds();
+    _loadGroups();
+    _autoscanTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _tickAutoscan(),
+    );
   }
 
   @override
   void dispose() {
+    _autoscanTimer?.cancel();
     _targetCtrl.dispose();
     super.dispose();
   }
@@ -140,6 +177,176 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  // ------------------------------------------------------------------
+  // Network groups: load/save, editor, delete, group scans, autoscan
+  // ------------------------------------------------------------------
+
+  Future<void> _loadGroups() async {
+    final (groups, file) = await _groupStore.load();
+    if (!mounted) return;
+    // An existing file wins over the mock demo seed; an empty load
+    // leaves the seed (mock) or the empty list (real) untouched.
+    if (groups.isEmpty) return;
+    setState(() {
+      _groups = groups;
+      _groupsFile = file;
+      // Re-point the active group at the fresh object (a group scan
+      // reloads the store after the core persisted last_scan).
+      final active = _activeGroup;
+      if (active != null) {
+        for (final g in groups) {
+          if (g.id == active.id) _activeGroup = g;
+        }
+      }
+    });
+  }
+
+  Future<void> _saveGroups() async {
+    try {
+      _groupsFile = await _groupStore.save(_groups);
+    } on FileSystemException {
+      // Saving failed everywhere — the in-memory list stands for
+      // this session; a later edit retries the write.
+    }
+  }
+
+  Future<void> _editGroup({NetGroup? existing}) async {
+    final result = await showGroupEditorDialog(context, existing: existing);
+    if (result == null || !mounted) return;
+    final clash = _groups.any(
+      (g) => g.name == result.name && g.id != result.id,
+    );
+    if (clash) {
+      setState(
+        () => _status = 'Đã có nhóm tên "${result.name}" — '
+            'tên nhóm phải khác nhau.',
+      );
+      _showSnack('Đã có nhóm tên "${result.name}".');
+      return;
+    }
+    setState(() {
+      if (existing == null) {
+        _groups = [..._groups, result];
+        _status = 'Đã thêm nhóm ${result.name}.';
+      } else {
+        _groups = [
+          for (final g in _groups) g.id == existing.id ? result : g,
+        ];
+        if (_activeGroup?.id == existing.id) _activeGroup = result;
+        _status = 'Đã sửa nhóm ${result.name}.';
+      }
+    });
+    await _saveGroups();
+  }
+
+  Future<void> _deleteGroup(NetGroup group) async {
+    // HashCore asks before removing a group, naming it — mirrored.
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: BeeSkyColors.panel,
+        title: const Text('Xóa nhóm?'),
+        content: Text(
+          'Nhóm "${group.name}" sẽ bị xóa khỏi danh sách. '
+          'Các máy trong nhóm không bị ảnh hưởng.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Hủy'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Xóa'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() {
+      _groups = _groups.where((g) => g.id != group.id).toList();
+      if (_activeGroup?.id == group.id) _activeGroup = null;
+      _status = 'Đã xóa nhóm ${group.name}.';
+    });
+    await _saveGroups();
+  }
+
+  /// Enter a group from its card: the miners view scopes to it and
+  /// the group scan starts immediately.
+  void _scanGroup(NetGroup group) {
+    setState(() {
+      _activeGroup = group;
+      _view = _View.miners;
+      _targetCtrl.text = group.targets;
+    });
+    _runGroupScan(group);
+  }
+
+  /// One scan THROUGH the group: the core resolves targets, merges
+  /// the group's creds ahead of the global file's, and persists
+  /// last_scan (mock mode updates the demo group in memory instead).
+  Future<void> _runGroupScan(NetGroup group) async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _status = 'Đang quét nhóm ${group.name} …';
+    });
+    try {
+      final result = widget.bridge.isMock
+          ? await widget.bridge.scan(group.targets)
+          : await widget.bridge.scanGroup(
+              group.name,
+              credsFile: await _credsFileForScan(),
+              groupsFile: _groupsFile?.path,
+            );
+      if (!mounted) return;
+      _applyScanResult(result);
+      _lastAutoscanRun[group.id] = DateTime.now();
+      setState(
+        () => _status = 'Quét nhóm ${group.name} xong: tìm thấy '
+            '${result.found} máy trong ${result.scanned} địa chỉ '
+            '(${result.elapsedS.toStringAsFixed(1)} giây).',
+      );
+      if (widget.bridge.isMock) {
+        setState(() => group.lastScan = _summaryOf(result));
+      } else {
+        await _loadGroups();
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _status = 'Lỗi quét nhóm ${group.name}: $e');
+      _showSnack('Lỗi quét nhóm: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// A GroupLastScan from a finished pass, counted exactly like
+  /// the core's scan_summary (mock mode only — the real core
+  /// persists its own).
+  GroupLastScan _summaryOf(ScanResult result) {
+    final ok = fleetStatusCount(result.records, 'OK');
+    final error = fleetStatusCount(result.records, 'ERROR');
+    return GroupLastScan(
+      at: DateTime.now().toIso8601String(),
+      scanned: result.scanned,
+      found: result.records.length,
+      ok: ok,
+      check: result.records.length - ok - error,
+      error: error,
+    );
+  }
+
+  void _tickAutoscan() {
+    if (!mounted || _busy) return;
+    final group = _activeGroup;
+    if (group == null) return;
+    final last = _lastAutoscanRun[group.id] ?? group.lastScan?.atTime;
+    if (autoscanDue(group, last, DateTime.now())) {
+      _runGroupScan(group);
+    }
+  }
+
   Future<void> _loadSysinfo() async {
     try {
       final info = await widget.bridge.sysinfo();
@@ -167,8 +374,30 @@ class _HomePageState extends State<HomePage> {
       ? '192.168.1.0/24'
       : _targetCtrl.text.trim();
 
+  /// Land a finished pass on the table (both scan paths share it):
+  /// v0.19.7 behaviour — the first row is selected so the detail
+  /// panel is alive immediately.
+  void _applyScanResult(ScanResult result) {
+    setState(() {
+      _records = result.records;
+      _lastScan = result;
+      _scanned = true;
+      _selected = result.records.isEmpty ? null : result.records.first;
+    });
+  }
+
   Future<void> _runScan() async {
     if (_busy) return;
+    // In a group's scope with the group's own ranges still in the
+    // target field, the scan IS a group scan (core-side resolution,
+    // merged creds, last_scan persisted). Editing the target away
+    // from the group's ranges leaves the scope — an ad-hoc scan.
+    final group = _activeGroup;
+    if (group != null && _target == group.targets) {
+      await _runGroupScan(group);
+      return;
+    }
+    if (group != null) setState(() => _activeGroup = null);
     setState(() {
       _busy = true;
       _status = 'Đang quét $_target …';
@@ -179,16 +408,12 @@ class _HomePageState extends State<HomePage> {
         credsFile: await _credsFileForScan(),
       );
       if (!mounted) return;
-      setState(() {
-        _records = result.records;
-        _lastScan = result;
-        _scanned = true;
-        // v0.19.7 behaviour: land on the first row so the detail panel
-        // is alive immediately after a scan.
-        _selected = result.records.isEmpty ? null : result.records.first;
-        _status = 'Quét xong: tìm thấy ${result.found} máy trong '
-            '${result.scanned} địa chỉ (${result.elapsedS.toStringAsFixed(1)} giây).';
-      });
+      _applyScanResult(result);
+      setState(
+        () => _status = 'Quét xong: tìm thấy ${result.found} máy trong '
+            '${result.scanned} địa chỉ '
+            '(${result.elapsedS.toStringAsFixed(1)} giây).',
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() => _status = 'Lỗi quét: $e');
@@ -243,19 +468,37 @@ class _HomePageState extends State<HomePage> {
         children: [
           _sidebar(),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _header(),
-                _scanBar(),
-                if (_busy) const LinearProgressIndicator(minHeight: 3),
-                Expanded(child: _content()),
-                _statusLine(),
-              ],
-            ),
+            child: _view == _View.groups
+                ? _groupsColumn()
+                : _minersColumn(),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _minersColumn() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _header(),
+        _scanBar(),
+        if (_busy) const LinearProgressIndicator(minHeight: 3),
+        Expanded(child: _content()),
+        _statusLine(),
+      ],
+    );
+  }
+
+  Widget _groupsColumn() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _groupsHeader(),
+        if (_busy) const LinearProgressIndicator(minHeight: 3),
+        Expanded(child: _groupsContent()),
+        _statusLine(),
+      ],
     );
   }
 
@@ -305,7 +548,20 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
           const SizedBox(height: 28),
-          _navItem(Icons.memory, 'Máy đào', active: true),
+          // The app opens on network groups — the HashCore home
+          // screen (v0.24); the miners table is one click away.
+          _navItem(
+            Icons.device_hub,
+            'Nhóm mạng',
+            active: _view == _View.groups,
+            onTap: () => setState(() => _view = _View.groups),
+          ),
+          _navItem(
+            Icons.memory,
+            'Máy đào',
+            active: _view == _View.miners,
+            onTap: () => setState(() => _view = _View.miners),
+          ),
           // Roadmap views: listed so the structure matches where the
           // product is going, greyed + "SAU" until they are real —
           // no fake functionality behind them.
@@ -326,43 +582,51 @@ class _HomePageState extends State<HomePage> {
     String label, {
     bool active = false,
     bool upcoming = false,
+    VoidCallback? onTap,
   }) {
+    final row = Container(
+      height: 38,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        // The approved prototype tints the active item with the
+        // accent itself instead of a neutral fill.
+        color: active
+            ? BeeSkyColors.accent.withValues(alpha: 0.13)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(radiusWidget),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            icon,
+            size: 18,
+            color: active ? BeeSkyColors.accent : BeeSkyColors.muted,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: active ? BeeSkyColors.accent : BeeSkyColors.muted,
+                fontSize: 13,
+                fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (upcoming) _soonTag(),
+        ],
+      ),
+    );
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
-      child: Container(
-        height: 38,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        decoration: BoxDecoration(
-          // The approved prototype tints the active item with the
-          // accent itself instead of a neutral fill.
-          color: active
-              ? BeeSkyColors.accent.withValues(alpha: 0.13)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(radiusWidget),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              icon,
-              size: 18,
-              color: active ? BeeSkyColors.accent : BeeSkyColors.muted,
+      child: onTap == null
+          ? row
+          : InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(radiusWidget),
+              child: row,
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                label,
-                style: TextStyle(
-                  color: active ? BeeSkyColors.accent : BeeSkyColors.muted,
-                  fontSize: 13,
-                  fontWeight: active ? FontWeight.w600 : FontWeight.w400,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            if (upcoming) _soonTag(),
-          ],
-        ),
-      ),
     );
   }
 
@@ -462,9 +726,19 @@ class _HomePageState extends State<HomePage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Máy đào',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+          Row(
+            children: [
+              const Text(
+                'Máy đào',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+              ),
+              // Scoped to a group: the header names it (the scan
+              // bar's "Quét ngay" then runs AS a group scan).
+              if (_activeGroup != null) ...[
+                const SizedBox(width: 10),
+                _chip('Nhóm: ${_activeGroup!.name}'),
+              ],
+            ],
           ),
           const SizedBox(height: 3),
           Text(
@@ -635,6 +909,230 @@ class _HomePageState extends State<HomePage> {
         _status,
         style: const TextStyle(color: BeeSkyColors.muted, fontSize: 12),
         overflow: TextOverflow.ellipsis,
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Groups view: header chips + group cards (the HashCore home)
+  // ------------------------------------------------------------------
+
+  Widget _groupsHeader() {
+    final scannedCount = _groups.where((g) => !g.isNew).length;
+    final totalErrors = _groups.fold<int>(
+      0,
+      (sum, g) => sum + (g.lastScan?.error ?? 0),
+    );
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 12),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: BeeSkyColors.border)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Nhóm mạng',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                ),
+              ),
+              FilledButton.icon(
+                onPressed: _busy ? null : () => _editGroup(),
+                icon: const Icon(Icons.add, size: 17),
+                label: const Text('Thêm nhóm'),
+                style: _scanBtnStyle,
+              ),
+            ],
+          ),
+          const SizedBox(height: 3),
+          const Text(
+            'Mỗi nhóm là một dải mạng của trại, có tài khoản riêng '
+            'và lịch tự quét riêng.',
+            style: TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              _chip('Tổng ${_groups.length} nhóm'),
+              const SizedBox(width: 8),
+              _chip('Đã quét $scannedCount'),
+              const SizedBox(width: 8),
+              _chip('Lỗi $totalErrors', dot: BeeSkyColors.bad),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _groupsContent() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 14, 18, 8),
+      child: _groups.isEmpty
+          ? _groupsEmptyState()
+          : ListView.builder(
+              itemCount: _groups.length,
+              itemBuilder: (context, i) => _groupCard(_groups[i]),
+            ),
+    );
+  }
+
+  Widget _groupsEmptyState() {
+    // HashCore's empty state mirrored: icon + line + the create
+    // action, inside a card — never a blank screen.
+    return GlassCard(
+      padding: EdgeInsets.zero,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.device_hub, size: 64, color: BeeSkyColors.muted),
+            const SizedBox(height: 14),
+            const Text(
+              'Chưa có nhóm mạng nào',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Tạo nhóm để gom các dải IP của trại — mỗi nhóm quét '
+              'và đăng nhập theo cách riêng của nó.',
+              style: TextStyle(color: BeeSkyColors.muted),
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: () => _editGroup(),
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('Thêm nhóm'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _newTag() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: BeeSkyColors.accent.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(radiusPill),
+      ),
+      child: const Text(
+        'MỚI',
+        style: TextStyle(
+          color: BeeSkyColors.accent,
+          fontSize: 9,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.6,
+        ),
+      ),
+    );
+  }
+
+  Widget _groupCard(NetGroup group) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: GlassCard(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          group.name,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      // HashCore's "new" tag for a never-scanned group.
+                      if (group.isNew) ...[
+                        const SizedBox(width: 8),
+                        _newTag(),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    group.targets,
+                    style: const TextStyle(
+                      color: BeeSkyColors.muted,
+                      fontSize: 12,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    group.lastScan == null
+                        ? 'Chưa quét'
+                        : group.lastScan!.summaryText,
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    group.autoscanText,
+                    style: const TextStyle(
+                      color: BeeSkyColors.muted,
+                      fontSize: 12,
+                    ),
+                  ),
+                  if (group.creds.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      'Tài khoản riêng: ${group.creds.length} bộ',
+                      style: const TextStyle(
+                        color: BeeSkyColors.muted,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                FilledButton.icon(
+                  onPressed: _busy ? null : () => _scanGroup(group),
+                  icon: const Icon(Icons.radar, size: 15),
+                  label: const Text('Quét nhóm'),
+                  style: _scanBtnStyle,
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    OutlinedButton(
+                      onPressed: _busy
+                          ? null
+                          : () => _editGroup(existing: group),
+                      style: _ghostBtnStyle,
+                      child: const Text('Sửa'),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, size: 19),
+                      tooltip: 'Xóa nhóm',
+                      onPressed:
+                          _busy ? null : () => _deleteGroup(group),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -28,6 +28,17 @@ abstract class BeeSkyBridge {
   /// passwords never travel on the command line (v0.23).
   Future<ScanResult> scan(String target, {String? credsFile});
 
+  /// One scan of a saved network group (v0.24): the CORE resolves
+  /// the group's targets, merges the group's own credential sets
+  /// ahead of the global [credsFile] ones, and persists the group's
+  /// last_scan into [groupsFile] (the core's default store location
+  /// applies when null).
+  Future<ScanResult> scanGroup(
+    String name, {
+    String? credsFile,
+    String? groupsFile,
+  });
+
   /// Exports repair tickets; returns a human-readable destination.
   Future<String> exportTickets(String target, {String? credsFile});
 }
@@ -137,9 +148,36 @@ class SidecarBridge implements BeeSkyBridge {
     return args;
   }
 
+  /// Argument list for a group scan — factored out for tests like
+  /// [scanArgs]: `scan --group <name>` with NO positional target
+  /// (the core takes it from the group), plus the file paths the
+  /// core needs (values never travel, only paths — v0.24).
+  static List<String> scanGroupArgs(
+    String name, {
+    String? credsFile,
+    String? groupsFile,
+  }) {
+    final args = <String>['scan', '--group', name, '--json'];
+    if (credsFile != null) args.addAll(['--creds-file', credsFile]);
+    if (groupsFile != null) args.addAll(['--groups-file', groupsFile]);
+    return args;
+  }
+
   @override
   Future<ScanResult> scan(String target, {String? credsFile}) async {
     final doc = await _runJson(scanArgs(target, credsFile: credsFile));
+    return ScanResult.fromJson(doc);
+  }
+
+  @override
+  Future<ScanResult> scanGroup(
+    String name, {
+    String? credsFile,
+    String? groupsFile,
+  }) async {
+    final doc = await _runJson(
+      scanGroupArgs(name, credsFile: credsFile, groupsFile: groupsFile),
+    );
     return ScanResult.fromJson(doc);
   }
 
@@ -232,13 +270,21 @@ class MockBridge implements BeeSkyBridge {
 
   @override
   Future<SysInfo> sysinfo() async =>
-      const SysInfo(version: '0.23.0', defaultTarget: '192.168.2.0/24');
+      const SysInfo(version: '0.24.0', defaultTarget: '192.168.2.0/24');
 
   @override
   Future<ScanResult> scan(String target, {String? credsFile}) async {
     await Future<void>.delayed(const Duration(milliseconds: 600));
     return ScanResult.fromJson(jsonDecode(_sampleJson) as Map<String, dynamic>);
   }
+
+  @override
+  Future<ScanResult> scanGroup(
+    String name, {
+    String? credsFile,
+    String? groupsFile,
+  }) =>
+      scan(name);
 
   @override
   Future<String> exportTickets(String target, {String? credsFile}) async =>

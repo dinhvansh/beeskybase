@@ -110,13 +110,58 @@ tagged for that family, in saved order → `any` sets → all remaining
 sets, so a wrong tag costs time but never locks a machine out. The
 winning set's label lands on the record as `cred_label`.
 
+## Network groups (v0.24)
+
+The app now OPENS on network groups — the HashCore Toolkit's home
+screen (the behaviour mapping, with every divergence and unknown
+marked, is `docs/network-groups-mapping.md` in the repo). A group
+is a named scan target with its own credential sets, an autoscan
+setting, and a persisted last-scan summary. Group cards show the
+name (with a "MỚI" tag while never scanned — HashCore's "new"),
+the targets, the last-scan line, the autoscan state, and
+[Quét nhóm] [Sửa] [Xóa] (delete asks first). The editor dialog
+holds name, targets, the autoscan toggle + interval (minutes),
+and the group's own credential sets via the same editor widget as
+the global sets — an empty list means "use the global sets".
+
+Groups persist in `beesky-groups.json` NEXT TO the executable
+(fallback `%APPDATA%\BeeSky\beesky-groups.json`) — the core's
+store document, shared with the CLI (`beesky groups list|add|
+remove|show|export|import`; import merges BY NAME):
+
+```json
+{"version": 1, "groups": [
+  {"id": "…", "name": "Trại chính", "targets": "192.168.2.0/24",
+   "creds": [{"label": "…", "user": "…", "password": "…",
+              "type": "vnish"}],
+   "autoscan": {"enabled": false, "interval_min": 30},
+   "last_scan": {"at": "…", "scanned": 254, "found": 63,
+                 "ok": 12, "check": 51, "error": 0}}]}
+```
+
+A group scan runs through the sidecar as `scan --group <name>`:
+the CORE resolves the targets, merges the group's sets ahead of
+the global creds file's (try order per miner: group family →
+global family → group "any" → global "any" → the rest), and
+persists `last_scan` into the store; the app reloads the store to
+refresh the card. Editing the miners view's target field away from
+the group's ranges leaves the group scope (an ad-hoc scan); the
+header names the active group while scoped.
+
+Autoscan is app-side (a documented divergence — HashCore's is
+app-side too; the always-on equivalent is the farm agent): while
+the app is open, a timer re-scans the ACTIVE group once its own
+interval has elapsed since its last scan.
+
 ## Stage-1 scope vs TODO
 
 Covered: splash, sidebar + header chips, scan bar, miners table with
 status chips, detail panel (issues + boards + winning cred label),
 empty state, auto-select first row, export tickets, saved
 credential sets (editor dialog + file persistence + `--creds-file`
-hand-off), double-click a row to open that miner's web admin.
+hand-off), double-click a row to open that miner's web admin,
+network groups (home screen, editor with per-group creds,
+core-resolved group scans, app-side autoscan).
 
 TODO (marked in code): a dedicated tickets verb so export doesn't need
 a second scan pass; `url_launcher` instead of the OS-shell browser open;

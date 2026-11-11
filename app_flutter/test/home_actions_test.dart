@@ -53,6 +53,12 @@ void main() {
       () => Future<void>.delayed(const Duration(milliseconds: 150)),
     );
     await tester.pump();
+    // v0.24: the app opens on network groups; these tests live on
+    // the miners view — one sidebar click over. (On the groups
+    // screen "Máy đào" is only the sidebar item, so the tap is
+    // unambiguous.)
+    await tester.tap(find.text('Máy đào'));
+    await tester.pumpAndSettle();
   }
 
   Future<void> runMockScan(WidgetTester tester) async {
