@@ -231,3 +231,6 @@ Model hydro loại bỏ phông nền studio đi kèm file gốc và quay mặt k
 Chọn **Tầng → Tất cả tầng · phối cảnh** để xem các tầng cùng lúc theo dạng tách tầng theo chiều cao, sàn trong suốt và đường viền riêng. Chọn một tầng để chỉnh vị trí; mở **Bố trí** tự trở về tầng đang chọn để thao tác an toàn. Nhãn bên trái là danh sách kệ luôn hiện trong cảnh, có thể cuộn; bấm tên để đưa camera tới kệ đó.
 
 Mặc định chỉ hiện thanh chọn tầng và các nút Bố trí, Lọc & nhóm, Tùy chọn, Toàn màn hình. Góc nhìn gom vào một danh sách; công cụ quản lý tầng, xoay kệ và di chuyển máy chỉ xuất hiện khi mở Bố trí. Bộ lọc/nhóm chỉ xuất hiện khi cần.
+
+
+Nhãn kệ hiện là bảng gắn phẳng lên tường sau, gồm tên kệ, sức chứa, tầng và khu vực; không còn danh sách nhãn nổi bên trái. Mỗi tầng có bảng riêng. Bấm bảng để tìm kệ trong chế độ khám phá.

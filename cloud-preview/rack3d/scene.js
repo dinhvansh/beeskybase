@@ -29,8 +29,7 @@ export function mount(host,api){
   scene.add(new T.HemisphereLight(0xffffff,0x657080,2.4));
   const light=new T.DirectionalLight(0xffffff,3);light.position.set(5,16,8);light.castShadow=true;light.shadow.mapSize.set(2048,2048);Object.assign(light.shadow.camera,{left:-26,right:26,top:20,bottom:-20,far:65});light.shadow.bias=-.001;scene.add(light);
   const fill=new T.DirectionalLight(0xd9ecff,1.8);fill.position.set(-12,8,-8);scene.add(fill);
-  const rackLabels=[];
-  const labelLayer=document.createElement('div');labelLayer.className='warehouse-label-layer';labelLayer.setAttribute('aria-label','Danh sách kệ trong cảnh');host.append(labelLayer);
+  const rackLabels=[],wallSigns=[];
   const slots=[],groups=[],rackMeshes=[],ray=new T.Raycaster(),pointer=new T.Vector2();
   const modelLoads=[];let loadedModels=0;
   const frameMat=new T.MeshStandardMaterial({color:c.frame,roughness:.65,metalness:.35});
@@ -79,17 +78,14 @@ export function mount(host,api){
       }
     }
     g.traverse(o=>{if(o.isMesh){o.userData.rackGroup=g;rackMeshes.push(o)}});
-    const tag=document.createElement('button');tag.type='button';tag.className='warehouse-rack-label';tag.title='Bấm để tìm '+r.name;tag.addEventListener('click',()=>{api.selectRack(r.id);focusRack(r.id)});
-    const name=document.createElement('strong');name.textContent=r.name+' · '+r.slots.filter(Boolean).length+'/'+r.slots.length;
-    const zone=document.createElement('small');zone.textContent=(api.floors.find(f=>f.id===r.placement.floorId)?.name||'')+' · '+r.zone;tag.append(name,zone);labelLayer.append(tag);rackLabels.push({tag,g,height:h});
+
   });
   const floorWidth=Math.max(...displayFloors.map(f=>f.width)),floorDepth=Math.max(...displayFloors.map(f=>f.depth));
   if(api.allFloors)displayFloors.forEach((floor,index)=>{
     const level=floorY(floor.id);
     if(index){const slabMat=new T.MeshBasicMaterial({color:c.selected,transparent:true,opacity:.08,depthWrite:false,side:T.DoubleSide});const slab=block(scene,0,level-.12,0,floor.width,.12,floor.depth,slabMat);slab.castShadow=false;slab.receiveShadow=false}
     const rim=new T.LineLoop(new T.BufferGeometry().setFromPoints([new T.Vector3(-floor.width/2,level, -floor.depth/2),new T.Vector3(floor.width/2,level,-floor.depth/2),new T.Vector3(floor.width/2,level,floor.depth/2),new T.Vector3(-floor.width/2,level,floor.depth/2)]),new T.LineBasicMaterial({color:c.selected}));scene.add(rim);
-    const count=racks.filter(r=>r.placement.floorId===floor.id).length;
-    const floorTag=document.createElement('span');floorTag.className='warehouse-floor-chip';floorTag.textContent=floor.name+' · '+count+' kệ';labelLayer.append(floorTag);
+
   });
   block(scene,0,-.08,0,floorWidth,.12,floorDepth,new T.MeshStandardMaterial({color:c.floor,roughness:1}));
   // Open front and roof: architecture frames the layout without hiding machines.
@@ -99,6 +95,29 @@ export function mount(host,api){
   const supplyMat=new T.MeshStandardMaterial({color:c.normal,roughness:.45,metalness:.25});
   const lampMat=new T.MeshBasicMaterial({color:0xfff4dc});
   const hallHeight=Math.max(height+2,8),back=-floorDepth/2;
+  function wallSign(title,subtitle,x,y,width,rackId){
+    const image=document.createElement('canvas');image.width=1024;image.height=256;
+    const ctx=image.getContext('2d');ctx.fillStyle=c.labelBg;ctx.fillRect(0,0,1024,256);
+    ctx.fillStyle=c.brand;ctx.fillRect(0,0,16,256);ctx.strokeStyle=c.frame;ctx.lineWidth=8;ctx.strokeRect(4,4,1016,248);
+    ctx.fillStyle=c.text;ctx.textAlign='center';ctx.textBaseline='middle';ctx.font='700 76px Arial';ctx.fillText(title,520,subtitle?94:128,950);
+    if(subtitle){ctx.font='36px Arial';ctx.fillText(subtitle,520,188,940)}
+    const texture=new T.CanvasTexture(image);texture.colorSpace=T.SRGBColorSpace;
+    const plaque=new T.Mesh(new T.PlaneGeometry(width,width/4),new T.MeshBasicMaterial({map:texture,toneMapped:false}));
+    plaque.position.set(x,y,back+.38);scene.add(plaque);
+    if(rackId){plaque.userData.rackId=rackId;wallSigns.push(plaque);rackLabels.push({plaque,rackId})}
+    return plaque;
+  }
+  for(const floor of displayFloors){
+    const level=floorY(floor.id),floorRacks=racks.filter(r=>r.placement.floorId===floor.id).sort((a,b)=>a.placement.x-b.placement.x);
+    if(level)block(scene,0,level+hallHeight/2,back,floorWidth,hallHeight,.18,wallMat);
+    const boardWidth=Math.min(6,(floorWidth-4)/Math.max(1,floorRacks.length)-.4);
+    floorRacks.forEach((rack,index)=>{
+      const x=(index-(floorRacks.length-1)/2)*Math.min(10,(floorWidth-4)/Math.max(1,floorRacks.length));
+      wallSign(rack.name+' · '+rack.slots.filter(Boolean).length+'/'+rack.slots.length,floor.name+' · '+rack.zone,x,level+height+.7,boardWidth,rack.id);
+    });
+    if(api.allFloors)wallSign(floor.name,'',-floorWidth/2+3.5,level+hallHeight-.6,4);
+  }
+
   block(scene,0,hallHeight/2,back,floorWidth,hallHeight,.18,wallMat);
   block(scene,-floorWidth/2,hallHeight/2,0,.18,hallHeight,floorDepth,wallMat);
   // Wall panels, steel columns and overhead service beams.
@@ -130,7 +149,7 @@ export function mount(host,api){
     for(let v=-.5;v<=.5;v+=.25)block(scene,x,3+v,back+.45,1.3,.035,.04,wallMat);
   }
   block(scene,-floorWidth/2+1,1.1,back+3,1.2,2.2,.8,trimMat);
-  label('BEESKY · MINING WORKSHOP',0,hallHeight-1,back+.3,9);
+  const brandSign=wallSign('BEESKY · MINING WORKSHOP','',0,height+1,8);brandSign.rotation.y=Math.PI/2;brandSign.position.set(-floorWidth/2+.25,height+1,0);
   const safetyMat=new T.MeshBasicMaterial({color:c.brand});
   // Mark the perimeter service route; the central floor stays free for rack layout.
   for(const z of [-floorDepth/2+3,floorDepth/2-3]){
@@ -144,8 +163,7 @@ export function mount(host,api){
   const selection=new T.BoxHelper(new T.Object3D(),c.selected);selection.visible=false;scene.add(selection);
   function selectRack(id){const g=groups.find(g=>g.userData.r.id===id);selection.visible=!!g;if(g)selection.setFromObject(g);draw()}
   function updateRackLabels(){
-    // Persistent, scrollable rack index: no clipping or depth occlusion on orbit/zoom.
-    for(const {tag,g} of rackLabels)tag.classList.toggle('selected',g.userData.r.id===api.selectedRack());
+    for(const {plaque,rackId} of rackLabels)plaque.material.color.set(rackId===api.selectedRack()?0xffffff:0xd9dfe6);
   }
   function focusRack(id){
     const group=groups.find(g=>g.userData.r.id===id);if(!group)return;
@@ -177,7 +195,7 @@ export function mount(host,api){
     if(rackDrag){const p=ground(e);if(p&&Math.hypot(e.clientX-down.x,e.clientY-down.y)>6){const {g}=rackDrag;const next={...g.userData.r.placement,x:Math.round((p.x-rackDrag.offset.x)*2)/2,z:Math.round((p.z-rackDrag.offset.z)*2)/2};rackDrag.next=next;rackDrag.error=api.validateRack(g.userData.r,next);rackDrag.moved=true;g.position.set(next.x,0,next.z);selection.setFromObject(g);selection.material.color.set(rackDrag.error?c.critical:c.selected);api.status(rackDrag.error||g.userData.r.name+' · X '+next.x+' · Z '+next.z+' · Thả để lưu vị trí');canvas.style.cursor='grabbing';api.hover(null);draw()}return}
     const m=hit(e);if(down&&api.edit()&&down.m?.userData.d&&Math.hypot(e.clientX-down.x,e.clientY-down.y)>6){drag=down.m;canvas.style.cursor='grabbing'}reset();if(drag){api.hover(null);drag.material.emissive.set(c.selected);if(m&&m!==drag){m.material.emissive.set(m.userData.d?c.critical:c.selected);api.status(m.userData.d?'Ô đã có máy. Chọn ô trống.':'Thả để chuyển '+drag.userData.d.ip+' → '+api.position(m.userData.r,m.userData.i))}}else{canvas.style.cursor=api.mode()==='racks'&&hitRack(e)?'grab':api.edit()&&m?.userData.d?'grab':m?'pointer':'default';if(m){m.material.emissive.set(c.selected);describe(m)}const rect=canvas.getBoundingClientRect();api.hover(m?.userData.d?{...m.userData,x:e.clientX-rect.left,y:e.clientY-rect.top}:null)}draw()
   }
-  function end(e){const m=hit(e),wasDrag=drag;controls.enabled=true;if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);if(rackDrag){const data=rackDrag;rackDrag=null;data.g.position.copy(data.old);if(data.moved&&data.next){if(data.error)api.status(data.error+' Vị trí cũ được giữ nguyên.');else api.moveRack(data.g.userData.r,data.next)}down=null;selection.material.color.set(c.selected);if(!disposed){selectRack(api.selectedRack());draw()}return}if(api.mode()==='racks'){down=null;return}if(drag&&m&&m!==drag){if(m.userData.d)api.status('Ô đã có máy. Vị trí cũ được giữ nguyên.');else api.move(drag.userData.d.id,m.userData.r,m.userData.i)}else if(down&&!wasDrag&&Math.hypot(e.clientX-down.x,e.clientY-down.y)<6&&m){if(api.pending()&&!m.userData.d)api.move(api.pending(),m.userData.r,m.userData.i);else api.inspect(m.userData.r,m.userData.i)}down=null;drag=null;reset();if(!disposed)draw()}
+  function end(e){aim(e);const sign=ray.intersectObjects(wallSigns,false)[0]?.object;if(sign&&down&&api.mode()==='inspect'&&!api.edit()&&Math.hypot(e.clientX-down.x,e.clientY-down.y)<6){controls.enabled=true;down=null;api.selectRack(sign.userData.rackId);focusRack(sign.userData.rackId);return}const m=hit(e),wasDrag=drag;controls.enabled=true;if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);if(rackDrag){const data=rackDrag;rackDrag=null;data.g.position.copy(data.old);if(data.moved&&data.next){if(data.error)api.status(data.error+' Vị trí cũ được giữ nguyên.');else api.moveRack(data.g.userData.r,data.next)}down=null;selection.material.color.set(c.selected);if(!disposed){selectRack(api.selectedRack());draw()}return}if(api.mode()==='racks'){down=null;return}if(drag&&m&&m!==drag){if(m.userData.d)api.status('Ô đã có máy. Vị trí cũ được giữ nguyên.');else api.move(drag.userData.d.id,m.userData.r,m.userData.i)}else if(down&&!wasDrag&&Math.hypot(e.clientX-down.x,e.clientY-down.y)<6&&m){if(api.pending()&&!m.userData.d)api.move(api.pending(),m.userData.r,m.userData.i);else api.inspect(m.userData.r,m.userData.i)}down=null;drag=null;reset();if(!disposed)draw()}
   function cancel(){if(rackDrag){rackDrag.g.position.copy(rackDrag.old);rackDrag=null;selection.material.color.set(c.selected);selectRack(api.selectedRack())}down=null;drag=null;controls.enabled=true;reset();api.hover(null);draw()}
   function over(e){if(!api.dragged())return;const m=hit(e);reset();if(m&&!m.userData.d){e.preventDefault();e.dataTransfer.dropEffect='move';m.material.emissive.set(c.selected);describe(m)}draw()}
   function drop(e){const id=api.dragged(),m=hit(e);if(!id||!m||m.userData.d)return;e.preventDefault();if(e.dataTransfer.getData('application/x-beesky-device')===id)api.move(id,m.userData.r,m.userData.i)}
@@ -191,5 +209,5 @@ export function mount(host,api){
   reset();draw();
   const effects=miningEffects(scene,slots,host,{...api,enabled:api.effects},()=>renderer.render(scene,camera));
   modelLoads.forEach(load=>load());
-  return {view,selectRack,focusDevice,setEffects(value){effects.setEnabled(value)},highlight(){reset();effects.refresh();draw()},cameraState(){return{position:camera.position.toArray(),target:controls.target.toArray()}},dispose(){if(disposed)return;disposed=true;effects.dispose();observer.disconnect();controls.dispose();window.removeEventListener('keydown',escape);api.hover(null);const geometries=new Set(),materials=new Set();scene.traverse(o=>{if(o.geometry&&!o.geometry.userData.minerShared)geometries.add(o.geometry);for(const material of Array.isArray(o.material)?o.material:[o.material])if(material)materials.add(material)});materials.forEach(m=>{for(const texture of Object.values(m))if(texture?.isTexture&&!texture.userData.minerShared)texture.dispose();m.dispose()});geometries.forEach(g=>g.dispose());renderer.dispose();renderer.forceContextLoss();labelLayer.remove();canvas.remove()}};
+  return {view,selectRack,focusDevice,setEffects(value){effects.setEnabled(value)},highlight(){reset();effects.refresh();draw()},cameraState(){return{position:camera.position.toArray(),target:controls.target.toArray()}},dispose(){if(disposed)return;disposed=true;effects.dispose();observer.disconnect();controls.dispose();window.removeEventListener('keydown',escape);api.hover(null);const geometries=new Set(),materials=new Set();scene.traverse(o=>{if(o.geometry&&!o.geometry.userData.minerShared)geometries.add(o.geometry);for(const material of Array.isArray(o.material)?o.material:[o.material])if(material)materials.add(material)});materials.forEach(m=>{for(const texture of Object.values(m))if(texture?.isTexture&&!texture.userData.minerShared)texture.dispose();m.dispose()});geometries.forEach(g=>g.dispose());renderer.dispose();renderer.forceContextLoss();canvas.remove()}};
 }

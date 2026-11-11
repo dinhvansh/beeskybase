@@ -163,5 +163,5 @@ Các màu light đề xuất trong master prompt:
 ### Đơn giản hóa điều khiển xưởng (bổ sung)
 
 - Màn hình khám phá ưu tiên cảnh; công cụ chỉnh sửa và lọc mở theo nhu cầu qua Bố trí và Lọc & nhóm.
-- Danh sách kệ không phụ thuộc phép chiếu camera, có thể cuộn, bấm để định vị; không tự biến mất khi xoay/zoom.
+- Theo yêu cầu mới, nhãn kệ là bảng gắn phẳng lên tường sau của từng tầng, không phải danh sách nổi hoặc billboard theo camera. Bấm bảng để định vị kệ.
 - Có phối cảnh nhiều tầng dạng tách tầng; chỉnh bố trí trên một tầng cụ thể, không làm thay đổi dữ liệu khi đổi góc nhìn.
