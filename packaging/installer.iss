@@ -37,7 +37,7 @@
 ; .github/workflows/build-windows.yml — never by hand)
 
 #define MyAppName "BeeSky"
-#define MyAppVersion "0.31.0"
+#define MyAppVersion "0.31.1"
 #define MyAppPublisher "BeeSkyBase"
 #define MyAppExeName "beesky-gui.exe"
 
@@ -186,7 +186,7 @@ end;
 var
   PairPage: TWizardPage;
   PairCloudEdit: TNewEdit;
-  PairKeyEdit: TNewPasswordEdit;
+  PairKeyEdit: TPasswordEdit;
   PairSiteEdit: TNewEdit;
 
 function AgentConfigPath: String;
@@ -273,7 +273,7 @@ begin
   Lbl.Left := 0;
   Lbl.Top := TopPos;
   Lbl.Caption := 'Agent key (cloud cấp, chỉ hiện một lần lúc tạo agent):';
-  PairKeyEdit := TNewPasswordEdit.Create(PairPage);
+  PairKeyEdit := TPasswordEdit.Create(PairPage);
   PairKeyEdit.Parent := PairPage.Surface;
   PairKeyEdit.Left := 0;
   PairKeyEdit.Top := TopPos + ScaleY(18);
