@@ -3184,3 +3184,232 @@ build-flutter.yml):
     runner and the BeeSkyFlutter-<tag>-win64.zip asset.
     The app remains compile-verified only until the
     owner runs it on real Windows (as since v0.21).
+
+---
+
+# v0.27.0 — Device detail tabs (HashCore Toolkit device-info dialog, ported per the dissection)
+
+The parity push continues (owner's bar: 99% of HashCore
+Toolkit in one month). Following the dissect-before-
+porting rule, the Toolkit's device-info dialog was
+dissected FIRST from the shipped materials (the
+device_info_dialog.* / device_info_board_info.* /
+device_info_pools_info.* translation keys — Metrics,
+Charts, Boards with CHIPS TOTAL / STABLE / SLOW /
+CRITICAL, Pools, Fans with Mode + Speed, Hotel Fee,
+the editable Device note) and BeeSky's OWN data audited
+against it (the dashd api-doc's AntmMinerStats /
+Cooling / PoolStats schemas; report.py's acs reading;
+each adapter's read-only reach, file:line) — the full
+mapping, with UNKNOWNs and DATA-GAPs named, is in
+docs/device-detail-mapping.md. Nothing renders that
+BeeSky does not actually have.
+
+PYTHON CORE:
+
+  * beesky/core/inspect.py (NEW) + the `inspect` verb:
+    `beesky inspect --json <ip>` deep-fetches ONE device
+    (read-only) through the scan's own machinery —
+    discover.probe_host claims it (family detection +
+    the v0.23 creds-file / v0.24 group credential
+    resolution: --creds-file, --group, --groups-file,
+    --user/--password, --api-key, --token exactly like
+    scan) and the winning set's token/key/login ride
+    the candidate into the section fetches. Output is
+    ONE JSON document: {ip, source, model, cred_label,
+    boards, pools, fans}; every section is
+    {"supported": true, ...} or {"supported": false,
+    "reason"} — an explicit marker, never an empty
+    success; one section's failure never sinks the
+    others. A malformed target (not one IPv4 address)
+    or a malformed creds file/group exits 2 BEFORE any
+    I/O; a device no adapter claims yields an exit-0
+    {"error": ...} document (the app renders the state).
+  * Per family (evidence: mapping §2): VNISH — the
+    /summary the scan already fetches carries pools
+    (PoolStats), cooling (per-fan rpm/status/max_rpm,
+    the fan mode auto/manual/immersion, fan_duty) and
+    per-board chip_statuses counts; /boards adds the
+    per-chip list (pos/hr/grade/temp). The grades ARE
+    HashCore's buckets: grey = STABLE, orange = SLOW
+    (degraded but hashing), red = CRITICAL (dead) —
+    dashd.py's own semantics. The fan mode is parsed
+    from BOTH the api-doc object shape {name, param}
+    and the plain-string shape some builds serve.
+    CGMINER — boards from the STATS acs strings (per
+    chain: raw acs, chips_total, chips_ok, dead
+    positions, the non-'o' character counts, temp) —
+    the SAME reading as report.build_record; pools via
+    the RPC `pools` command (CgminerClient.pools
+    existed unused); fans = STATS speeds, mode null
+    (no source key exists). STOCK — boards/fans from
+    the status CGI the probe already fetched (cgminer-
+    shaped); pools attempted via the bmminer RPC and
+    honestly unsupported when it does not answer (no
+    CGI source). The scan record is UNCHANGED.
+
+FLUTTER APP (app_flutter/):
+
+  * The detail panel becomes TABBED (named layout
+    divergence: BeeSky keeps its v0.22 right-side panel;
+    HashCore's is a modal dialog — tabs + content are
+    the parity target). Order mirrors the dialog:
+    Số liệu (Metrics) · Biểu đồ (Charts) · Board ·
+    Pools · Quạt (Fans) · Ghi chú (Note). The first tab
+    is NOT named 'Tổng quan' — that label already names
+    the grid's Overview density on the same screen (the
+    collision broke a grid widget test during the
+    build; fixed by naming, disclosed here).
+  * lib/detail.dart (NEW): the inspect wire models
+    (sections with supported/reason; boards with the
+    grade buckets OR the acs shape, never both faked);
+    HistorySample + appendHistorySample (keyed MAC-else-
+    IP via deviceKeyFor, rate in the record's OWN native
+    unit, cap 300/device, oldest pruned); the pure
+    chart prep (ratePoints / tempPoints / powerPoints —
+    samples lacking a metric are skipped, never zeroed;
+    rateUnitOf labels the line with the device's unit);
+    MiniChart, a hand-drawn CustomPainter line chart
+    (zero third-party deps kept — HashCore's fl_chart
+    is a library divergence, not a behaviour one; a
+    single point draws as a lone dot); HistoryStore
+    (beesky-history.json) + NoteStore (beesky-notes.json)
+    on the stores' usual beside-the-exe / %APPDATA%
+    strategy, corrupt reads as empty.
+  * Số liệu = the v0.22 panel content VERBATIM
+    (metrics, issues, board summary lines) — a shipped
+    contract; the Board tab carries the deep view (the
+    named duplication). Biểu đồ: LOCAL samples only —
+    every completed scan appends one sample per live
+    device (FETCH_ERROR records are skipped: a failed
+    read is not a sample); hashrate + max-temp + power
+    (when the device reports power) lines, per device,
+    never aggregated across units; the empty state says
+    charts fill in as scans accumulate. Board: record
+    rows immediately; the inspect fetch (lazy, once per
+    device per session) adds the vnish grade split +
+    PCB temp + per-chip grades, or the cgminer/stock
+    acs breakdown + dead positions — matched to boards
+    by POSITION (record and inspect index bases differ
+    between the mock fleet and the real core; position
+    is the convention-free key). Pools: the record's
+    pools when a future core fills them, else inspect
+    on first open — loading state, then rows ('Pool N
+    URL' / 'Pool N worker', HashCore's own labels) or
+    the core's unsupported reason verbatim. Quạt:
+    record speeds immediately; inspect adds mode +
+    duty (vnish) or the plain 'firmware không báo'
+    absence. Ghi chú: HashCore's Device note + Save
+    note — a text field + explicit Lưu ghi chú, keyed
+    like history, persisted across restarts.
+  * lib/sidecar.dart: BeeSkyBridge.inspect(ip, {credsFile,
+    group, groupsFile}) — argv carries the IP + file
+    PATHS + the group NAME only (values never travel,
+    the v0.23 rule); in a group's scope the group rides
+    along so the core resolves its creds layer, exactly
+    like its scans and ops jobs. MockBridge gains
+    inspect fixtures per sample device (vnish with the
+    split + mode, two cgminer with acs boards + pools,
+    the unreachable unit as an error document) and the
+    app seeds demo history for the mock fleet so every
+    tab renders in tests/demos.
+
+PER-TAB MATCH / DIVERGENCE / DATA-GAP vs HASHCORE
+(full table: docs/device-detail-mapping.md §3–§5):
+
+  Metrics -> Số liệu: MATCH (the existing panel).
+  Charts: DIVERGENCE (named) — HashCore's history
+  mechanics are UNKNOWN from the shipped materials;
+  BeeSky charts LOCAL scan samples, persisted, per
+  device in its native unit. Content (hashrate +
+  temperature lines) matches; power is a BeeSky extra
+  the data genuinely carries.
+  Boards: MATCH for vnish (TOTAL/STABLE/SLOW/CRITICAL
+  from the firmware's own grades — the same data
+  HashCore renders). DATA-GAP for cgminer/stock: the
+  acs alphabet's non-'o' characters have no documented
+  grade semantics in BeeSky's evidence, so those boards
+  show ok/total + dead positions + raw character counts
+  and the tab STATES the gap — no invented buckets.
+  Pools: MATCH per family where a source exists
+  (dashd summary, cgminer RPC); stock without an RPC
+  answer is unsupported-with-reason, not empty.
+  Fans: MATCH (mode + per-fan speed) for vnish;
+  speeds-only for cgminer/stock — fan MODE is a
+  DATA-GAP there (no source key exists).
+  Note: MATCH (per-device, placeholder + explicit
+  save), as a tab instead of a dialog field (the
+  container divergence). The v0.25 grid Note COLUMN is
+  NOT wired: cell text is a pure function of the
+  record and notes live outside records — more than a
+  trivial hookup; left for a later pass, named here.
+  Hotel Fee: NOT APPLICABLE — BeeSky has no hotel-fee
+  concept (no data, no settings); not built.
+  Also named: PCB temp rides inspect only (the record
+  still carries chip temp alone); MAC keying is
+  'when present' — no adapter emits a MAC today.
+
+(a) VERIFIED LOCALLY (this sandbox):
+
+  * Python suites at the v0.27.0 pins:
+
+    mock_inspect_test: 33 PASS / 0 FAIL (standalone)
+    mock_agent_bg_test: 52 PASS / 0 FAIL (standalone)
+    mock_bridge_test: 24 PASS / 0 FAIL (standalone)
+    mock_creds_test: 32 PASS / 0 FAIL (standalone)
+    mock_groups_test: 39 PASS / 0 FAIL (standalone)
+    mock_units_test: 50 PASS / 0 FAIL (standalone)
+    mock_ops_test: 32 PASS / 0 FAIL (standalone)
+
+    mock_inspect_test covers: the vnish sections end
+    to end (grade split 112/0/2 on the sick board,
+    dead positions [10, 55] from /boards grades, the
+    114-chip list, chip + pcb temps, PoolStats pools,
+    fan mode auto + duty 62 + per-fan status); the
+    cgminer sections (acs counts 111/114, dead
+    [10, 55, 114], other_chars {x: 3}, NO grade keys
+    in the wire — the gap is structural; RPC pools;
+    fan mode null); the stock sections (CGI boards/
+    fans; pools unsupported with the no-source reason);
+    credential reuse (a locked dashd claimed by the
+    creds-file winner + label, its pools honestly
+    unsupported — that mock's summary carries none;
+    wrong creds -> the vnish candidate with every
+    section unsupported on the 401; --group resolution
+    with the group's set winning; unknown group exits
+    2); the exit-2 contract (5 malformed targets + a
+    malformed creds file, stdout empty throughout);
+    the exit-0 error document for an unclaimed device.
+
+  * Flutter (SDK 3.47.9 at ~/workspace/flutter-sdk):
+    flutter analyze: clean; flutter test: 94 PASS / 0 FAIL (local SDK 3.47.9; 78 pre-existing + 16 new detail tests) — inspect model parsing per family
+    (grades vs acs shapes, unsupported markers, the
+    error document + failure factory); history append
+    (IP/MAC keying, native-unit + legacy-ths rates,
+    the 300-cap prune) + JSON round-trips; chart prep
+    (null-skipping, unit labelling, empty/single
+    shapes); the history/notes stores' round-trips +
+    corrupt-reads-empty; the inspect argv contract;
+    the mock fixtures' family shapes; the painter's
+    single-point + flat-series smoke. Widget level:
+    all six tabs render for the vnish S19 (pool rows,
+    fan mode + duty, the three grade lines, the seeded
+    charts incl. power); the L9's Boards tab states
+    the grade DATA-GAP + the acs breakdown with no
+    bucket line, its Fans tab shows the honest mode
+    absence; the charts empty state for the sample-
+    less device; a note saves and survives a fresh
+    HomePage. All 78 pre-existing tests still pass —
+    the only pre-existing test touched is the version
+    pin in widget_test.dart (v0.27.0); the grid
+    density test's 'Tổng quan' collision was fixed by
+    NAMING the detail tab 'Số liệu', not by editing
+    the grid test.
+
+(b) VERIFIED ONLY BY CI (.github/workflows/
+build-flutter.yml):
+
+  * flutter build windows --release on a real Windows
+    runner and the BeeSkyFlutter-<tag>-win64.zip asset.
+    The app remains compile-verified only until the
+    owner runs it on real Windows (as since v0.21).

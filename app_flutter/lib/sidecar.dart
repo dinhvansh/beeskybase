@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'detail.dart';
 import 'models.dart';
 import 'ops.dart';
 
@@ -49,6 +50,19 @@ abstract class BeeSkyBridge {
   /// sets are referenced by path). Returns the run handle: event
   /// stream + summary future + Stop.
   Future<OpsRun> startOps(Map<String, dynamic> job);
+
+  /// Deep-fetch ONE device (v0.27): pools / fans / per-board
+  /// detail for the detail tabs, through the core's
+  /// `inspect --json` — the scan record does not carry them.
+  /// Credential resolution is the scan's own: [credsFile]'s sets,
+  /// led by [group]'s when a group scope is active (the core
+  /// resolves; only paths and the group NAME travel on argv).
+  Future<InspectResult> inspect(
+    String ip, {
+    String? credsFile,
+    String? group,
+    String? groupsFile,
+  });
 }
 
 /// Opens [url] in the OS default browser — used for a miner's own
@@ -175,6 +189,37 @@ class SidecarBridge implements BeeSkyBridge {
   /// (its path is the only ops argument; no secret value ever
   /// appears in argv, the v0.23 rule applied to tasks).
   static List<String> opsArgs(String jobPath) => ['ops', '--job', jobPath];
+
+  /// Argument list for an inspect run — factored out for tests
+  /// like [scanArgs]: the device IP plus file PATHS only (the
+  /// group is referenced by name; its sets resolve core-side).
+  static List<String> inspectArgs(
+    String ip, {
+    String? credsFile,
+    String? group,
+    String? groupsFile,
+  }) {
+    final args = <String>['inspect', ip, '--json'];
+    if (credsFile != null) args.addAll(['--creds-file', credsFile]);
+    if (group != null) args.addAll(['--group', group]);
+    if (groupsFile != null) args.addAll(['--groups-file', groupsFile]);
+    return args;
+  }
+
+  @override
+  Future<InspectResult> inspect(
+    String ip, {
+    String? credsFile,
+    String? group,
+    String? groupsFile,
+  }) async {
+    final doc = await _runJson(
+      inspectArgs(ip,
+          credsFile: credsFile, group: group, groupsFile: groupsFile),
+      timeout: const Duration(seconds: 60),
+    );
+    return InspectResult.fromJson(doc);
+  }
 
   @override
   Future<OpsRun> startOps(Map<String, dynamic> job) async {
@@ -405,7 +450,7 @@ class MockBridge implements BeeSkyBridge {
 
   @override
   Future<SysInfo> sysinfo() async =>
-      const SysInfo(version: '0.26.0', defaultTarget: '192.168.2.0/24');
+      const SysInfo(version: '0.27.0', defaultTarget: '192.168.2.0/24');
 
   @override
   Future<ScanResult> scan(String target, {String? credsFile}) async {
@@ -428,6 +473,194 @@ class MockBridge implements BeeSkyBridge {
   @override
   Future<OpsRun> startOps(Map<String, dynamic> job) async =>
       _MockOpsRun(job);
+
+  /// Inspect fixtures mirroring the sample fleet's families:
+  /// the S19 (vnish) gets the grade split + fan mode, the L9/Z15
+  /// (cgminer) get acs boards (NO grade buckets — the DATA-GAP
+  /// is part of the fixture), and the unreachable unit is an
+  /// honest error document, exactly like the real core's.
+  @override
+  Future<InspectResult> inspect(
+    String ip, {
+    String? credsFile,
+    String? group,
+    String? groupsFile,
+  }) async {
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    final doc = _inspectFixtures[ip] ??
+        <String, dynamic>{
+          'ip': ip,
+          'source': null,
+          'error': 'no miner answered on the RPC or web ports (mock)',
+        };
+    return InspectResult.fromJson(doc);
+  }
+
+  static Map<String, dynamic> _vnishBoard(
+    int index,
+    int stable,
+    int slow,
+    int critical,
+    List<int> dead,
+    double chipTemp,
+    double pcbTemp,
+  ) =>
+      {
+        'index': index,
+        'chips_total': stable + slow + critical,
+        'stable': stable,
+        'slow': slow,
+        'critical': critical,
+        'dead_positions': dead,
+        'chip_temp_c': chipTemp,
+        'pcb_temp_c': pcbTemp,
+        'chips': null,
+      };
+
+  static Map<String, dynamic> _acsBoard(
+    int index,
+    int total,
+    int ok,
+    List<int> dead,
+    double temp,
+  ) =>
+      {
+        'index': index,
+        'acs': List<String>.generate(
+          total,
+          (i) => dead.contains(i + 1) ? 'x' : 'o',
+        ).join(),
+        'chips_total': total,
+        'chips_ok': ok,
+        'dead_positions': dead,
+        'other_chars': {if (dead.isNotEmpty) 'x': dead.length},
+        'temp_c': temp,
+      };
+
+  static final Map<String, Map<String, dynamic>> _inspectFixtures = {
+    '192.168.2.101': {
+      'ip': '192.168.2.101',
+      'source': 'vnish',
+      'model': 'Antminer S19 Pro',
+      'cred_label': 'VNish trại A',
+      'boards': {
+        'supported': true,
+        'boards': [
+          _vnishBoard(1, 114, 0, 0, const [], 61, 49),
+          _vnishBoard(2, 114, 0, 0, const [], 65, 52),
+          _vnishBoard(3, 114, 0, 0, const [], 63, 51),
+        ],
+      },
+      'pools': {
+        'supported': true,
+        'pools': [
+          {
+            'id': 0,
+            'url': 'stratum+tcp://pool.example.com:3333',
+            'user': 'mockworker.001',
+            'status': 'working',
+            'accepted': 2048,
+            'rejected': 12,
+            'stale': 1,
+            'ping': 42,
+          },
+        ],
+      },
+      'fans': {
+        'supported': true,
+        'mode': 'auto',
+        'mode_param': null,
+        'duty_pct': 62,
+        'fans': [
+          {'id': 1, 'rpm': 4120, 'status': 'ok', 'max_rpm': 6000},
+          {'id': 2, 'rpm': 4080, 'status': 'ok', 'max_rpm': 6000},
+          {'id': 3, 'rpm': 4150, 'status': 'ok', 'max_rpm': 6000},
+          {'id': 4, 'rpm': 4090, 'status': 'ok', 'max_rpm': 6000},
+        ],
+      },
+    },
+    '192.168.2.102': {
+      'ip': '192.168.2.102',
+      'source': 'cgminer',
+      'model': 'Antminer L9',
+      'cred_label': null,
+      'boards': {
+        'supported': true,
+        'boards': [
+          _acsBoard(1, 123, 123, const [], 57),
+          _acsBoard(
+            2,
+            123,
+            84,
+            [for (var i = 85; i <= 123; i++) i],
+            59,
+          ),
+          _acsBoard(3, 123, 123, const [], 58),
+        ],
+      },
+      'pools': {
+        'supported': true,
+        'pools': [
+          {
+            'id': 0,
+            'url': 'stratum+tcp://pool.example.com:3333',
+            'user': 'mockworker.001',
+            'status': 'Alive',
+            'accepted': 2048,
+            'rejected': 12,
+          },
+        ],
+      },
+      'fans': {
+        'supported': true,
+        'mode': null,
+        'fans': [
+          {'id': 1, 'rpm': 4560},
+          {'id': 2, 'rpm': 4440},
+        ],
+      },
+    },
+    '192.168.2.103': {
+      'ip': '192.168.2.103',
+      'source': 'cgminer',
+      'model': 'Antminer Z15',
+      'cred_label': null,
+      'boards': {
+        'supported': true,
+        'boards': [
+          _acsBoard(1, 24, 24, const [], 71),
+          _acsBoard(2, 24, 24, const [], 88),
+          _acsBoard(3, 24, 24, const [], 73),
+        ],
+      },
+      'pools': {
+        'supported': true,
+        'pools': [
+          {
+            'id': 0,
+            'url': 'stratum+tcp://pool.example.com:3333',
+            'user': 'mockworker.001',
+            'status': 'Alive',
+            'accepted': 1024,
+            'rejected': 3,
+          },
+        ],
+      },
+      'fans': {
+        'supported': true,
+        'mode': null,
+        'fans': [
+          {'id': 1, 'rpm': 3900},
+          {'id': 2, 'rpm': 3840},
+        ],
+      },
+    },
+    '192.168.2.104': {
+      'ip': '192.168.2.104',
+      'source': null,
+      'error': 'không kết nối được (cổng 4028/80) (mock)',
+    },
+  };
 }
 
 /// The mock ops path: simulates the core runner's lifecycle against

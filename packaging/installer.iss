@@ -23,7 +23,7 @@
 ; .github/workflows/build-windows.yml — never by hand)
 
 #define MyAppName "BeeSky"
-#define MyAppVersion "0.26.0"
+#define MyAppVersion "0.27.0"
 #define MyAppPublisher "BeeSkyBase"
 #define MyAppExeName "beesky-gui.exe"
 

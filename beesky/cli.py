@@ -23,6 +23,13 @@
     python -m beesky sysinfo [--json]  (version + auto-detected default
                                         scan target; --json for machines)
 
+    python -m beesky inspect <ip> [--json] [--creds-file sets.json]
+                                   [--group NAME] [--groups-file FILE]
+                                   (one-device deep fetch — pools /
+                                   fans / per-board detail for the
+                                   detail tabs; v0.27,
+                                   docs/device-detail-mapping.md)
+
     python -m beesky ops --job FILE   (one Operations task — rescan /
                                         reboot / switch_pool — over a
                                         job file's targets, streaming
@@ -66,6 +73,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import secrets
@@ -82,6 +90,7 @@ from .cloud.server import run_cloud_server
 from .cloud.store import CloudStore
 from .core import firmware as firmware_mod
 from .core import groups as groups_mod
+from .core import inspect as inspect_mod
 from .core import ops as ops_mod
 from .core import notify as notify_mod
 from .core import report
@@ -388,6 +397,67 @@ def cmd_sysinfo(args: argparse.Namespace) -> int:
     else:
         print(f"BeeSky {info['version']}")
         print(f"Default scan target: {info['default_target']}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# inspect — one-device deep fetch (v0.27): pools / fans / per-board
+# detail behind the Flutter detail tabs, through the scan's own
+# probe + credential resolution (docs/device-detail-mapping.md)
+# ---------------------------------------------------------------------------
+
+def _inspect_creds(args: argparse.Namespace) -> list[dict] | None:
+    """Credential sets for `inspect`: scan's layers, minus the target.
+
+    --group contributes its sets ahead of the --creds-file ones
+    (groups.effective_creds — the v0.24 layering); the group's
+    TARGETS do not apply: inspect always names its one device.
+    Raises ValueError (unknown group, malformed sets anywhere) —
+    cmd_inspect turns it into exit 2 before any device I/O.
+    """
+    name = getattr(args, "group", None)
+    if not name:
+        return _scan_creds(args)
+    store = groups_mod.GroupStore(getattr(args, "groups_file", None))
+    group = store.find(name)
+    if group is None:
+        raise ValueError(
+            f"group not found: {name!r} (store: {store.path})")
+    group_sets = _normalise_creds(
+        group["creds"], f"group {name!r} creds") if group["creds"] else None
+    return groups_mod.effective_creds(group_sets, _scan_creds(args))
+
+
+def cmd_inspect(args: argparse.Namespace) -> int:
+    # The target must be ONE IPv4 address — a range here is a typo,
+    # and deep-fetching a whole subnet was never the verb's job.
+    # Validation happens before any I/O (scan's exit-2 contract).
+    try:
+        addr = ipaddress.ip_address(args.ip)
+        if addr.version != 4:
+            raise ValueError("not IPv4")
+    except ValueError:
+        print(f"inspect: {args.ip!r} is not a single IPv4 address",
+              file=sys.stderr)
+        return 2
+    bad = _validate_creds(args, "inspect")
+    if bad is not None:
+        return bad
+    try:
+        creds = _inspect_creds(args)
+    except ValueError as exc:
+        print(f"inspect: {exc}", file=sys.stderr)
+        return 2
+    doc = inspect_mod.inspect_device(
+        args.ip, timeout=args.timeout, http_port=args.http_port,
+        cgminer_port=args.cgminer_port, username=args.user,
+        password=args.password, api_key=args.api_key, token=args.token,
+        creds=creds)
+    if args.json:
+        # Bridge mode: stdout is exactly ONE JSON document.
+        print(json.dumps(_jsonable(doc), ensure_ascii=False))
+    else:
+        print(json.dumps(_jsonable(doc), indent=2, ensure_ascii=False))
     return 0
 
 
@@ -1023,6 +1093,44 @@ def main(argv: list[str] | None = None) -> int:
     sysinfo.add_argument("--json", action="store_true",
                          help="print as one JSON document")
     sysinfo.set_defaults(func=cmd_sysinfo)
+
+    inspect = sub.add_parser(
+        "inspect", help="deep-fetch ONE miner (pools / fans / "
+                        "per-board detail) as JSON — the detail "
+                        "tabs' data (v0.27; docs/device-detail-"
+                        "mapping.md)")
+    inspect.add_argument("ip", help="miner IP address (single host)")
+    inspect.add_argument("--json", action="store_true",
+                         help="print the document as ONE JSON line "
+                              "(sidecar bridge mode)")
+    inspect.add_argument("--timeout", type=float, default=3.0,
+                         help="per-request timeout seconds "
+                              "(default 3)")
+    inspect.add_argument("--user", default="root",
+                         help="legacy single login (default root)")
+    inspect.add_argument("--password", default="root",
+                         help="legacy single password (default root)")
+    inspect.add_argument("--creds-file", metavar="FILE",
+                         help="JSON list of credential sets "
+                              "(v0.23 schema) tried in family order")
+    inspect.add_argument("--group", metavar="NAME",
+                         help="resolve credentials through a saved "
+                              "network group: its sets lead the "
+                              "--creds-file ones (v0.24 layering); "
+                              "the group's targets do NOT apply")
+    inspect.add_argument("--groups-file", metavar="FILE",
+                         help="groups store file for --group "
+                              "(default: beesky-groups.json beside "
+                              "the executable)")
+    inspect.add_argument("--api-key", metavar="KEY",
+                         help="dashd x-api-key (VNish API-key method)")
+    inspect.add_argument("--token", metavar="JWT",
+                         help="dashd bearer token")
+    inspect.add_argument("--http-port", type=int, default=80,
+                         help="web/API port (default 80)")
+    inspect.add_argument("--cgminer-port", type=int, default=4028,
+                         help="cgminer RPC port (default 4028)")
+    inspect.set_defaults(func=cmd_inspect)
 
     ops = sub.add_parser(
         "ops", help="run ONE Operations task (rescan / reboot / "

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'creds.dart';
+import 'detail.dart';
 import 'grid.dart';
 import 'grid_dialogs.dart';
 import 'groups.dart';
@@ -74,6 +75,16 @@ class HomePage extends StatefulWidget {
   /// [OpsFiles.appDefault] (beside the executable).
   final OpsFiles? opsFiles;
 
+  /// Chart-history override (tests point it at a temp dir); the
+  /// real app uses [HistoryStore.appDefault] — beesky-history.json
+  /// beside the executable (v0.27).
+  final HistoryStore? historyStore;
+
+  /// Device-notes override (tests point it at a temp dir); the
+  /// real app uses [NoteStore.appDefault] — beesky-notes.json
+  /// beside the executable (v0.27).
+  final NoteStore? noteStore;
+
   /// Row double-click opener override (tests record the URL instead
   /// of launching a browser); defaults to [openUrlInBrowser].
   final Future<void> Function(String url)? urlOpener;
@@ -86,6 +97,8 @@ class HomePage extends StatefulWidget {
     this.gridStore,
     this.opsStore,
     this.opsFiles,
+    this.historyStore,
+    this.noteStore,
     this.urlOpener,
   });
 
@@ -174,6 +187,22 @@ class _HomePageState extends State<HomePage> {
   final _searchFocus = FocusNode();
   final _gridHScroll = ScrollController();
 
+  // Device detail (v0.27): the detail panel's tabs, the LOCAL
+  // chart history (one sample per device per finished scan), the
+  // per-device notes, and the on-demand inspect cache — one
+  // deep fetch per device per session, keyed by IP.
+  late final HistoryStore _historyStore =
+      widget.historyStore ?? HistoryStore.appDefault();
+  late final NoteStore _noteStore =
+      widget.noteStore ?? NoteStore.appDefault();
+  Map<String, List<HistorySample>> _history = {};
+  Map<String, String> _notes = {};
+  int _detailTab = 0;
+  final Map<String, InspectResult> _inspectCache = {};
+  final Set<String> _inspectLoading = {};
+  final _noteCtrl = TextEditingController();
+  String? _noteOwnerKey;
+
   @override
   void initState() {
     super.initState();
@@ -189,6 +218,8 @@ class _HomePageState extends State<HomePage> {
     _loadGroups();
     _loadGrid();
     _loadOpsHistory();
+    _loadHistory();
+    _loadNotes();
     _autoscanTimer = Timer.periodic(
       const Duration(seconds: 30),
       (_) => _tickAutoscan(),
@@ -204,7 +235,47 @@ class _HomePageState extends State<HomePage> {
     _searchCtrl.dispose();
     _searchFocus.dispose();
     _gridHScroll.dispose();
+    _noteCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadHistory() async {
+    var loaded = await _historyStore.load();
+    if (!mounted) return;
+    // The mock shell seeds demo samples so the chart tab renders
+    // without six real scans (detail.dart demoHistory).
+    if (loaded.isEmpty && widget.bridge.isMock) {
+      loaded = demoHistory(DateTime.now());
+    }
+    setState(() => _history = loaded);
+  }
+
+  Future<void> _loadNotes() async {
+    final loaded = await _noteStore.load();
+    if (!mounted) return;
+    setState(() => _notes = loaded);
+  }
+
+  Future<void> _saveHistory() async {
+    try {
+      await _historyStore.save(_history);
+    } on FileSystemException {
+      // History stays in memory for this session.
+    }
+  }
+
+  /// One sample per LIVE device per finished scan (a FETCH_ERROR
+  /// record is a failed read, not a sample of the machine's
+  /// state). Called BEFORE the result lands on the table so the
+  /// chart tab already includes this pass when it renders.
+  void _appendHistorySamples(List<MinerRecord> records) {
+    final live = records.where((r) => !r.hasFetchError).toList();
+    if (live.isEmpty) return;
+    final now = DateTime.now();
+    for (final rec in live) {
+      appendHistorySample(_history, rec, now);
+    }
+    _saveHistory();
   }
 
   Future<void> _loadGrid() async {
@@ -477,6 +548,7 @@ class _HomePageState extends State<HomePage> {
   /// v0.19.7 behaviour — the first row is selected so the detail
   /// panel is alive immediately.
   void _applyScanResult(ScanResult result) {
+    _appendHistorySamples(result.records);
     setState(() {
       _records = result.records;
       _lastScan = result;
@@ -2631,45 +2703,174 @@ class _HomePageState extends State<HomePage> {
   // Detail panel (only present while a row is selected)
   // ------------------------------------------------------------------
 
+  /// The detail tabs — HashCore's device-info dialog order
+  /// (Metrics · Charts · Boards · Pools · Fans · Note), in
+  /// BeeSky's side panel instead of a modal (the named layout
+  /// divergence, docs/device-detail-mapping.md §4). The first
+  /// tab is "Số liệu" (Metrics), NOT "Tổng quan" — that label
+  /// already names the grid's Overview density on this screen.
+  static const _detailTabNames = [
+    'Số liệu',
+    'Biểu đồ',
+    'Board',
+    'Pools',
+    'Quạt',
+    'Ghi chú',
+  ];
+
   Widget _detailPanel() {
     final rec = _selected!;
+    // The note editor follows the selected device (keyed like
+    // history/notes: MAC when present, else IP).
+    final noteKey = deviceKeyFor(rec);
+    if (_noteOwnerKey != noteKey) {
+      _noteOwnerKey = noteKey;
+      _noteCtrl.text = _notes[noteKey] ?? '';
+    }
+    // The inspect-backed tabs (Board/Pools/Quạt) fetch lazily
+    // for the device on show.
+    if (_detailTab >= 2 && _detailTab <= 4) _maybeInspect(rec);
     return GlassCard(
       padding: const EdgeInsets.all(16),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Text(
-                    rec.model,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                    ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  rec.model,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.close, size: 18),
-                  tooltip: 'Đóng chi tiết',
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(
-                    minWidth: 28,
-                    minHeight: 28,
-                  ),
-                  onPressed: () => setState(() => _selected = null),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, size: 18),
+                tooltip: 'Đóng chi tiết',
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(
+                  minWidth: 28,
+                  minHeight: 28,
                 ),
-              ],
+                onPressed: () => setState(() => _selected = null),
+              ),
+            ],
+          ),
+          Text(
+            '${rec.ip} • ${rec.sourceLabel}',
+            style: const TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+          ),
+          const SizedBox(height: 10),
+          _detailTabBar(),
+          const SizedBox(height: 12),
+          Expanded(
+            child: SingleChildScrollView(child: _detailTabBody(rec)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _detailTabBar() {
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        for (var i = 0; i < _detailTabNames.length; i++)
+          InkWell(
+            borderRadius: BorderRadius.circular(999),
+            onTap: () => setState(() => _detailTab = i),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: i == _detailTab
+                    ? BeeSkyColors.accent
+                    : BeeSkyColors.ghostFill,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                _detailTabNames[i],
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: i == _detailTab
+                      ? BeeSkyColors.accentText
+                      : BeeSkyColors.muted,
+                ),
+              ),
             ),
-            Text(
-              '${rec.ip} • ${rec.sourceLabel}',
-              style: const TextStyle(color: BeeSkyColors.muted, fontSize: 12),
-            ),
-            const SizedBox(height: 12),
-            _kv('Hashrate', rec.rateText),
+          ),
+      ],
+    );
+  }
+
+  Widget _detailTabBody(MinerRecord rec) {
+    return switch (_detailTab) {
+      1 => _chartsTab(rec),
+      2 => _boardsTab(rec),
+      3 => _poolsTab(rec),
+      4 => _fansTab(rec),
+      5 => _noteTab(rec),
+      _ => _overviewTab(rec),
+    };
+  }
+
+  // ------------------------------------------------------------------
+  // Inspect fetch — one deep fetch per device per session
+  // ------------------------------------------------------------------
+
+  void _maybeInspect(MinerRecord rec) {
+    if (_inspectCache.containsKey(rec.ip) ||
+        _inspectLoading.contains(rec.ip)) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _ensureInspect(rec);
+    });
+  }
+
+  Future<void> _ensureInspect(MinerRecord rec) async {
+    if (_inspectCache.containsKey(rec.ip) ||
+        _inspectLoading.contains(rec.ip)) {
+      return;
+    }
+    setState(() => _inspectLoading.add(rec.ip));
+    try {
+      final result = await widget.bridge.inspect(
+        rec.ip,
+        credsFile: await _credsFileForScan(),
+        // In a group's scope the core resolves creds through the
+        // group's sets first (v0.24 layering), like its scans.
+        group: _activeGroup?.name,
+        groupsFile: _groupsFile?.path,
+      );
+      if (!mounted) return;
+      setState(() {
+        _inspectCache[rec.ip] = result;
+        _inspectLoading.remove(rec.ip);
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _inspectCache[rec.ip] = InspectResult.failure(rec.ip, '$e');
+        _inspectLoading.remove(rec.ip);
+      });
+    }
+  }
+
+  /// The "Số liệu" (Metrics) tab — the v0.22 panel content
+  /// verbatim: the shipped panel contract (its board summary
+  /// lines included) stays; the Board tab carries the deep view
+  /// (the named duplication in the mapping, §4).
+  Widget _overviewTab(MinerRecord rec) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _kv('Hashrate', rec.rateText),
             _kv('Chip sống', '${rec.chipsAlive} / ${rec.chipsTotal}'),
             _kv(
               'Nhiệt độ',
@@ -2723,10 +2924,363 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
             ],
-          ],
+      ],
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Charts tab — LOCAL samples only (one per finished scan)
+  // ------------------------------------------------------------------
+
+  Widget _chartsTab(MinerRecord rec) {
+    final samples = _history[deviceKeyFor(rec)] ?? const <HistorySample>[];
+    final rates = ratePoints(samples);
+    final temps = tempPoints(samples);
+    final powers = powerPoints(samples);
+    if (rates.isEmpty && temps.isEmpty && powers.isEmpty) {
+      return const Text(
+        'Chưa có dữ liệu biểu đồ cho máy này. Biểu đồ được vẽ từ '
+        'các lần quét — mỗi lần quét xong ghi thêm một mẫu, quét '
+        'thêm vài lần biểu đồ sẽ hiện dần.',
+        style: TextStyle(color: BeeSkyColors.muted, fontSize: 12.5),
+      );
+    }
+    String two(int v) => v.toString().padLeft(2, '0');
+    String hm(DateTime t) => '${two(t.hour)}:${two(t.minute)}';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (rates.isNotEmpty) ...[
+          MiniChart(
+            title: 'Hashrate',
+            unit: rateUnitOf(samples) ?? '',
+            points: rates,
+            color: BeeSkyColors.accent,
+          ),
+          const SizedBox(height: 14),
+        ],
+        if (temps.isNotEmpty) ...[
+          MiniChart(
+            title: 'Nhiệt độ tối đa',
+            unit: '°C',
+            points: temps,
+            color: BeeSkyColors.hotTemp,
+          ),
+          const SizedBox(height: 14),
+        ],
+        if (powers.isNotEmpty) ...[
+          MiniChart(
+            title: 'Công suất',
+            unit: 'W',
+            points: powers,
+            color: BeeSkyColors.ok,
+          ),
+          const SizedBox(height: 14),
+        ],
+        Text(
+          '${samples.length} mẫu · ${hm(samples.first.ts)} → '
+          '${hm(samples.last.ts)}'
+          '${samples.length == 1 ? ' · quét thêm để thấy đường xu hướng' : ''}',
+          style: const TextStyle(color: BeeSkyColors.muted, fontSize: 11.5),
+        ),
+      ],
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Boards tab — record rows now, inspect enrichment when landed
+  // ------------------------------------------------------------------
+
+  Widget _boardsTab(MinerRecord rec) {
+    final insp = _inspectCache[rec.ip];
+    // Enrichment matches by POSITION: the record's chains and
+    // the inspect boards both enumerate the machine's boards in
+    // order (their `index` bases differ between the mock fleet
+    // and the real core — position is the convention-free key).
+    final deepBoards =
+        (insp != null && insp.boards.supported) ? insp.boards.boards : null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (rec.chains.isEmpty)
+          const Text(
+            'Máy không báo board nào trong lần quét gần nhất.',
+            style: TextStyle(color: BeeSkyColors.muted, fontSize: 12.5),
+          )
+        else
+          for (var i = 0; i < rec.chains.length; i++)
+            _boardBlock(
+              rec.chains[i],
+              (deepBoards != null && i < deepBoards.length)
+                  ? deepBoards[i]
+                  : null,
+            ),
+        if (insp == null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              _inspectLoading.contains(rec.ip)
+                  ? 'Đang đọc chi tiết board từ máy…'
+                  : 'Đang chuẩn bị đọc chi tiết board…',
+              style: const TextStyle(
+                  color: BeeSkyColors.muted, fontSize: 12),
+            ),
+          )
+        else if (insp.error != null)
+          _sectionError(insp.error!)
+        else if (!insp.boards.supported)
+          _sectionError(insp.boards.reason ?? 'Không đọc được board.')
+        else if (!insp.boards.boards.any((b) => b.hasGrades)) ...[
+          // The DATA-GAP, stated where the user would look for
+          // the buckets (docs/device-detail-mapping.md §5.1).
+          const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: Text(
+              'Firmware này không phân loại chip Ổn định / Chậm — '
+              'chỉ biết chip sống/chết theo ký tự acs.',
+              style: TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _boardBlock(ChainInfo chain, InspectBoard? deep) {
+    final lines = <Widget>[
+      Text(
+        'Board ${chain.index + 1}: ${chain.chipsAlive}/${chain.chipsTotal} chip'
+        '${chain.tempC == null ? '' : ' • ${chain.tempC!.toStringAsFixed(0)}°C'}',
+        style: TextStyle(
+          color: chain.isHot ? BeeSkyColors.hotTemp : BeeSkyColors.text,
+          fontSize: 12.5,
+          fontWeight: FontWeight.w700,
         ),
       ),
+    ];
+    if (deep != null) {
+      if (deep.hasGrades) {
+        lines.add(Text(
+          'Ổn định ${deep.stable} · Chậm ${deep.slow} · '
+          'Nghiêm trọng ${deep.critical}',
+          style: const TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+        ));
+      }
+      if (deep.pcbTempC != null) {
+        lines.add(Text(
+          'PCB ${deep.pcbTempC!.toStringAsFixed(0)}°C',
+          style: const TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+        ));
+      }
+      if (deep.otherChars.isNotEmpty) {
+        lines.add(Text(
+          'Ký tự acs khác: '
+          '${deep.otherChars.entries.map((e) => '${e.key} ×${e.value}').join(' · ')}',
+          style: const TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+        ));
+      }
+      if (deep.deadPositions.isNotEmpty) {
+        lines.add(Text(
+          'Chip chết: ${deep.deadPositions.join(', ')}',
+          style: const TextStyle(color: BeeSkyColors.bad, fontSize: 12),
+        ));
+      }
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: lines,
+      ),
     );
+  }
+
+  // ------------------------------------------------------------------
+  // Pools tab — the record's pools when a core fills them, else
+  // the inspect fetch (loading / unsupported shown honestly)
+  // ------------------------------------------------------------------
+
+  Widget _poolsTab(MinerRecord rec) {
+    if (rec.pools.isNotEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var i = 0; i < rec.pools.length; i++) ...[
+            _kv('Pool ${i + 1} URL', rec.pools[i].url),
+            _kv('Pool ${i + 1} worker', rec.pools[i].worker),
+            const SizedBox(height: 6),
+          ],
+        ],
+      );
+    }
+    final insp = _inspectCache[rec.ip];
+    if (insp == null) {
+      return Text(
+        _inspectLoading.contains(rec.ip)
+            ? 'Đang đọc pool từ máy…'
+            : 'Đang chuẩn bị đọc pool…',
+        style: const TextStyle(color: BeeSkyColors.muted, fontSize: 12.5),
+      );
+    }
+    if (insp.error != null) return _sectionError(insp.error!);
+    if (!insp.pools.supported) {
+      return _sectionError(insp.pools.reason ?? 'Không đọc được pool.');
+    }
+    if (insp.pools.pools.isEmpty) {
+      return const Text(
+        'Máy không báo pool nào.',
+        style: TextStyle(color: BeeSkyColors.muted, fontSize: 12.5),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < insp.pools.pools.length; i++) ...[
+          _kv('Pool ${i + 1} URL', insp.pools.pools[i].url ?? '—'),
+          _kv('Pool ${i + 1} worker', insp.pools.pools[i].user ?? '—'),
+          if (insp.pools.pools[i].status != null)
+            _kv('Trạng thái', insp.pools.pools[i].status!),
+          if (insp.pools.pools[i].accepted != null)
+            _kv(
+              'Accepted / Rejected',
+              '${insp.pools.pools[i].accepted} / '
+              '${insp.pools.pools[i].rejected ?? '—'}',
+            ),
+          const SizedBox(height: 6),
+        ],
+      ],
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Fans tab — record speeds now; inspect adds mode/duty/status
+  // ------------------------------------------------------------------
+
+  Widget _fansTab(MinerRecord rec) {
+    final insp = _inspectCache[rec.ip];
+    final deep = (insp != null && insp.fans.supported) ? insp.fans : null;
+    final children = <Widget>[];
+    if (deep != null) {
+      if (deep.mode != null) {
+        _fanModeLine(children, deep);
+      } else {
+        children.add(_kv('Chế độ', '— (firmware không báo)'));
+      }
+    }
+    final speeds = deep != null
+        ? [for (final f in deep.fans) (f.id, f.rpm, f.status, f.maxRpm)]
+        : [
+            for (var i = 0; i < rec.fansRpm.length; i++)
+              (i + 1, rec.fansRpm[i], null, null),
+          ];
+    if (speeds.isEmpty) {
+      children.add(const Text(
+        'Máy không báo tốc độ quạt.',
+        style: TextStyle(color: BeeSkyColors.muted, fontSize: 12.5),
+      ));
+    } else {
+      for (final (id, rpm, status, maxRpm) in speeds) {
+        children.add(_kv(
+          'Fan $id',
+          '${rpm == null ? '—' : formatCount(rpm)} RPM'
+          '${status != null ? ' • $status' : ''}'
+          '${maxRpm != null ? ' / tối đa ${formatCount(maxRpm)}' : ''}',
+          valueColor: status == 'lost' ? BeeSkyColors.bad : null,
+        ));
+      }
+    }
+    if (insp == null) {
+      children.add(Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Text(
+          _inspectLoading.contains(rec.ip)
+              ? 'Đang đọc chi tiết quạt từ máy…'
+              : 'Đang chuẩn bị đọc chi tiết quạt…',
+          style: const TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+        ),
+      ));
+    } else if (insp.error != null) {
+      children.add(_sectionError(insp.error!));
+    } else if (!insp.fans.supported) {
+      children.add(
+          _sectionError(insp.fans.reason ?? 'Không đọc được quạt.'));
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: children,
+    );
+  }
+
+  void _fanModeLine(List<Widget> children, InspectFans deep) {
+    children.add(_kv(
+      'Chế độ',
+      deep.mode! +
+          (deep.modeParam != null ? ' (${deep.modeParam})' : '') +
+          (deep.dutyPct != null ? ' • duty ${deep.dutyPct}%' : ''),
+    ));
+  }
+
+  /// An inspect section that could not be read, with the core's
+  /// own reason — an honest state, never an empty list pretending
+  /// to be data.
+  Widget _sectionError(String message) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: BeeSkyColors.warn.withValues(alpha: 0.08),
+        border: Border.all(color: BeeSkyColors.warn.withValues(alpha: 0.35)),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(message, style: const TextStyle(fontSize: 12, height: 1.45)),
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Note tab — HashCore's Device note + Save note, per device
+  // ------------------------------------------------------------------
+
+  Widget _noteTab(MinerRecord rec) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          controller: _noteCtrl,
+          maxLines: 5,
+          decoration: const InputDecoration(
+            hintText: 'Ghi chú cho máy này',
+            contentPadding:
+                EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          ),
+          style: const TextStyle(fontSize: 13),
+        ),
+        const SizedBox(height: 10),
+        FilledButton.icon(
+          onPressed: () => _saveNote(rec),
+          icon: const Icon(Icons.save, size: 16),
+          label: const Text('Lưu ghi chú'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _saveNote(MinerRecord rec) async {
+    final key = deviceKeyFor(rec);
+    final text = _noteCtrl.text.trim();
+    setState(() {
+      if (text.isEmpty) {
+        _notes.remove(key);
+      } else {
+        _notes[key] = text;
+      }
+      _status = 'Đã lưu ghi chú cho ${rec.ip}.';
+    });
+    try {
+      await _noteStore.save(_notes);
+    } on FileSystemException {
+      // The note stays in memory for this session.
+    }
   }
 
   /// One diagnosed problem as a tinted box (the prototype's treatment):
