@@ -1,12 +1,20 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import 'models.dart';
 import 'sidecar.dart';
 import 'theme.dart';
 
-/// The main window — mirrors the Tk app's structure (v0.19.x) so current
-/// users recognise it instantly: header, scan card, 4 stat tiles, miners
-/// table + detail panel, status line.
+/// The main window — v0.22 layout, restructured after the owner rejected
+/// the v0.21 hero-card layout ("card to để làm gì, người ta muốn thấy
+/// máy đào" — what are the big cards FOR, people want to SEE THE
+/// MINERS). The structure now mirrors the HashCore Toolkit he pointed
+/// at: a left sidebar (brand + nav + version), a slim header whose stats
+/// are compact chips in ONE row, one slim scan bar, and the miners table
+/// filling everything else. The detail view is a right-hand panel that
+/// only takes width while a row is selected. BeeSky's palette and the
+/// sidecar wiring are unchanged — structure changed, identity didn't.
 class HomePage extends StatefulWidget {
   final BeeSkyBridge bridge;
   const HomePage({super.key, required this.bridge});
@@ -21,7 +29,9 @@ class _HomePageState extends State<HomePage> {
   final _passCtrl = TextEditingController();
 
   SysInfo? _sysinfo;
+  bool _sysinfoFailed = false;
   List<MinerRecord> _records = const [];
+  ScanResult? _lastScan;
   MinerRecord? _selected;
   bool _scanned = false;
   bool _busy = false;
@@ -47,6 +57,7 @@ class _HomePageState extends State<HomePage> {
       if (!mounted) return;
       setState(() {
         _sysinfo = info;
+        _sysinfoFailed = false;
         // Pre-fill the target with this machine's own /24 (the v0.19.6
         // lesson: a hard-coded foreign subnet finds nothing at a farm),
         // unless the user already typed something.
@@ -56,7 +67,10 @@ class _HomePageState extends State<HomePage> {
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _status = 'Không đọc được sysinfo từ beesky: $e');
+      setState(() {
+        _sysinfoFailed = true;
+        _status = 'Không đọc được sysinfo từ beesky: $e';
+      });
     }
   }
 
@@ -79,12 +93,12 @@ class _HomePageState extends State<HomePage> {
       if (!mounted) return;
       setState(() {
         _records = result.records;
+        _lastScan = result;
         _scanned = true;
         // v0.19.7 behaviour: land on the first row so the detail panel
         // is alive immediately after a scan.
         _selected = result.records.isEmpty ? null : result.records.first;
-        _status =
-            'Quét xong: tìm thấy ${result.found} máy trong '
+        _status = 'Quét xong: tìm thấy ${result.found} máy trong '
             '${result.scanned} địa chỉ (${result.elapsedS.toStringAsFixed(1)} giây).';
       });
     } catch (e) {
@@ -139,191 +153,420 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Padding(
-        padding: const EdgeInsets.all(22),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _header(),
-            const SizedBox(height: 16),
-            _scanCard(),
-            if (_busy) ...[
-              const SizedBox(height: 10),
-              const LinearProgressIndicator(minHeight: 3),
-            ],
-            const SizedBox(height: 16),
-            _tilesRow(),
-            const SizedBox(height: 16),
-            Expanded(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(child: _tableCard()),
-                  const SizedBox(width: 16),
-                  SizedBox(width: 340, child: _detailCard()),
-                ],
-              ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              _status,
-              style: const TextStyle(color: BeeSkyColors.muted, fontSize: 12),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _header() {
-    return Row(
-      children: [
-        Image.asset('assets/beesky-logo.png', width: 44, height: 44),
-        const SizedBox(width: 12),
-        const Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'BeeSky',
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
-            ),
-            Text(
-              'Giám sát & chẩn đoán máy đào ASIC',
-              style: TextStyle(color: BeeSkyColors.muted, fontSize: 12),
-            ),
-          ],
-        ),
-        const Spacer(),
-        if (widget.bridge.isMock)
-          _pill('MOCK', BeeSkyColors.warn)
-        else if (_sysinfo != null)
-          _pill('v${_sysinfo!.version}', BeeSkyColors.muted),
-      ],
-    );
-  }
-
-  Widget _pill(String text, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: BeeSkyColors.ghostFill,
-        border: Border.all(color: BeeSkyColors.glassBorder),
-        borderRadius: BorderRadius.circular(radiusPill),
-      ),
-      child: Text(text, style: TextStyle(color: color, fontSize: 12)),
-    );
-  }
-
-  Widget _scanCard() {
-    return GlassCard(
-      padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      body: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _targetCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Mục tiêu quét',
-                    hintText: '192.168.1.0/24 hoặc 192.168.0.10-60, …',
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              SizedBox(
-                width: 140,
-                child: TextField(
-                  controller: _userCtrl,
-                  decoration: const InputDecoration(labelText: 'User'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              SizedBox(
-                width: 140,
-                child: TextField(
-                  controller: _passCtrl,
-                  obscureText: true,
-                  decoration: const InputDecoration(labelText: 'Mật khẩu'),
-                ),
-              ),
-              const SizedBox(width: 14),
-              FilledButton.icon(
-                onPressed: _busy ? null : _runScan,
-                icon: const Icon(Icons.radar, size: 18),
-                label: const Text('Quét ngay'),
-              ),
-              const SizedBox(width: 10),
-              OutlinedButton(
-                onPressed: _busy ? null : _exportTickets,
-                child: const Text('Xuất phiếu sửa'),
-              ),
-              const SizedBox(width: 10),
-              OutlinedButton(
-                onPressed: _busy ? null : _openWeb,
-                child: const Text('Mở web tại chỗ'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'User / Mật khẩu — tài khoản web của máy chạy firmware gốc. '
-            'Quét lại: bấm Quét ngay lần nữa.',
-            style: TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+          _sidebar(),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _header(),
+                _scanBar(),
+                if (_busy) const LinearProgressIndicator(minHeight: 3),
+                Expanded(child: _content()),
+                _statusLine(),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _tilesRow() {
-    final maxTemp = fleetMaxTempC(_records);
-    final problems = fleetProblemCount(_records);
-    return Row(
-      children: [
-        _tile('Tổng số máy', _scanned ? '${_records.length}' : '—'),
-        const SizedBox(width: 16),
-        _tile('Tổng hashrate', _scanned ? fleetRateTotalsText(_records) : '—'),
-        const SizedBox(width: 16),
-        _tile(
-          'Máy có vấn đề',
-          _scanned ? '$problems' : '—',
-          valueColor: problems > 0 ? BeeSkyColors.bad : null,
+  // ------------------------------------------------------------------
+  // Sidebar
+  // ------------------------------------------------------------------
+
+  Widget _sidebar() {
+    return Container(
+      width: 228,
+      decoration: const BoxDecoration(
+        color: BeeSkyColors.panel,
+        border: Border(right: BorderSide(color: BeeSkyColors.border)),
+      ),
+      padding: const EdgeInsets.fromLTRB(18, 20, 14, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Image.asset('assets/beesky-logo.png', width: 40, height: 40),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'BeeSky',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      'QUẢN LÝ MÁY ĐÀO',
+                      style: TextStyle(
+                        color: BeeSkyColors.muted,
+                        fontSize: 10,
+                        letterSpacing: 1.6,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 28),
+          _navItem(Icons.memory, 'Máy đào', active: true),
+          // Roadmap views: listed so the structure matches where the
+          // product is going, greyed + "SAU" until they are real —
+          // no fake functionality behind them.
+          _navItem(Icons.grid_on, 'Bản đồ nhiệt', upcoming: true),
+          _navItem(Icons.bolt, 'Điện năng', upcoming: true),
+          _navItem(Icons.build, 'Lịch sử sửa', upcoming: true),
+          _navItem(Icons.notifications_none, 'Sự kiện', upcoming: true),
+          _navItem(Icons.settings, 'Cài đặt', upcoming: true),
+          const Spacer(),
+          _sidebarFooter(),
+        ],
+      ),
+    );
+  }
+
+  Widget _navItem(
+    IconData icon,
+    String label, {
+    bool active = false,
+    bool upcoming = false,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Container(
+        height: 38,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          // The approved prototype tints the active item with the
+          // accent itself instead of a neutral fill.
+          color: active
+              ? BeeSkyColors.accent.withValues(alpha: 0.13)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(radiusWidget),
         ),
-        const SizedBox(width: 16),
-        _tile(
-          'Nhiệt độ cao nhất',
-          maxTemp == null ? '—' : '${maxTemp.toStringAsFixed(0)} °C',
+        child: Row(
+          children: [
+            Icon(
+              icon,
+              size: 18,
+              color: active ? BeeSkyColors.accent : BeeSkyColors.muted,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: active ? BeeSkyColors.accent : BeeSkyColors.muted,
+                  fontSize: 13,
+                  fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (upcoming) _soonTag(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _soonTag() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: BeeSkyColors.entryFill,
+        borderRadius: BorderRadius.circular(radiusPill),
+      ),
+      child: const Text(
+        'SAU',
+        style: TextStyle(
+          color: BeeSkyColors.muted,
+          fontSize: 9,
+          letterSpacing: 0.6,
+        ),
+      ),
+    );
+  }
+
+  /// (dot colour, label) for the sidebar footer: mock mode, sidecar
+  /// found and talking, sidecar exe missing beside the app, or the
+  /// sysinfo probe still in flight / failed.
+  (Color, String) _sidecarStatus() {
+    if (widget.bridge.isMock) {
+      return (BeeSkyColors.warn, 'Ruột quét: dữ liệu mẫu');
+    }
+    final exe = widget.bridge.exePath;
+    if (exe != null &&
+        exe.contains(Platform.pathSeparator) &&
+        !File(exe).existsSync()) {
+      return (BeeSkyColors.bad, 'Ruột quét: thiếu beesky.exe');
+    }
+    if (_sysinfo != null) return (BeeSkyColors.ok, 'Ruột quét: đã nối');
+    if (_sysinfoFailed) return (BeeSkyColors.bad, 'Ruột quét: không nối được');
+    return (BeeSkyColors.muted, 'Ruột quét: đang kiểm tra…');
+  }
+
+  Widget _sidebarFooter() {
+    final (dot, label) = _sidecarStatus();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(color: dot, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(color: BeeSkyColors.muted, fontSize: 11),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          _sysinfo == null ? 'BeeSky v…' : 'BeeSky v${_sysinfo!.version}',
+          style: const TextStyle(color: BeeSkyColors.muted, fontSize: 11),
         ),
       ],
     );
   }
 
-  Widget _tile(String label, String value, {Color? valueColor}) {
-    return Expanded(
-      child: GlassCard(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              style: const TextStyle(color: BeeSkyColors.muted, fontSize: 12),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 21,
-                fontWeight: FontWeight.w700,
-                color: valueColor ?? BeeSkyColors.text,
+  // ------------------------------------------------------------------
+  // Header: view title + network line, then the stat chips in ONE row
+  // (the approved prototype's arrangement — chips are pills, never
+  // big cards)
+  // ------------------------------------------------------------------
+
+  String get _headerSub {
+    if (_busy) return 'Đang quét $_target …';
+    final scan = _lastScan;
+    if (_scanned && scan != null) {
+      return 'Mạng $_target • ${scan.found} máy • '
+          '${scan.elapsedS.toStringAsFixed(1)} giây';
+    }
+    return 'Mạng $_target';
+  }
+
+  Widget _header() {
+    final ok = _scanned ? fleetStatusCount(_records, 'OK') : null;
+    final check = _scanned ? fleetStatusCount(_records, 'CHECK') : null;
+    final error = _scanned ? fleetStatusCount(_records, 'ERROR') : null;
+    final maxTemp = fleetMaxTempC(_records);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 12),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: BeeSkyColors.border)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Máy đào',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            _headerSub,
+            style: const TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              _chip(_scanned ? 'Tổng ${_records.length} máy' : 'Tổng — máy'),
+              const SizedBox(width: 8),
+              _chip('OK ${ok ?? '—'}', dot: BeeSkyColors.ok),
+              const SizedBox(width: 8),
+              _chip('Cần kiểm tra ${check ?? '—'}', dot: BeeSkyColors.warn),
+              const SizedBox(width: 8),
+              _chip('Lỗi ${error ?? '—'}', dot: BeeSkyColors.bad),
+              const SizedBox(width: 8),
+              Flexible(
+                child: _chip(
+                  _scanned ? fleetRateTotalsText(_records) : 'Hashrate —',
+                  shrink: true,
+                ),
               ),
-              overflow: TextOverflow.ellipsis,
+              const SizedBox(width: 8),
+              _chip(
+                maxTemp == null
+                    ? 'Max — °C'
+                    : 'Max ${maxTemp.toStringAsFixed(0)} °C',
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _chip(String text, {Color? dot, bool shrink = false}) {
+    final label = Text(
+      text,
+      style: const TextStyle(fontSize: 12),
+      overflow: TextOverflow.ellipsis,
+      softWrap: false,
+    );
+    return Container(
+      height: 26,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: BeeSkyColors.ghostFill,
+        border: Border.all(color: BeeSkyColors.glassBorder),
+        borderRadius: BorderRadius.circular(radiusPill),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (dot != null) ...[
+            Container(
+              width: 7,
+              height: 7,
+              decoration: BoxDecoration(color: dot, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 6),
+          ],
+          if (shrink) Flexible(child: label) else label,
+        ],
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Scan bar: one slim row, wraps when the window is narrow
+  // ------------------------------------------------------------------
+
+  static final ButtonStyle _scanBtnStyle = FilledButton.styleFrom(
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+    textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+  );
+
+  static final ButtonStyle _ghostBtnStyle = OutlinedButton.styleFrom(
+    backgroundColor: BeeSkyColors.ghostFill,
+    foregroundColor: BeeSkyColors.text,
+    side: const BorderSide(color: BeeSkyColors.glassBorder),
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(radiusWidget),
+    ),
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    textStyle: const TextStyle(fontSize: 13),
+  );
+
+  Widget _scanBar() {
+    const fieldPad = EdgeInsets.symmetric(horizontal: 12, vertical: 9);
+    // The prototype draws the scan bar as its own slim card; the fields
+    // carry hints instead of floating labels (the values — a subnet,
+    // "root" — speak for themselves).
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 14, 18, 0),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: BeeSkyColors.panel,
+          border: Border.all(color: BeeSkyColors.border),
+          borderRadius: BorderRadius.circular(radiusWidget),
+        ),
+        child: Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            SizedBox(
+              width: 300,
+              child: TextField(
+                controller: _targetCtrl,
+                decoration: const InputDecoration(
+                  hintText: 'Mục tiêu: 192.168.1.0/24, 192.168.0.10-60, …',
+                  contentPadding: fieldPad,
+                ),
+              ),
+            ),
+            SizedBox(
+              width: 120,
+              child: TextField(
+                controller: _userCtrl,
+                decoration: const InputDecoration(
+                  hintText: 'User',
+                  contentPadding: fieldPad,
+                ),
+              ),
+            ),
+            SizedBox(
+              width: 120,
+              child: TextField(
+                controller: _passCtrl,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  hintText: 'Mật khẩu',
+                  contentPadding: fieldPad,
+                ),
+              ),
+            ),
+            FilledButton.icon(
+              onPressed: _busy ? null : _runScan,
+              icon: const Icon(Icons.radar, size: 17),
+              label: const Text('Quét ngay'),
+              style: _scanBtnStyle,
+            ),
+            OutlinedButton(
+              onPressed: _busy ? null : _exportTickets,
+              style: _ghostBtnStyle,
+              child: const Text('Xuất phiếu sửa'),
+            ),
+            OutlinedButton(
+              onPressed: _busy ? null : _openWeb,
+              style: _ghostBtnStyle,
+              child: const Text('Mở web local'),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Content: the table is the screen; detail is a side panel
+  // ------------------------------------------------------------------
+
+  Widget _content() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 14, 18, 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(child: _tableCard()),
+          if (_selected != null) ...[
+            const SizedBox(width: 14),
+            SizedBox(width: 300, child: _detailPanel()),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _statusLine() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
+      child: Text(
+        _status,
+        style: const TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+        overflow: TextOverflow.ellipsis,
       ),
     );
   }
@@ -339,26 +582,28 @@ class _HomePageState extends State<HomePage> {
         child: !_scanned
             ? _emptyState()
             : _records.isEmpty
-            ? _noResultsState()
-            : Column(
-                children: [
-                  _tableHeader(),
-                  const Divider(height: 1),
-                  Expanded(
-                    child: ListView.builder(
-                      itemCount: _records.length,
-                      itemBuilder: (context, i) => _tableRow(_records[i], i),
-                    ),
+                ? _noResultsState()
+                : Column(
+                    children: [
+                      _tableHeader(),
+                      const Divider(height: 1),
+                      Expanded(
+                        child: ListView.builder(
+                          itemCount: _records.length,
+                          itemBuilder: (context, i) =>
+                              _tableRow(_records[i], i),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
       ),
     );
   }
 
   Widget _emptyState() {
     // The polish detail the owner admired in the Toolkit: a real empty
-    // state (icon + line + action), not a blank grid.
+    // state (icon + line + action), not a blank grid — it lives inside
+    // the table area so the table stays the screen.
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -408,19 +653,22 @@ class _HomePageState extends State<HomePage> {
 
   static const _columns = <(String, int)>[
     ('IP', 3),
-    ('Model', 4),
-    ('Nguồn', 3),
-    ('Hashrate', 3),
-    ('Chip', 2),
-    ('Nhiệt độ', 2),
-    ('Quạt', 4),
-    ('Trạng thái', 2),
+    ('MODEL', 4),
+    ('NGUỒN', 3),
+    ('HASHRATE', 3),
+    ('CHIP', 2),
+    // NHIỆT carries EVERY board's temp since the owner's follow-up
+    // rule, so it gets a wider share; QUẠT gives one back (its long
+    // strings ellipsised anyway).
+    ('NHIỆT', 3),
+    ('QUẠT', 3),
+    ('TRẠNG THÁI', 2),
   ];
 
   Widget _tableHeader() {
     return Container(
       color: BeeSkyColors.tableHeading,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       child: Row(
         children: [
           for (final (label, flex) in _columns)
@@ -430,8 +678,9 @@ class _HomePageState extends State<HomePage> {
                 label,
                 style: const TextStyle(
                   color: BeeSkyColors.muted,
-                  fontSize: 12,
+                  fontSize: 11,
                   fontWeight: FontWeight.w700,
+                  letterSpacing: 1.1,
                 ),
               ),
             ),
@@ -448,8 +697,18 @@ class _HomePageState extends State<HomePage> {
     return InkWell(
       onTap: () => setState(() => _selected = rec),
       child: Container(
-        color: bg,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        decoration: BoxDecoration(
+          color: bg,
+          // The prototype marks the selected row with a 3px accent bar.
+          border: selected
+              ? const Border(
+                  left: BorderSide(color: BeeSkyColors.accent, width: 3),
+                )
+              : const Border(
+                  left: BorderSide(color: Colors.transparent, width: 3),
+                ),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         child: Row(
           children: [
             _cell(rec.ip, 3),
@@ -457,8 +716,8 @@ class _HomePageState extends State<HomePage> {
             _cell(rec.sourceLabel, 3),
             _cell(rec.rateText, 3),
             _cell(rec.chipsText, 2),
-            _cell(rec.tempText, 2),
-            _cell(rec.fansText, 4),
+            _tempCell(rec),
+            _cell(rec.fansText, 3),
             Expanded(flex: 2, child: _statusChip(rec)),
           ],
         ),
@@ -477,6 +736,62 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  /// The NHIỆT cell shows EVERY hashboard's temperature, not only the
+  /// max (owner rule added 2026-11-11 after the prototype review:
+  /// "sao hok hiện hết 3 hoặc 4 hash board, cái nào nóng quá thì đỏ
+  /// lên"). Values render compactly in chain order; a board at/over
+  /// the core's 85 °C limit (models.tempLimitC — the threshold behind
+  /// the OVER_TEMP problem) turns bold red on a soft red pill, the
+  /// rest stay muted. A record with no per-chain temps falls back to
+  /// the single max temp, and an unreachable row keeps "—".
+  Widget _tempCell(MinerRecord rec) {
+    final shown = rec.chains.where((c) => c.tempC != null).toList();
+    if (shown.isEmpty) return _cell(rec.tempText, 3);
+    return Expanded(
+      flex: 3,
+      // Scale down rather than overflow when a narrow window (detail
+      // panel open) squeezes the column — the temps stay on one line.
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var i = 0; i < shown.length; i++) ...[
+              if (i > 0) const SizedBox(width: 6),
+              _boardTemp(shown[i]),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _boardTemp(ChainInfo chain) {
+    final label = '${chain.tempC!.toStringAsFixed(0)}°';
+    if (!chain.isHot) {
+      return Text(
+        label,
+        style: const TextStyle(color: BeeSkyColors.muted, fontSize: 12.5),
+      );
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color: BeeSkyColors.hotTemp.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: BeeSkyColors.hotTemp,
+          fontSize: 12.5,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+
   Widget _statusChip(MinerRecord rec) {
     final (bg, fg) = switch (rec.statusLabel) {
       'OK' => (const Color(0x2634D399), BeeSkyColors.ok),
@@ -486,7 +801,7 @@ class _HomePageState extends State<HomePage> {
     return Align(
       alignment: Alignment.centerLeft,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(radiusPill),
@@ -503,99 +818,136 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _detailCard() {
-    final rec = _selected;
+  // ------------------------------------------------------------------
+  // Detail panel (only present while a row is selected)
+  // ------------------------------------------------------------------
+
+  Widget _detailPanel() {
+    final rec = _selected!;
     return GlassCard(
-      child: rec == null
-          ? const Center(
-              child: Text(
-                'Chọn một máy trong bảng để xem chi tiết.',
-                style: TextStyle(color: BeeSkyColors.muted),
-                textAlign: TextAlign.center,
-              ),
-            )
-          : SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '${rec.ip} — ${rec.model}',
+      padding: const EdgeInsets.all(16),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(
+                    rec.model,
                     style: const TextStyle(
-                      fontSize: 15,
+                      fontSize: 16,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  Text(
-                    rec.sourceLabel,
-                    style: const TextStyle(
-                      color: BeeSkyColors.muted,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, size: 18),
+                  tooltip: 'Đóng chi tiết',
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 28,
+                    minHeight: 28,
+                  ),
+                  onPressed: () => setState(() => _selected = null),
+                ),
+              ],
+            ),
+            Text(
+              '${rec.ip} • ${rec.sourceLabel}',
+              style: const TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+            ),
+            const SizedBox(height: 12),
+            _kv('Hashrate', rec.rateText),
+            _kv('Chip sống', '${rec.chipsAlive} / ${rec.chipsTotal}'),
+            _kv(
+              'Nhiệt độ',
+              rec.maxTempC == null
+                  ? '—'
+                  : '${rec.maxTempC!.toStringAsFixed(0)} °C',
+            ),
+            _kv('Quạt', rec.fansRpm.isEmpty ? '—' : '${rec.fansText} RPM'),
+            _kv(
+              'Trạng thái',
+              rec.statusLabel,
+              valueColor: rec.statusLabel == 'OK'
+                  ? BeeSkyColors.ok
+                  : rec.statusLabel == 'ERROR'
+                      ? BeeSkyColors.bad
+                      : BeeSkyColors.warn,
+            ),
+            const SizedBox(height: 4),
+            if (rec.issues.isEmpty)
+              const Text(
+                'Không phát hiện vấn đề.',
+                style: TextStyle(color: BeeSkyColors.muted),
+              )
+            else
+              for (final p in rec.issues) _issueBox(p),
+            if (rec.chains.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              // One line per board the machine ACTUALLY reports
+              // (len(chains) — never an assumed 3), each with that
+              // board's OWN temperature when the record carries one
+              // (steering 2026-11-11: "nhiệt độ máy có 4 hashboard
+              // thì sao" — a 4-board machine shows 4 lines).
+              for (final c in rec.chains)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  // A hot board's line (>= the 85 °C limit) takes the
+                  // same red treatment as its pill in the table's
+                  // NHIỆT cell, so table and panel agree.
+                  child: Text(
+                    'Board ${c.index + 1}: ${c.chipsAlive}/${c.chipsTotal} chip'
+                    '${c.tempC == null ? '' : ' • ${c.tempC!.toStringAsFixed(0)}°C'}',
+                    style: TextStyle(
+                      color:
+                          c.isHot ? BeeSkyColors.hotTemp : BeeSkyColors.muted,
                       fontSize: 12,
+                      fontWeight:
+                          c.isHot ? FontWeight.w700 : FontWeight.w400,
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  _kv('Hashrate', rec.rateText),
-                  _kv('Chip', rec.chipsText),
-                  _kv(
-                    'Nhiệt độ',
-                    rec.maxTempC == null
-                        ? '—'
-                        : '${rec.maxTempC!.toStringAsFixed(0)} °C',
-                  ),
-                  _kv(
-                    'Quạt',
-                    rec.fansRpm.isEmpty ? '—' : '${rec.fansText} RPM',
-                  ),
-                  _kv(
-                    'Trạng thái',
-                    rec.statusLabel,
-                    valueColor: rec.statusLabel == 'OK'
-                        ? BeeSkyColors.ok
-                        : rec.statusLabel == 'ERROR'
-                        ? BeeSkyColors.bad
-                        : BeeSkyColors.warn,
-                  ),
-                  const Divider(height: 22),
-                  const Text(
-                    'Vấn đề:',
-                    style: TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 6),
-                  if (rec.issues.isEmpty)
-                    const Text(
-                      'Không phát hiện vấn đề.',
-                      style: TextStyle(color: BeeSkyColors.muted),
-                    )
-                  else
-                    for (final p in rec.issues)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: Text(
-                          '• [${p.code}] ${p.detail}',
-                          style: TextStyle(
-                            color: p.severity == 'error'
-                                ? BeeSkyColors.bad
-                                : BeeSkyColors.warn,
-                          ),
-                        ),
-                      ),
-                  if (rec.chains.isNotEmpty) ...[
-                    const Divider(height: 22),
-                    for (final c in rec.chains)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: Text(
-                          'Board ${c.index + 1}: ${c.chipsAlive}/${c.chipsTotal} chip'
-                          '${c.tempC == null ? '' : ', nhiệt ${c.tempC!.toStringAsFixed(0)} °C'}',
-                          style: const TextStyle(
-                            color: BeeSkyColors.muted,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                  ],
-                ],
-              ),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// One diagnosed problem as a tinted box (the prototype's treatment):
+  /// the code on its own line, the human detail underneath.
+  Widget _issueBox(Problem p) {
+    final isError = p.severity == 'error';
+    final fg = isError ? BeeSkyColors.bad : BeeSkyColors.warn;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: fg.withValues(alpha: 0.08),
+        border: Border.all(color: fg.withValues(alpha: 0.35)),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '[${p.code}]',
+            style: TextStyle(
+              color: fg,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.4,
             ),
+          ),
+          const SizedBox(height: 4),
+          Text(p.detail, style: const TextStyle(fontSize: 12, height: 1.45)),
+        ],
+      ),
     );
   }
 

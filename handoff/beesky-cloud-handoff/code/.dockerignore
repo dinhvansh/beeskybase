@@ -1,0 +1,16 @@
+.git
+.github
+# Secrets and local state must never enter a build context.
+.env
+*.db
+__pycache__
+**/__pycache__
+*.py[cod]
+.venv
+venv
+tests
+docs
+README.md
+Dockerfile
+docker-compose.yml
+.dockerignore

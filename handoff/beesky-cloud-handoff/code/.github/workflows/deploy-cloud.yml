@@ -1,0 +1,175 @@
+# BeeSky Cloud CD — build-checks the cloud image on every relevant push,
+# and (only when the owner enables it) deploys the cloud service to a VPS.
+#
+# Two jobs:
+#   build  — ALWAYS runs, needs zero secrets: proves the cloud Docker
+#            image still builds. This is the safety net for every push.
+#   deploy — runs ONLY when repo variable BEESKY_DEPLOY_ENABLED == 'true'.
+#            SSHes into the VPS, checks out the exact commit that
+#            triggered this run, rebuilds the beesky-cloud compose
+#            service and health-checks it. Skipped cleanly otherwise.
+#
+# One-time owner setup (VPS clone + .env + GitHub vars/secrets) is in
+# docs/cd-deploy.md. Nothing in this file contains a credential: the
+# SSH key comes from repo secrets, is written 0600 on the runner and
+# shredded when the job ends.
+name: BeeSky Cloud CD
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "beesky/cloud/**"
+      - "beesky/__init__.py"
+      # The cloud image is built from the repo-root Dockerfile (shared
+      # with the web service); Dockerfile.cloud is listed too so a
+      # future split into a cloud-only Dockerfile triggers as well.
+      - "Dockerfile"
+      - "Dockerfile.cloud"
+      - "docker-compose.yml"
+      - ".github/workflows/deploy-cloud.yml"
+  workflow_dispatch:
+
+# Never let two deploys race, and never cancel one halfway through —
+# a half-finished `compose up` on the VPS is worse than a queued run.
+concurrency:
+  group: deploy-cloud
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build cloud image (validation, no push)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the beesky-cloud image
+        # Builds exactly what the VPS builds (same compose service,
+        # same Dockerfile) — a broken image fails here, not in prod.
+        run: docker compose build beesky-cloud
+
+  deploy:
+    name: Deploy cloud to VPS
+    needs: build
+    # The enable flag is a repo VARIABLE (not a secret): it is a
+    # deliberate on/off switch, visible in Settings, not a credential.
+    if: vars.BEESKY_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BEESKY_VPS_HOST: ${{ secrets.BEESKY_VPS_HOST }}
+      BEESKY_VPS_USER: ${{ secrets.BEESKY_VPS_USER }}
+      BEESKY_VPS_SSH_KEY: ${{ secrets.BEESKY_VPS_SSH_KEY }}
+      # Port/path are configuration, not credentials: variable wins,
+      # then the secret of the same name, then the default.
+      BEESKY_VPS_PORT: ${{ vars.BEESKY_VPS_PORT || secrets.BEESKY_VPS_PORT || '22' }}
+      BEESKY_VPS_PATH: ${{ vars.BEESKY_VPS_PATH || '/opt/beesky' }}
+      DEPLOY_SHA: ${{ github.sha }}
+      # Host port of the beesky-cloud service in docker-compose.yml.
+      CLOUD_HEALTH_PORT: "8788"
+    steps:
+      - name: Check deploy configuration is present
+        # Fail FAST and name the missing piece, instead of dying later
+        # with a cryptic ssh error. Only reached when deploy is
+        # enabled — the job-level `if` skips everything otherwise.
+        run: |
+          missing=0
+          for name in BEESKY_VPS_HOST BEESKY_VPS_USER BEESKY_VPS_SSH_KEY; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Deploy is enabled (BEESKY_DEPLOY_ENABLED=true) but repo secret '$name' is empty or missing. Add it under Settings -> Secrets and variables -> Actions (see docs/cd-deploy.md)."
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ] || exit 1
+          echo "Deploy target: $BEESKY_VPS_USER@$BEESKY_VPS_HOST:$BEESKY_VPS_PORT -> $BEESKY_VPS_PATH @ $DEPLOY_SHA"
+
+      - name: Install SSH key and pin host key
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$BEESKY_VPS_SSH_KEY" > ~/.ssh/beesky_deploy_key
+          chmod 600 ~/.ssh/beesky_deploy_key
+          # Trust-on-first-use: fetch the VPS host key now and pin it
+          # for this run (docs/cd-deploy.md notes the stricter option).
+          ssh-keyscan -p "$BEESKY_VPS_PORT" -H "$BEESKY_VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Deploy exact commit to the VPS
+        run: |
+          ssh -i ~/.ssh/beesky_deploy_key \
+              -p "$BEESKY_VPS_PORT" \
+              -o BatchMode=yes -o ConnectTimeout=15 \
+              "$BEESKY_VPS_USER@$BEESKY_VPS_HOST" \
+              bash -s -- "$DEPLOY_SHA" "$BEESKY_VPS_PATH" "$CLOUD_HEALTH_PORT" <<'REMOTE'
+          set -euo pipefail
+          SHA="$1"; APP_DIR="$2"; HEALTH_PORT="$3"
+          REPO_URL="https://github.com/dinhvansh/beeskybase.git"
+
+          # --- checkout: clone once if the one-time setup is missing --
+          if [ ! -d "$APP_DIR/.git" ]; then
+            echo "No checkout at $APP_DIR yet — attempting one-time clone..."
+            mkdir -p "$(dirname "$APP_DIR")"
+            if ! git clone "$REPO_URL" "$APP_DIR"; then
+              echo "ERROR: clone failed. The repo is private, so the VPS needs"
+              echo "its own GitHub read access. Do the one-time manual setup in"
+              echo "docs/cd-deploy.md (clone by hand once), then re-run this workflow."
+              exit 1
+            fi
+          fi
+          cd "$APP_DIR"
+
+          # --- guard: the cloud password lives in .env on the VPS only.
+          # .env is untracked, so git checkout below can never overwrite
+          # it — but a fresh clone has none, and deploying an OPEN viewer
+          # would be worse than not deploying. Abort with instructions.
+          if [ ! -f .env ] || ! grep -q '^BEESKY_CLOUD_PASSWORD=.' .env; then
+            echo "ERROR: $APP_DIR/.env is missing or has no BEESKY_CLOUD_PASSWORD."
+            echo "Create it ONCE on the VPS (see docs/cd-deploy.md):"
+            echo "  printf 'BEESKY_CLOUD_PASSWORD=<viewer-password>\n' > $APP_DIR/.env"
+            echo "  chmod 600 $APP_DIR/.env"
+            exit 1
+          fi
+
+          # --- move to the exact commit this run was triggered by -----
+          git fetch --prune origin
+          # -f discards local edits to tracked files on the deploy target
+          # (it is a checkout, not a workspace); untracked files such as
+          # .env are never touched by checkout.
+          git checkout -f "$SHA"
+          echo "VPS now at: $(git rev-parse --short HEAD) ($SHA)"
+
+          # --- rebuild + restart ONLY the cloud service ---------------
+          # (beesky-web is the farm-LAN scanner — it does not belong on
+          # a VPS; see docs/cloud.md.)
+          docker compose up -d --build beesky-cloud
+
+          # --- health check: cloud answers on 127.0.0.1:<port> --------
+          # Unauthenticated GET / is a 302 to /login by design; 200/302/
+          # 401/403 all prove the server is up. Up to ~60 s of retries.
+          code=""
+          for i in $(seq 1 30); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${HEALTH_PORT}/" || true)"
+            case "$code" in
+              200|302|401|403) break ;;
+            esac
+            sleep 2
+          done
+          case "$code" in
+            200|302|401|403)
+              echo "Health check OK (HTTP $code) — BeeSky cloud is up."
+              docker compose ps
+              ;;
+            *)
+              echo "ERROR: health check FAILED after ~60 s (last HTTP code: '${code:-none}')."
+              docker compose ps || true
+              echo "----- beesky-cloud logs (last 100 lines) -----"
+              docker compose logs --tail=100 beesky-cloud || true
+              exit 1
+              ;;
+          esac
+          REMOTE
+
+      - name: Shred deploy key
+        if: always()
+        run: |
+          if [ -f ~/.ssh/beesky_deploy_key ]; then
+            shred -u ~/.ssh/beesky_deploy_key 2>/dev/null || rm -f ~/.ssh/beesky_deploy_key
+          fi

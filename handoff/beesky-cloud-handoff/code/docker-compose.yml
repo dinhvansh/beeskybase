@@ -1,0 +1,41 @@
+# BeeSky web dashboard + cloud.
+#
+#   BEESKY_TARGET=192.168.1.0/24 docker compose up -d --build
+#   -> dashboard (single site, scans locally):  http://<host>:8787
+#   -> cloud (many sites, agents push to it):   http://<host>:8788
+#
+# CAVEAT (see docs/web.md): the beesky-web service scans from the network
+# the host / container sits on. For a mining farm, run it on a machine
+# inside the farm LAN. On Linux, uncomment `network_mode: host` so the
+# container scans the host's LAN directly instead of the Docker bridge
+# network. The beesky-cloud service scans NOTHING — farm agents dial out
+# to it (see docs/cloud.md), so it can live on a VPS; set
+# BEESKY_CLOUD_PASSWORD and put HTTPS in front of it before real use.
+services:
+  beesky-web:
+    build: .
+    # network_mode: host        # Linux only — needed to reach the farm LAN
+    ports:
+      - "8787:8787"
+    environment:
+      BEESKY_TARGET: ${BEESKY_TARGET:-192.168.1.0/24}
+      BEESKY_INTERVAL: ${BEESKY_INTERVAL:-30}
+    restart: unless-stopped
+
+  beesky-cloud:
+    build: .
+    command: ["python", "-m", "beesky", "cloud",
+              "--host", "0.0.0.0", "--port", "8788",
+              "--db", "/data/beesky-cloud.db"]
+    ports:
+      - "8788:8788"
+    environment:
+      # Viewer password for the multi-site web. If left empty the viewer
+      # is OPEN (startup prints a loud warning) — set it for real use.
+      BEESKY_CLOUD_PASSWORD: ${BEESKY_CLOUD_PASSWORD:-}
+    volumes:
+      - beesky-cloud-data:/data
+    restart: unless-stopped
+
+volumes:
+  beesky-cloud-data:

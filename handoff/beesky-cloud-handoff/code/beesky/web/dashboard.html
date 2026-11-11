@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BeeSky — Giám sát máy đào</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%22-373.37%20-15.87%20198.58%20198.58%22%3E%3Cg%3E%0A%09%3Ccircle%20cx%3D%22-274.08%22%20cy%3D%2283.421%22%20r%3D%2299.29%22%2F%3E%0A%09%3Ccircle%20fill%3D%22%23F4D600%22%20cx%3D%22-274.08%22%20cy%3D%2283.421%22%20r%3D%2287.763%22%2F%3E%0A%09%3Cpath%20d%3D%22M-207.439%2C26.24l-86.987%2C82.395l-1.26%2C1.194l-64.403-44.017c-1.149%2C5.665-1.753%2C11.528-1.753%2C17.532%0A%09%09c0%2C4.924%2C0.412%2C9.751%2C1.192%2C14.455l66.224%2C45.262l1.463%2C1l99.866-94.593C-196.66%2C40.961-201.524%2C33.137-207.439%2C26.24z%22%2F%3E%0A%09%3Cpath%20d%3D%22M-293.376%2C83.199l73.07-69.213c-5.066-3.934-10.576-7.323-16.44-10.084l-57.681%2C54.636l-0.848%2C0.803l-46.539-31.808%0A%09%09c-3.945%2C4.783-7.391%2C9.992-10.264%2C15.546l57.651%2C39.402L-293.376%2C83.199z%22%2F%3E%0A%09%3Cpath%20d%3D%22M-293.5%2C39.735l43.177-40.898c-6.461-1.813-13.225-2.9-20.197-3.179l-23.907%2C22.645l-0.724%2C0.686l-19.627-13.415%0A%09%09c-5.2%2C2.727-10.092%2C5.958-14.612%2C9.632l34.963%2C23.896L-293.5%2C39.735z%22%2F%3E%0A%3C%2Fg%3E%3C%2Fsvg%3E">
+<style>
+  :root {
+    --yellow: #F5D800;
+    --bg: #0B0B0D;
+    --panel: #15151A;
+    --panel2: #1C1C22;
+    --line: #232329;
+    --text: #F2F2F3;
+    --muted: #9CA3AF;
+    --ok: #34D399;
+    --warn: #FBBF24;
+    --bad: #F87171;
+    --orange: #FB923C;
+    --radius-card: 16px;
+    --radius-widget: 12px;
+    --radius-pill: 999px;
+    /* Liquid Glass (v0.18): same tokens as the cloud dashboard —
+       translucent surfaces + backdrop blur over the ambient body
+       backdrop, with solid fallbacks at the bottom of this sheet. */
+    --glass: rgba(255, 255, 255, .045);
+    --glass-line: rgba(255, 255, 255, .09);
+    --glass-soft: rgba(255, 255, 255, .05);
+    --glass-line-soft: rgba(255, 255, 255, .10);
+    --glass-chrome: rgba(255, 255, 255, .03);
+    --glass-head: rgba(255, 255, 255, .03);
+    --glass-hover: rgba(255, 255, 255, .05);
+    --glass-blur: blur(16px) saturate(150%);
+    --glass-blur-soft: blur(10px) saturate(150%);
+    --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 8px 32px rgba(0, 0, 0, .35);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; color: var(--text);
+    background:
+      radial-gradient(600px 400px at 15% -5%, rgba(245, 216, 0, .07), transparent 60%),
+      radial-gradient(700px 500px at 95% 110%, rgba(70, 100, 180, .06), transparent 60%),
+      var(--bg);
+    background-attachment: fixed;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    font-size: 14px;
+  }
+  header {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 14px 20px; border-bottom: 1px solid var(--glass-line);
+    background: var(--glass-chrome);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+  }
+  .logo {
+    font-size: 26px; font-weight: 800; letter-spacing: 1px; color: var(--text);
+  }
+  .logo .bee { color: var(--yellow); }
+  .logo .logo-mark {
+    width: 34px; height: 34px; vertical-align: middle; margin-right: 10px;
+  }
+  header .sub { color: var(--muted); font-size: 13px; }
+  header .spacer { flex: 1; }
+  header .meta { color: var(--muted); font-size: 12px; text-align: right; }
+  button {
+    background: var(--yellow); color: #000; border: 0; border-radius: var(--radius-widget);
+    padding: 9px 18px; font-weight: 700; cursor: pointer; font-size: 13.5px;
+  }
+  button:hover { filter: brightness(1.08); }
+  button:disabled { opacity: .5; cursor: default; }
+  main { padding: 22px 24px 34px; max-width: 1280px; margin: 0 auto; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+  .card {
+    background: var(--glass); border: 1px solid var(--glass-line);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    border-radius: var(--radius-card); box-shadow: var(--glass-shadow);
+    padding: 16px 18px; position: relative;
+  }
+  .ic-chip {
+    position: absolute; top: 14px; right: 14px; width: 34px; height: 34px;
+    border-radius: var(--radius-widget); background: var(--glass-soft); border: 1px solid var(--glass-line-soft);
+    display: flex; align-items: center; justify-content: center; color: var(--muted);
+  }
+  .ic-chip svg { width: 18px; height: 18px; }
+  .card.alert .ic-chip { color: var(--bad); border-color: #4A2326; }
+  .card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .6px; }
+  .card .value { font-size: 28px; font-weight: 700; margin-top: 5px; font-variant-numeric: tabular-nums; }
+  .card .value small { font-size: 14px; color: var(--muted); font-weight: 400; }
+  .card.alert .value { color: var(--bad); }
+  h2 { margin: 28px 0 12px; font-size: 17px; font-weight: 800; }
+  h2 .accent { color: var(--yellow); font-weight: 600; }
+  .tablewrap {
+    overflow-x: auto; background: var(--glass); border: 1px solid var(--glass-line);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    border-radius: var(--radius-card); box-shadow: var(--glass-shadow);
+  }
+  table { width: 100%; border-collapse: collapse; min-width: 860px; font-variant-numeric: tabular-nums; }
+  th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; font-size: 13px; }
+  th {
+    background: var(--glass-head); color: var(--muted); font-size: 12px;
+    text-transform: uppercase; letter-spacing: .4px;
+    position: sticky; top: 0; z-index: 1;
+  }
+  tbody tr:hover td { background: var(--glass-hover); }
+  tr:last-child td { border-bottom: 0; }
+  tr.offline td { opacity: .45; }
+  .pill {
+    display: inline-block; padding: 2px 10px; border-radius: var(--radius-pill);
+    font-size: 12px; font-weight: 700;
+  }
+  .pill.ok { background: #0E2C22; color: var(--ok); }
+  .pill.check { background: #33161A; color: var(--bad); }
+  .pill.off { background: #232329; color: var(--muted); }
+  .problems { color: #F3B8B2; font-size: 12px; margin-top: 4px; line-height: 1.5; }
+  .events {
+    background: var(--glass); border: 1px solid var(--glass-line);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    border-radius: var(--radius-card); box-shadow: var(--glass-shadow); overflow: hidden;
+  }
+  .event {
+    display: flex; gap: 10px; align-items: baseline; padding: 10px 16px;
+    border-bottom: 1px solid var(--line); flex-wrap: wrap;
+  }
+  .event:last-child { border-bottom: 0; }
+  .event .time { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .event .who { font-weight: 700; white-space: nowrap; }
+  .event .detail { color: #D8D8DC; }
+  .sev { font-size: 11px; font-weight: 800; padding: 2px 9px; border-radius: var(--radius-pill); text-transform: uppercase; white-space: nowrap; }
+  .sev.info { background: #1D2735; color: #9DB8CC; }
+  .sev.warning { background: #33290E; color: var(--warn); }
+  .sev.major { background: #33200E; color: var(--orange); }
+  .sev.critical { background: #33161A; color: var(--bad); }
+  .empty { color: var(--muted); padding: 18px 16px; text-align: center; }
+  footer { color: var(--muted); font-size: 12px; text-align: center; padding: 0 20px 22px; }
+  .heatwrap {
+    background: var(--glass); border: 1px solid var(--glass-line);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    border-radius: var(--radius-card); box-shadow: var(--glass-shadow);
+    padding: 14px 16px;
+  }
+  .heatmap { display: flex; flex-wrap: wrap; gap: 8px; }
+  .tile {
+    width: 94px; border-radius: var(--radius-widget); padding: 7px 9px;
+    border: 2px solid transparent; background: var(--panel2); color: var(--text);
+  }
+  .tile .octet { font-size: 19px; font-weight: 800; line-height: 1.15; }
+  .tile .tt { font-size: 15px; font-weight: 700; }
+  .tile .hh { font-size: 11px; opacity: .85; white-space: nowrap; }
+  .tile.problem { border-color: var(--bad); }
+  .tile.offline { background: #1C1C22; border: 2px dashed #3F3F46; color: var(--muted); }
+
+  /* -- Liquid Glass fallbacks (v0.18) -------------------------------------------- */
+  /* Same contract as the cloud dashboard: no backdrop-filter support, or
+     reduced transparency preferred → glass tokens revert to the pre-v0.18
+     solid colours and the blur switches off. */
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    :root {
+      --glass: #15151A; --glass-line: #232329;
+      --glass-soft: #1C1C22; --glass-line-soft: #232329;
+      --glass-chrome: #101014; --glass-head: #1C1C22;
+      --glass-hover: #191920;
+      --glass-blur: none; --glass-blur-soft: none;
+      --glass-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+    }
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    :root {
+      --glass: #15151A; --glass-line: #232329;
+      --glass-soft: #1C1C22; --glass-line-soft: #232329;
+      --glass-chrome: #101014; --glass-head: #1C1C22;
+      --glass-hover: #191920;
+      --glass-blur: none; --glass-blur-soft: none;
+      --glass-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+    }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"><svg class="logo-mark" viewBox="-373.37 -15.87 198.58 198.58" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><g>
+	<circle cx="-274.08" cy="83.421" r="99.29"/>
+	<circle fill="#F4D600" cx="-274.08" cy="83.421" r="87.763"/>
+	<path d="M-207.439,26.24l-86.987,82.395l-1.26,1.194l-64.403-44.017c-1.149,5.665-1.753,11.528-1.753,17.532
+		c0,4.924,0.412,9.751,1.192,14.455l66.224,45.262l1.463,1l99.866-94.593C-196.66,40.961-201.524,33.137-207.439,26.24z"/>
+	<path d="M-293.376,83.199l73.07-69.213c-5.066-3.934-10.576-7.323-16.44-10.084l-57.681,54.636l-0.848,0.803l-46.539-31.808
+		c-3.945,4.783-7.391,9.992-10.264,15.546l57.651,39.402L-293.376,83.199z"/>
+	<path d="M-293.5,39.735l43.177-40.898c-6.461-1.813-13.225-2.9-20.197-3.179l-23.907,22.645l-0.724,0.686l-19.627-13.415
+		c-5.2,2.727-10.092,5.958-14.612,9.632l34.963,23.896L-293.5,39.735z"/>
+</g></svg><span class="bee">Bee</span>Sky</div>
+  <div class="sub">Giám sát &amp; chẩn đoán máy đào ASIC</div>
+  <div class="spacer"></div>
+  <div class="meta">
+    <div>Mục tiêu quét: <span id="meta-target">…</span></div>
+    <div>Quét mỗi <span id="meta-interval">…</span>s · Lần quét cuối: <span id="meta-last">…</span></div>
+  </div>
+  <button id="scan-btn" type="button">Quét ngay</button>
+</header>
+
+<main>
+  <section class="cards">
+    <div class="card"><div class="ic-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg></div><div class="label">Tổng số máy</div><div class="value" id="card-total">–</div></div>
+    <div class="card"><div class="ic-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div><div class="label">Tổng hashrate</div><div class="value" id="card-hashrate">–</div></div>
+    <div class="card" id="card-problems-wrap"><div class="ic-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg></div><div class="label">Máy có vấn đề</div><div class="value" id="card-problems">–</div></div>
+    <div class="card"><div class="ic-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/></svg></div><div class="label">Nhiệt độ cao nhất</div><div class="value" id="card-temp">–</div></div>
+  </section>
+
+  <h2>Danh sách máy <span class="accent">· Miners</span></h2>
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr>
+          <th>IP</th><th>Model</th><th>Nguồn</th><th>Hashrate</th>
+          <th>Chip sống/tổng</th><th>Nhiệt độ max</th><th>Quạt (RPM)</th><th>Trạng thái</th>
+        </tr>
+      </thead>
+      <tbody id="miners-body">
+        <tr><td colspan="8" class="empty">Đang tải…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Bản đồ nhiệt <span class="accent">· Heat map</span></h2>
+  <div class="heatwrap" id="heatmap">
+    <div class="empty">Đang tải…</div>
+  </div>
+
+  <h2>Sự kiện gần đây <span class="accent">· Events</span></h2>
+  <div class="events" id="events-list">
+    <div class="empty">Đang tải…</div>
+  </div>
+</main>
+
+<footer>BeeSky v{{VERSION}} — dữ liệu tự làm mới mỗi 10 giây · Chỉ dùng trong mạng nội bộ của trại/xưởng</footer>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+
+function fmtThs(v) {
+  if (v === null || v === undefined) return "–";
+  return v.toFixed(2) + " TH/s";
+}
+// Native-rate display (v0.20): records carry rate_value + rate_unit;
+// pre-v0.20 records fall back to their ths as TH/s. Totals group per
+// unit — a mixed fleet never sums unlike quantities together.
+function rateOf(m) {
+  if (m.rate_value !== null && m.rate_value !== undefined && m.rate_unit)
+    return [m.rate_value, m.rate_unit];
+  if (m.ths !== null && m.ths !== undefined) return [m.ths, "TH/s"];
+  return null;
+}
+function fmtRate(m) {
+  const r = rateOf(m);
+  return r ? r[0].toFixed(2) + " " + r[1] : "–";
+}
+function fmtRate0(m) {
+  const r = rateOf(m);
+  return r ? r[0].toFixed(0) + " " + r[1] : "–";
+}
+const RATE_UNIT_ORDER = ["TH/s", "GH/s", "MH/s", "ksol/s", "sol/s"];
+function fmtTotalsHtml(groups) {
+  const keys = RATE_UNIT_ORDER.filter((u) => groups.has(u));
+  if (!keys.length) return null;
+  return keys.map((u) => groups.get(u).toFixed(2) + " <small>" + u + "</small>").join(" · ");
+}
+function esc(s) {
+  return String(s === null || s === undefined ? "" : s)
+    .replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+// -- heat map (v0.8) ------------------------------------------------------
+// Records already carry max_temp_c, so tiles render purely client-side
+// from the /api/miners payload. Colour scale by max temp (°C):
+//   < 60 green-dark · 60-70 yellow-green · 70-80 amber · 80-90 orange
+//   >= 90 red · offline grey · problem miners get a red border.
+function heatColor(t) {
+  if (t === null || t === undefined) return "#2c2c2c";
+  if (t < 60) return "#14532d";
+  if (t < 70) return "#4a5d23";
+  if (t < 80) return "#7a5a12";
+  if (t < 90) return "#8a4512";
+  return "#8a1f1a";
+}
+function ipSortKey(ip) {
+  return String(ip || "").split(".").map((p) => parseInt(p, 10) || 0);
+}
+function cmpIp(a, b) {
+  const ka = ipSortKey(a), kb = ipSortKey(b);
+  for (let i = 0; i < 4; i++) { if (ka[i] !== kb[i]) return ka[i] - kb[i]; }
+  return 0;
+}
+function minerOffline(m) {
+  if (m.online === false) return true;
+  return (m.problems || []).some((p) => p.code === "FETCH_ERROR");
+}
+function heatTile(m) {
+  const offline = minerOffline(m);
+  const problems = (m.problems || []).length;
+  const lastOctet = String(m.ip || "?").split(".").pop();
+  const temp = (m.max_temp_c === null || m.max_temp_c === undefined)
+    ? "–" : m.max_temp_c.toFixed(0) + " °C";
+  const ths = fmtRate0(m);
+  const tip = (m.ip || "") + " · " + (m.model || "") + " · " +
+    (offline ? "Mất kết nối" : (m.status === "OK" ? "OK" : "Cần kiểm tra")) +
+    (problems ? " · " + problems + " vấn đề" : "");
+  const cls = "tile" + (offline ? " offline" : "")
+    + (!offline && m.status !== "OK" ? " problem" : "");
+  const bg = offline ? "" : ' style="background:' + heatColor(m.max_temp_c) + '"';
+  return '<div class="' + cls + '"' + bg + ' title="' + esc(tip) + '">' +
+    '<div class="octet">' + esc(lastOctet) + "</div>" +
+    '<div class="tt">' + (offline ? "Offline" : temp) + "</div>" +
+    '<div class="hh">' + esc(m.ip || "") + " · " + ths + "</div></div>";
+}
+function renderHeatmap(miners) {
+  const wrap = $("heatmap");
+  if (!miners.length) {
+    wrap.innerHTML = '<div class="empty">Chưa phát hiện máy nào — kiểm tra lại mục tiêu quét.</div>';
+    return;
+  }
+  wrap.innerHTML = '<div class="heatmap">' +
+    miners.slice().sort((a, b) => cmpIp(a.ip, b.ip)).map(heatTile).join("") +
+    "</div>";
+}
+
+async function refreshStatus() {
+  try {
+    const r = await fetch("/api/status");
+    const s = await r.json();
+    $("meta-target").textContent = s.target;
+    $("meta-interval").textContent = s.interval;
+    $("meta-last").textContent = s.last_scan_at || "chưa có";
+  } catch (e) { /* server tạm thời chưa trả lời, lần poll sau thử lại */ }
+}
+
+async function refreshMiners() {
+  try {
+    const r = await fetch("/api/miners");
+    const data = await r.json();
+    const miners = data.miners || [];
+    const totalGroups = new Map();
+    let problems = 0, maxTemp = null;
+    const rows = miners.map((m) => {
+      if (m.online) {
+        const r = rateOf(m);
+        if (r) totalGroups.set(r[1], (totalGroups.get(r[1]) || 0) + r[0]);
+      }
+      if (m.status !== "OK") problems += 1;
+      if (m.max_temp_c !== null && m.max_temp_c !== undefined) {
+        maxTemp = maxTemp === null ? m.max_temp_c : Math.max(maxTemp, m.max_temp_c);
+      }
+      const fans = (m.fans_rpm || []).join(" / ") || "–";
+      const chips = m.chips_total ? (m.chips_alive + "/" + m.chips_total) : "–";
+      const temp = (m.max_temp_c === null || m.max_temp_c === undefined) ? "–" : m.max_temp_c.toFixed(0) + " °C";
+      let statusHtml;
+      if (!m.online) statusHtml = '<span class="pill off">MẤT KẾT NỐI</span>';
+      else if (m.status === "OK") statusHtml = '<span class="pill ok">OK</span>';
+      else statusHtml = '<span class="pill check">CẦN KIỂM TRA</span>';
+      const probHtml = (m.problems && m.problems.length)
+        ? '<div class="problems">' + m.problems.map((p) => "• " + esc(p.detail)).join("<br>") + "</div>"
+        : "";
+      return "<tr" + (m.online ? "" : ' class="offline"') + ">" +
+        "<td>" + esc(m.ip) + "</td>" +
+        "<td>" + esc(m.model) + "</td>" +
+        "<td>" + esc(m.source || "–") + "</td>" +
+        "<td>" + fmtRate(m) + "</td>" +
+        "<td>" + chips + "</td>" +
+        "<td>" + temp + "</td>" +
+        "<td>" + esc(fans) + "</td>" +
+        "<td>" + statusHtml + probHtml + "</td></tr>";
+    });
+    $("miners-body").innerHTML = rows.length
+      ? rows.join("")
+      : '<tr><td colspan="8" class="empty">Chưa phát hiện máy nào — kiểm tra lại mục tiêu quét.</td></tr>';
+    renderHeatmap(miners);
+    $("card-total").textContent = miners.length;
+    $("card-hashrate").innerHTML = miners.length
+      ? (fmtTotalsHtml(totalGroups) || "0.00 <small>TH/s</small>") : "–";
+    $("card-problems").textContent = miners.length ? problems : "–";
+    $("card-problems-wrap").classList.toggle("alert", problems > 0);
+    $("card-temp").innerHTML = maxTemp === null ? "–" : maxTemp.toFixed(0) + " <small>°C</small>";
+  } catch (e) { /* giữ nguyên dữ liệu cũ khi poll lỗi */ }
+}
+
+const SEV_LABEL = { info: "Thông tin", warning: "Cảnh báo", major: "Nghiêm trọng", critical: "Khẩn cấp" };
+const TYPE_LABEL = {
+  OFFLINE: "Mất kết nối", BACK_ONLINE: "Đã kết nối lại",
+  HASHRATE_DROP: "Sụt hashrate", OVER_TEMP: "Quá nhiệt",
+  CHIPS_LOST: "Mất chip", CHAIN_DOWN: "Board ngắt"
+};
+
+async function refreshEvents() {
+  try {
+    const r = await fetch("/api/events?n=50");
+    const data = await r.json();
+    const events = data.events || [];
+    $("events-list").innerHTML = events.length
+      ? events.map((ev) =>
+          '<div class="event">' +
+          '<span class="time">' + esc(ev.time || "") + "</span>" +
+          '<span class="sev ' + esc(ev.severity) + '">' + esc(SEV_LABEL[ev.severity] || ev.severity) + "</span>" +
+          '<span class="who">' + esc(ev.ip) + " · " + esc(TYPE_LABEL[ev.type] || ev.type) + "</span>" +
+          '<span class="detail">' + esc(ev.detail) + "</span>" +
+          "</div>").join("")
+      : '<div class="empty">Chưa có sự kiện nào.</div>';
+  } catch (e) { /* giữ nguyên dữ liệu cũ khi poll lỗi */ }
+}
+
+async function refreshAll() {
+  await Promise.all([refreshStatus(), refreshMiners(), refreshEvents()]);
+}
+
+$("scan-btn").addEventListener("click", async () => {
+  const btn = $("scan-btn");
+  btn.disabled = true;
+  try {
+    await fetch("/api/scan", { method: "POST" });
+    setTimeout(refreshAll, 1500);
+  } finally {
+    setTimeout(() => { btn.disabled = false; }, 2000);
+  }
+});
+
+refreshAll();
+setInterval(refreshAll, 10000);
+</script>
+</body>
+</html>

@@ -24,6 +24,11 @@ class BeeSkyColors {
   static const ok = Color(0xFF34D399);
   static const warn = Color(0xFFFBBF24);
   static const bad = Color(0xFFF87171);
+
+  /// A hashboard at/over the temperature limit (models.tempLimitC),
+  /// in the table's NHIỆT cell and the detail panel's board lines —
+  /// the approved prototype's `.bt.hot` red (#FF6B6B).
+  static const hotTemp = Color(0xFFFF6B6B);
   static const selectBg = Color(0xFF3A3410);
 }
 

@@ -67,6 +67,12 @@ void main() {
       expect(fleetProblemCount(result.records), 2);
     });
 
+    test('header chip counts split OK / CHECK / ERROR', () {
+      expect(fleetStatusCount(result.records, 'OK'), 3);
+      expect(fleetStatusCount(result.records, 'CHECK'), 1);
+      expect(fleetStatusCount(result.records, 'ERROR'), 1);
+    });
+
     test('grouped totals mirror format_rate_totals', () {
       expect(
         fleetRateTotalsText(result.records),
@@ -113,13 +119,70 @@ void main() {
     });
   });
 
+  group('per-board temps (the NHIỆT column rule)', () {
+    MinerRecord recWithChains(List<Map<String, Object?>> chains,
+            {double? maxTempC}) =>
+        MinerRecord.fromJson({
+          'ip': '10.0.0.7',
+          'model': 'Antminer Z15',
+          'source': 'cgminer',
+          'chains': chains,
+          'fans_rpm': [3900],
+          'chips_alive': 72,
+          'chips_total': 72,
+          'max_temp_c': maxTempC,
+          'problems': [],
+          'status': 'OK',
+          'rate_value': 1101.0,
+          'rate_unit': 'ksol/s',
+          'ths': null,
+        });
+
+    Map<String, Object?> chain(int index, double? tempC) => {
+          'index': index,
+          'temp_c': tempC,
+          'chips_alive': 24,
+          'chips_total': 24,
+        };
+
+    test('boardTemps lists every reported board temp in chain order', () {
+      final rec = recWithChains(
+        [chain(0, 71.0), chain(1, 88.0), chain(2, 73.0)],
+        maxTempC: 88.0,
+      );
+      expect(rec.boardTemps, [71.0, 88.0, 73.0]);
+    });
+
+    test('the hot line is >= 85 — the core TEMP_LIMIT_C', () {
+      final rec = recWithChains(
+        [chain(0, 84.9), chain(1, 85.0), chain(2, null)],
+        maxTempC: 85.0,
+      );
+      expect(tempLimitC, 85);
+      expect(rec.chains[0].isHot, isFalse);
+      expect(rec.chains[1].isHot, isTrue);
+      expect(rec.chains[2].isHot, isFalse);
+      // A chain that reported no temp contributes nothing to the cell.
+      expect(rec.boardTemps, [84.9, 85.0]);
+    });
+
+    test('no per-chain temps -> empty boardTemps, max-temp fallback', () {
+      final noChains = recWithChains(const [], maxTempC: 63.0);
+      expect(noChains.boardTemps, isEmpty);
+      expect(noChains.tempText, '63 °C');
+      final nullTemps = recWithChains([chain(0, null), chain(1, null)]);
+      expect(nullTemps.boardTemps, isEmpty);
+      expect(nullTemps.tempText, '—');
+    });
+  });
+
   group('sysinfo', () {
     test('parses version + default target', () {
       final info = SysInfo.fromJson(const {
-        'version': '0.21.0',
+        'version': '0.22.0',
         'default_target': '192.168.2.0/24',
       });
-      expect(info.version, '0.21.0');
+      expect(info.version, '0.22.0');
       expect(info.defaultTarget, '192.168.2.0/24');
     });
   });

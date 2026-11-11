@@ -2297,3 +2297,126 @@ the Tk release assets publish regardless):
     and the Agent app are later stages. Self-update
     signing stays inert (owner key setup outstanding,
     as since v0.10).
+
+# v0.22.0 — Flutter layout redesign: sidebar + chips, table-first
+
+Owner verdict on the v0.21 Flutter layout after his first run
+(2026-11-11): "card to để làm gì, người ta muốn thấy máy đào"
+— the 4 big stat tiles ate the screen; people want to SEE
+THE MINERS. His order: copy the HashCore Toolkit's structure.
+An HTML prototype he approved (~/workspace/beesky-demo/
+proto-v22/) is the visual spec. Later the same session he
+added: "nhiệt độ máy có 4 hashboard thì sao" — board
+temperature is per-board data, so the detail panel shows
+each board's OWN temperature, for as many boards as the
+machine actually reports.
+
+What changed (app_flutter/ + version pins only):
+
+  * Structure: 228px left sidebar (official logo, "BeeSky",
+    "QUẢN LÝ MÁY ĐÀO" tagline, nav; version + sidecar status
+    dot at the foot) / header block (view title + network
+    line, then the fleet stats as compact ~26px chips in ONE
+    row: Tổng, OK, Cần kiểm tra, Lỗi, grouped hashrate,
+    Max temp) / scan bar as its own slim card (hints instead
+    of floating labels) / miners table filling ALL remaining
+    space (~34px rows) / detail as a 300px right panel that
+    exists only while a row is selected (close button returns
+    the width to the table; first row still auto-selects
+    after a scan). The v0.21 stat-tile row is DELETED.
+  * Sidebar nav beyond "Máy đào" — Bản đồ nhiệt, Điện năng,
+    Lịch sử sửa, Sự kiện, Cài đặt — is greyed with a "SAU"
+    tag: visible roadmap, no fake functionality.
+  * Detail panel (prototype treatment): model as title,
+    "ip • source" sub-line, "Chip sống a / b", each issue as
+    a severity-tinted box (code line + detail), and one
+    board line per REPORTED chain — "Board N: a/b chip •
+    T°C" — carrying that board's own temp from chains[]
+    .temp_c, omitted when the record has none. Board count
+    = len(chains); a 4-board machine shows 4 lines.
+  * Table: uppercase letterspaced headers; the selected row
+    gets the prototype's 3px accent left bar. Status pill
+    text stays OK / CHECK / ERROR for BeeSky-wide
+    consistency with the Tk app and the cloud dashboards
+    (the prototype drawing used longer Vietnamese labels —
+    a copy call; the structure is what was copied).
+  * models.dart gains fleetStatusCount (the chip counts);
+    the BeeSkyBridge interface gains exePath so the sidebar
+    dot can tell mock / sidecar-found / sidecar-missing
+    apart. Sidecar wiring (scan --json, tickets, serve) is
+    unchanged from v0.21; the Tk apps are untouched.
+  * Release pins bumped to 0.22.0 (__init__, both .iss,
+    mock_agent_bg_test, pubspec 0.22.0+2); the MockBridge
+    sysinfo version follows.
+
+(a) VERIFIED LOCALLY (this sandbox — new this release:
+`flutter pub get --offline` resolves from the SDK-local
+cache, so the Dart side is verified HERE, not only in CI):
+
+  * flutter analyze: No issues found.
+  * flutter test: 10/10 pass — model tests (bridge parsing,
+    native units, grouped totals, the NEW OK/CHECK/ERROR
+    chip-count split) and the widget test rebuilt for the
+    new layout: sidebar + 5 SAU tags, stat tiles absent,
+    chips (Tổng 4 máy / OK 2 / Cần kiểm tra 1 / Lỗi 1 /
+    grouped hashrate / Max 65 °C), table rows with native
+    units, L9 tap -> issue box + "Board 2: 84/123 chip •
+    59°C" (Boards 1/3 likewise with their own temps),
+    close-panel returns the width.
+  * Layout preview rendered with mock data at 1280x800 by a
+    throwaway capture test (deleted before commit, not
+    shipped): ~/workspace/beesky-demo/flutter-v22-preview.png
+    — glyphs are the test font's blocks (real fonts load on
+    a real machine); sidebar, chips row, scan card, dominant
+    table with accent-bar selection, and the detail panel
+    with per-board temps all render as designed. The scan
+    bar wraps to two lines under the extra-wide test font;
+    at real font widths it fits one line, and the Wrap is
+    the graceful fallback by design.
+  * Python: mock_agent_bg_test standalone under Xvfb —
+    52 PASS / 0 FAIL, including "versions in sync at
+    0.22.0". (Headless without a display the suite stops at
+    its tkinter check with TclError — pre-existing sandbox
+    constraint, same as previous sweeps.)
+
+(b) VERIFIED ONLY BY CI: flutter build windows --release
+and the BeeSkyFlutter-<tag>-win64.zip release asset
+(build-flutter.yml, unchanged). Runtime behaviour on a
+real Windows machine remains the owner's first-launch
+test, as with v0.21.
+
+(c) KNOWINGLY NOT YET WIRED: the sidebar roadmap views
+stay placeholders ("SAU"); tickets still shell a second
+scan pass; no installer bundling the Flutter app yet
+(stage 2, gated on the owner's runtime verdict on this
+layout).
+
+Follow-up (same release — folds into v0.22.0, no version
+bump): a second owner rule from the same prototype review
+— "sao hok hiện hết 3 hoặc 4 hash board, cái nào nóng quá
+thì đỏ lên". The table's NHIỆT column no longer shows only
+the max: it renders EVERY hashboard's temperature from the
+record's chains[], in chain order, compact ("71° 88° 73°").
+A board at/over the red line renders bold #FF6B6B on a soft
+red pill (the prototype's .bt.hot; BeeSkyColors.hotTemp);
+the rest stay muted. The red line is 85 °C — TEMP_LIMIT_C
+in beesky/core/report.py, the same threshold that already
+makes the core emit a per-chain OVER_TEMP problem (mirrored
+in Dart as models.tempLimitC / ChainInfo.isHot). The detail
+panel's board lines take the same red treatment for a hot
+board, so table and panel agree. Records with no per-chain
+temps fall back to the single max temp exactly as before;
+unreachable rows keep "—". Column flex rebalanced for the
+wider cell (NHIỆT 2->3, QUẠT 4->3). The MockBridge Z15 now
+carries a hot board (chains 71/88/73, max 88, OVER_TEMP +
+CHECK — byte-shaped like the real core's output for that
+data) so the red state is exercised in tests.
+Verified locally: flutter analyze clean; flutter test
+13/13 (3 new model tests — boardTemps order, the >=85 line,
+the no-chain-temp fallback — plus widget assertions on the
+multi-temp cell, the red 88° style vs its muted neighbours,
+the fallback row, and the red Board 2 detail line); the
+header chips shift accordingly (OK 1 / Cần kiểm tra 2 /
+Max 88 °C). Python pin suite unchanged and green:
+mock_agent_bg_test 52 PASS / 0 FAIL ("versions in sync at
+0.22.0").

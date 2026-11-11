@@ -16,6 +16,11 @@ import 'models.dart';
 /// touch a real process.
 abstract class BeeSkyBridge {
   bool get isMock;
+
+  /// Resolved sidecar executable path, or null for the mock bridge.
+  /// The sidebar's status dot uses it to tell "sidecar found" apart
+  /// from "beesky.exe missing next to the app".
+  String? get exePath;
   Future<SysInfo> sysinfo();
   Future<ScanResult> scan(
     String target, {
@@ -133,9 +138,8 @@ class SidecarBridge implements BeeSkyBridge {
     // TODO(stage-2): a `tickets` verb re-using the last scan's records
     // would avoid the second network pass.
     final exeFile = File(exePath);
-    final baseDir = exePath.contains(Platform.pathSeparator)
-        ? exeFile.parent.path
-        : '.';
+    final baseDir =
+        exePath.contains(Platform.pathSeparator) ? exeFile.parent.path : '.';
     final dir = Directory('$baseDir${Platform.pathSeparator}tickets');
     await dir.create(recursive: true);
     final args = <String>['scan', target, '--tickets', dir.path];
@@ -165,20 +169,26 @@ class SidecarBridge implements BeeSkyBridge {
     // TODO(stage-2): the url_launcher plugin would open the browser more
     // cleanly than the OS shell; kept dependency-free for stage 1.
     const port = 8787;
-    await Process.start(exePath, [
-      'serve',
-      target,
-      '--port',
-      '$port',
-    ], mode: ProcessStartMode.detached);
+    await Process.start(
+        exePath,
+        [
+          'serve',
+          target,
+          '--port',
+          '$port',
+        ],
+        mode: ProcessStartMode.detached);
     final url = 'http://localhost:$port';
     if (Platform.isWindows) {
-      await Process.start('cmd', [
-        '/c',
-        'start',
-        '',
-        url,
-      ], mode: ProcessStartMode.detached);
+      await Process.start(
+          'cmd',
+          [
+            '/c',
+            'start',
+            '',
+            url,
+          ],
+          mode: ProcessStartMode.detached);
     } else if (Platform.isMacOS) {
       await Process.start('open', [url], mode: ProcessStartMode.detached);
     } else {
@@ -192,9 +202,15 @@ class SidecarBridge implements BeeSkyBridge {
 /// by the widget tests. The sample fleet intentionally includes the two
 /// machines that exposed the v0.20 unit bug — an L9 at 14.54 MH/s and a
 /// Z15 at 1101.00 ksol/s — plus one sick S19 and one unreachable unit.
+/// The Z15's middle board runs at 88 °C (over the core's 85 °C limit,
+/// reported exactly as the core reports it: OVER_TEMP + CHECK) so the
+/// red per-board temp state is exercised everywhere temps are shown.
 class MockBridge implements BeeSkyBridge {
   @override
   bool get isMock => true;
+
+  @override
+  String? get exePath => null;
 
   static const String _sampleJson = '''
 {"records": [
@@ -215,11 +231,14 @@ class MockBridge implements BeeSkyBridge {
                  "detail": "board 1: 84/123 chip"}],
    "status": "CHECK", "rate_value": 14.54, "rate_unit": "MH/s", "ths": null},
   {"ip": "192.168.2.103", "model": "Antminer Z15", "source": "cgminer",
-   "chains": [{"index": 0, "temp_c": 55.0, "chips_alive": 24, "chips_total": 24},
-              {"index": 1, "temp_c": 58.0, "chips_alive": 24, "chips_total": 24},
-              {"index": 2, "temp_c": 56.0, "chips_alive": 24, "chips_total": 24}],
+   "chains": [{"index": 0, "temp_c": 71.0, "chips_alive": 24, "chips_total": 24},
+              {"index": 1, "temp_c": 88.0, "chips_alive": 24, "chips_total": 24},
+              {"index": 2, "temp_c": 73.0, "chips_alive": 24, "chips_total": 24}],
    "fans_rpm": [3900, 3840], "chips_alive": 72, "chips_total": 72,
-   "max_temp_c": 58.0, "problems": [], "status": "OK",
+   "max_temp_c": 88.0,
+   "problems": [{"code": "OVER_TEMP", "severity": "warn",
+                 "detail": "chain 1: 88 C >= 85 C limit"}],
+   "status": "CHECK",
    "rate_value": 1101.0, "rate_unit": "ksol/s", "ths": null},
   {"ip": "192.168.2.104", "model": "—", "source": "cgminer",
    "chains": [], "fans_rpm": [], "chips_alive": 0, "chips_total": 0,
@@ -233,7 +252,7 @@ class MockBridge implements BeeSkyBridge {
 
   @override
   Future<SysInfo> sysinfo() async =>
-      const SysInfo(version: '0.21.0', defaultTarget: '192.168.2.0/24');
+      const SysInfo(version: '0.22.0', defaultTarget: '192.168.2.0/24');
 
   @override
   Future<ScanResult> scan(
@@ -250,7 +269,8 @@ class MockBridge implements BeeSkyBridge {
     String target, {
     String user = '',
     String password = '',
-  }) async => '(mock) không ghi file phiếu thật';
+  }) async =>
+      '(mock) không ghi file phiếu thật';
 
   @override
   Future<void> openLocalWeb(String target) async {}

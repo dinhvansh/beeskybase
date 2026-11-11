@@ -11,6 +11,11 @@ library;
 /// Canonical unit order — mirrors beesky.core.report.RATE_UNIT_ORDER.
 const List<String> rateUnitOrder = ['TH/s', 'GH/s', 'MH/s', 'ksol/s', 'sol/s'];
 
+/// A hashboard at or above this temperature is flagged hot — mirrors
+/// beesky.core.report.TEMP_LIMIT_C, the same threshold that already
+/// makes the core emit a per-chain OVER_TEMP problem.
+const double tempLimitC = 85;
+
 /// "1101.0, ksol/s" -> "1,101.00 ksol/s" — mirrors Python's f"{v:,.2f}".
 String formatRateNum(double value) {
   final fixed = value.toStringAsFixed(2);
@@ -43,10 +48,10 @@ class Problem {
   });
 
   factory Problem.fromJson(Map<String, dynamic> json) => Problem(
-    code: (json['code'] ?? '') as String,
-    severity: (json['severity'] ?? '') as String,
-    detail: (json['detail'] ?? '') as String,
-  );
+        code: (json['code'] ?? '') as String,
+        severity: (json['severity'] ?? '') as String,
+        detail: (json['detail'] ?? '') as String,
+      );
 }
 
 class ChainInfo {
@@ -62,11 +67,15 @@ class ChainInfo {
   });
 
   factory ChainInfo.fromJson(Map<String, dynamic> json) => ChainInfo(
-    index: (json['index'] as num).toInt(),
-    tempC: (json['temp_c'] as num?)?.toDouble(),
-    chipsAlive: (json['chips_alive'] as num).toInt(),
-    chipsTotal: (json['chips_total'] as num).toInt(),
-  );
+        index: (json['index'] as num).toInt(),
+        tempC: (json['temp_c'] as num?)?.toDouble(),
+        chipsAlive: (json['chips_alive'] as num).toInt(),
+        chipsTotal: (json['chips_total'] as num).toInt(),
+      );
+
+  /// At/over the core's TEMP_LIMIT_C — the board renders red wherever
+  /// per-board temps are shown (table NHIỆT cell, detail board lines).
+  bool get isHot => tempC != null && tempC! >= tempLimitC;
 }
 
 class MinerRecord {
@@ -152,6 +161,15 @@ class MinerRecord {
   String get tempText =>
       maxTempC == null ? '—' : '${maxTempC!.toStringAsFixed(0)} °C';
 
+  /// Per-board temperatures in chain order — only the chains that
+  /// actually reported one. Empty when the record carries no per-chain
+  /// temps at all; the table then falls back to [tempText] (the single
+  /// max temp), exactly as before this rule existed.
+  List<double> get boardTemps => [
+        for (final c in chains)
+          if (c.tempC != null) c.tempC!,
+      ];
+
   String get fansText {
     final live = fansRpm.where((f) => f > 0).toList();
     return live.isEmpty ? '—' : live.join(' / ');
@@ -159,11 +177,11 @@ class MinerRecord {
 
   /// Display label for the wire source token (mirrors gui.SOURCE_LABEL).
   String get sourceLabel => switch (source) {
-    'cgminer' => 'cgminer RPC',
-    'vnish' => 'VNish',
-    'stock' => 'Bitmain gốc',
-    _ => source,
-  };
+        'cgminer' => 'cgminer RPC',
+        'vnish' => 'VNish',
+        'stock' => 'Bitmain gốc',
+        _ => source,
+      };
 }
 
 /// Grouped fleet total — a direct port of report.fleet_rate_totals +
@@ -199,6 +217,11 @@ double? fleetMaxTempC(List<MinerRecord> records) {
 int fleetProblemCount(List<MinerRecord> records) =>
     records.where((r) => !r.isOk).length;
 
+/// Count of records whose table chip reads [label]
+/// ("OK" | "CHECK" | "ERROR") — drives the header stat chips.
+int fleetStatusCount(List<MinerRecord> records, String label) =>
+    records.where((r) => r.statusLabel == label).length;
+
 class ScanResult {
   final List<MinerRecord> records;
   final int scanned;
@@ -212,13 +235,13 @@ class ScanResult {
   });
 
   factory ScanResult.fromJson(Map<String, dynamic> json) => ScanResult(
-    records: ((json['records'] as List<dynamic>?) ?? const [])
-        .map((e) => MinerRecord.fromJson(e as Map<String, dynamic>))
-        .toList(),
-    scanned: ((json['scanned'] as num?) ?? 0).toInt(),
-    found: ((json['found'] as num?) ?? 0).toInt(),
-    elapsedS: ((json['elapsed_s'] as num?) ?? 0).toDouble(),
-  );
+        records: ((json['records'] as List<dynamic>?) ?? const [])
+            .map((e) => MinerRecord.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        scanned: ((json['scanned'] as num?) ?? 0).toInt(),
+        found: ((json['found'] as num?) ?? 0).toInt(),
+        elapsedS: ((json['elapsed_s'] as num?) ?? 0).toDouble(),
+      );
 }
 
 class SysInfo {
@@ -227,7 +250,7 @@ class SysInfo {
   const SysInfo({required this.version, required this.defaultTarget});
 
   factory SysInfo.fromJson(Map<String, dynamic> json) => SysInfo(
-    version: (json['version'] ?? '') as String,
-    defaultTarget: (json['default_target'] ?? '') as String,
-  );
+        version: (json['version'] ?? '') as String,
+        defaultTarget: (json['default_target'] ?? '') as String,
+      );
 }

@@ -1,0 +1,1458 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BeeSky Cloud — Quản lý nhiều trại</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%22-373.37%20-15.87%20198.58%20198.58%22%3E%3Cg%3E%0A%09%3Ccircle%20cx%3D%22-274.08%22%20cy%3D%2283.421%22%20r%3D%2299.29%22%2F%3E%0A%09%3Ccircle%20fill%3D%22%23F4D600%22%20cx%3D%22-274.08%22%20cy%3D%2283.421%22%20r%3D%2287.763%22%2F%3E%0A%09%3Cpath%20d%3D%22M-207.439%2C26.24l-86.987%2C82.395l-1.26%2C1.194l-64.403-44.017c-1.149%2C5.665-1.753%2C11.528-1.753%2C17.532%0A%09%09c0%2C4.924%2C0.412%2C9.751%2C1.192%2C14.455l66.224%2C45.262l1.463%2C1l99.866-94.593C-196.66%2C40.961-201.524%2C33.137-207.439%2C26.24z%22%2F%3E%0A%09%3Cpath%20d%3D%22M-293.376%2C83.199l73.07-69.213c-5.066-3.934-10.576-7.323-16.44-10.084l-57.681%2C54.636l-0.848%2C0.803l-46.539-31.808%0A%09%09c-3.945%2C4.783-7.391%2C9.992-10.264%2C15.546l57.651%2C39.402L-293.376%2C83.199z%22%2F%3E%0A%09%3Cpath%20d%3D%22M-293.5%2C39.735l43.177-40.898c-6.461-1.813-13.225-2.9-20.197-3.179l-23.907%2C22.645l-0.724%2C0.686l-19.627-13.415%0A%09%09c-5.2%2C2.727-10.092%2C5.958-14.612%2C9.632l34.963%2C23.896L-293.5%2C39.735z%22%2F%3E%0A%3C%2Fg%3E%3C%2Fsvg%3E">
+<style>
+  :root {
+    --yellow: #F5D800;
+    --bg: #0B0B0D;
+    --sidebar: #101014;
+    --panel: #15151A;
+    --panel2: #1C1C22;
+    --line: #232329;
+    --text: #F2F2F3;
+    --muted: #9CA3AF;
+    --ok: #34D399;
+    --warn: #FBBF24;
+    --bad: #F87171;
+    --orange: #FB923C;
+    --radius-card: 16px;
+    --radius-widget: 12px;
+    --radius-pill: 999px;
+    /* Liquid Glass (v0.18): translucent surfaces + backdrop blur over
+       the ambient body backdrop. The @supports / reduced-transparency
+       blocks at the bottom re-point these tokens at the pre-v0.18
+       solid colours, so every glass rule below falls back cleanly. */
+    --glass: rgba(255, 255, 255, .045);
+    --glass-line: rgba(255, 255, 255, .09);
+    --glass-soft: rgba(255, 255, 255, .05);
+    --glass-line-soft: rgba(255, 255, 255, .10);
+    --glass-chrome: rgba(255, 255, 255, .03);
+    --glass-head: rgba(255, 255, 255, .03);
+    --glass-hover: rgba(255, 255, 255, .05);
+    --glass-blur: blur(16px) saturate(150%);
+    --glass-blur-soft: blur(10px) saturate(150%);
+    --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 8px 32px rgba(0, 0, 0, .35);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; color: var(--text);
+    background:
+      radial-gradient(600px 400px at 15% -5%, rgba(245, 216, 0, .07), transparent 60%),
+      radial-gradient(700px 500px at 95% 110%, rgba(70, 100, 180, .06), transparent 60%),
+      var(--bg);
+    background-attachment: fixed;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    font-size: 14px;
+  }
+  .layout { display: flex; min-height: 100vh; align-items: stretch; }
+
+  /* -- sidebar ------------------------------------------------------- */
+  .sidebar {
+    width: 230px; flex: 0 0 230px; background: var(--glass-chrome);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    border-right: 1px solid var(--glass-line); padding: 20px 14px;
+    position: sticky; top: 0; height: 100vh;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .brand { display: flex; align-items: center; gap: 11px; padding: 2px 8px 18px; }
+  .brand .logo-mark { width: 38px; height: 38px; flex: 0 0 auto; }
+  .brand-name { font-size: 19px; font-weight: 800; letter-spacing: .3px; line-height: 1.15; }
+  .brand-name .bee { color: var(--yellow); }
+  .brand-name .cloud-word { color: var(--muted); font-weight: 600; }
+  .brand-sub { color: var(--muted); font-size: 11.5px; margin-top: 2px; line-height: 1.35; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    width: 100%; text-align: left; background: transparent;
+    color: var(--muted); border: 0; border-radius: var(--radius-widget);
+    padding: 10px 12px; font-size: 14px; font-weight: 600; cursor: pointer;
+    font-family: inherit;
+  }
+  .nav-item:hover { color: var(--text); background: var(--glass-hover); }
+  .nav-item.active { color: var(--yellow); background: rgba(245, 216, 0, .10); }
+  /* Inline stroke icons (v0.13) — Lucide-style geometry, currentColor
+     so nav icons follow the muted/active colour of their item. */
+  .nav-ic { width: 19px; height: 19px; flex: 0 0 auto; }
+  .sidebar-foot {
+    margin-top: auto; padding: 12px 8px 2px; color: var(--muted);
+    font-size: 11.5px; line-height: 1.5; border-top: 1px solid var(--line);
+  }
+
+  /* -- main column / topbar ------------------------------------------ */
+  .main-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 13px 24px; border-bottom: 1px solid var(--glass-line);
+    background: var(--glass-chrome);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    position: sticky; top: 0; z-index: 20;
+  }
+  .topbar-title { font-size: 17px; font-weight: 800; }
+  .topbar .spacer { flex: 1; }
+  .last-update { color: var(--muted); font-size: 12.5px; }
+  .site-select { color: var(--muted); font-size: 13px; }
+  select, input, textarea {
+    background: var(--glass-soft); color: var(--text); border: 1px solid var(--glass-line-soft);
+    -webkit-backdrop-filter: var(--glass-blur-soft); backdrop-filter: var(--glass-blur-soft);
+    border-radius: var(--radius-widget); padding: 8px 11px; font-size: 13px; font-family: inherit;
+  }
+  select:focus, input:focus, textarea:focus { outline: 1px solid var(--yellow); }
+  a.logout {
+    color: var(--yellow); font-size: 13px; font-weight: 600; text-decoration: none;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  a.logout svg { width: 15px; height: 15px; }
+  a.logout:hover { text-decoration: underline; }
+  main { padding: 22px 24px 34px; width: 100%; max-width: 1440px; margin: 0 auto; }
+  footer { color: var(--muted); font-size: 12px; text-align: center; padding: 0 24px 22px; }
+
+  /* -- views ---------------------------------------------------------- */
+  .view { display: none; }
+  .view.active { display: block; }
+  .view-heading { margin: 26px 0 12px; font-size: 17px; font-weight: 800; }
+  .view-heading:first-child { margin-top: 0; }
+  .view-heading .accent { color: var(--yellow); font-weight: 600; }
+  .panel-head-row { display: flex; align-items: baseline; gap: 14px; }
+  .panel-head-row .view-heading { flex: 1; }
+  .btn-link {
+    background: transparent; border: 0; color: var(--yellow); cursor: pointer;
+    font-size: 13px; font-weight: 700; font-family: inherit; padding: 0;
+  }
+  .btn-link:hover { text-decoration: underline; }
+
+  /* -- panels & cards -------------------------------------------------- */
+  .panel {
+    background: var(--glass); border: 1px solid var(--glass-line);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    border-radius: var(--radius-card); box-shadow: var(--glass-shadow);
+  }
+  .listbox { overflow: hidden; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+  .card {
+    background: var(--glass); border: 1px solid var(--glass-line);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    border-radius: var(--radius-card); box-shadow: var(--glass-shadow);
+    padding: 16px 18px; position: relative;
+  }
+  .ic-chip {
+    position: absolute; top: 14px; right: 14px; width: 34px; height: 34px;
+    border-radius: var(--radius-widget); background: var(--glass-soft); border: 1px solid var(--glass-line-soft);
+    display: flex; align-items: center; justify-content: center; color: var(--muted);
+  }
+  .ic-chip svg { width: 18px; height: 18px; }
+  .card.alert .ic-chip { color: var(--bad); border-color: #4A2326; }
+  .card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .6px; }
+  .card .value { font-size: 28px; font-weight: 700; margin-top: 5px; font-variant-numeric: tabular-nums; }
+  .card .value small { font-size: 14px; color: var(--muted); font-weight: 400; }
+  .card.alert .value { color: var(--bad); }
+  .chart-panel { margin-top: 16px; padding: 16px 18px 10px; }
+  .panel-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 6px; }
+  .panel-head h3 { margin: 0; font-size: 15px; font-weight: 800; }
+  .panel-head h3 .accent { color: var(--yellow); font-weight: 600; }
+  .chart-meta { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  #chart-wrap svg { width: 100%; height: auto; display: block; }
+  .sites { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 14px; }
+  .site-card {
+    background: var(--glass); border: 1px solid var(--glass-line); border-radius: var(--radius-card);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    box-shadow: var(--glass-shadow); padding: 16px 18px; cursor: pointer;
+  }
+  .site-card:hover { border-color: var(--yellow); }
+  .site-card.selected { border-color: var(--yellow); box-shadow: 0 0 0 1px var(--yellow); }
+  .site-card .name { font-size: 17px; font-weight: 800; display: flex; align-items: center; gap: 8px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ok); display: inline-block; }
+  .dot.stale { background: var(--bad); }
+  .site-card .stats { color: var(--muted); font-size: 13px; margin-top: 8px; line-height: 1.7; }
+  .site-card .stats b { color: var(--text); }
+  .site-card .stats .prob { color: var(--bad); font-weight: 700; }
+
+  /* -- tables ------------------------------------------------------------ */
+  .tablewrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; min-width: 960px; font-variant-numeric: tabular-nums; }
+  th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; font-size: 13px; }
+  th {
+    background: var(--glass-head); color: var(--muted); font-size: 12px;
+    text-transform: uppercase; letter-spacing: .4px;
+    position: sticky; top: 0; z-index: 1;
+  }
+  tbody tr:hover td { background: var(--glass-hover); }
+  tr:last-child td { border-bottom: 0; }
+  .pill {
+    display: inline-block; padding: 2px 10px; border-radius: var(--radius-pill);
+    font-size: 12px; font-weight: 700;
+  }
+  .pill.ok { background: #0E2C22; color: var(--ok); }
+  .pill.check { background: #33161A; color: var(--bad); }
+  .problems { color: #F3B8B2; font-size: 12px; margin-top: 4px; line-height: 1.5; }
+  tr.miner-row { cursor: pointer; }
+  tr.miner-row.selected td { background: #26210A; }
+  .btn-action {
+    background: var(--glass-soft); color: var(--yellow); border: 1px solid var(--yellow);
+    -webkit-backdrop-filter: var(--glass-blur-soft); backdrop-filter: var(--glass-blur-soft);
+    border-radius: var(--radius-widget); padding: 5px 11px; font-size: 12px; font-weight: 700;
+    cursor: pointer; white-space: nowrap; font-family: inherit;
+  }
+  .btn-action:hover { background: var(--yellow); color: #000; }
+  .btn-action:disabled { opacity: .45; cursor: wait; }
+
+  /* -- list rows (events / commands / repairs / pool) --------------------- */
+  .event, .cmd, .repair, .poolrow, .cfgrow {
+    display: flex; gap: 10px; align-items: baseline; padding: 10px 16px;
+    border-bottom: 1px solid var(--line); flex-wrap: wrap;
+  }
+  .event:last-child, .cmd:last-child, .repair:last-child,
+  .poolrow:last-child, .cfgrow:last-child { border-bottom: 0; }
+  .event .time, .cmd .time, .repair .time { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .event .who, .cmd .who, .repair .who { font-weight: 700; white-space: nowrap; }
+  .event .site, .cmd .site, .repair .site, .poolrow .site, .cfgrow .site {
+    color: var(--yellow); font-size: 12px; white-space: nowrap;
+  }
+  .poolrow .site, .cfgrow .site { font-weight: 800; font-size: 13px; }
+  .event .detail, .cmd .result, .repair .detail { color: #D8D8DC; }
+  .poolrow .num { font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .poolrow .num small { color: var(--muted); font-weight: 400; }
+  .poolrow .when { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .cfgrow { font-size: 13px; color: #D8D8DC; }
+  .cfgrow .cfg-url { word-break: break-all; }
+  .sev, .kind, .cmdstat, .gap {
+    font-size: 11px; font-weight: 800; padding: 2px 9px; border-radius: var(--radius-pill);
+    text-transform: uppercase; white-space: nowrap;
+  }
+  .sev.info { background: #1D2735; color: #9DB8CC; }
+  .sev.warning { background: #33290E; color: var(--warn); }
+  .sev.major { background: #33200E; color: var(--orange); }
+  .sev.critical { background: #33161A; color: var(--bad); }
+  .cmdstat.pending { background: #33290E; color: var(--warn); }
+  .cmdstat.sent { background: #33200E; color: var(--orange); }
+  .cmdstat.done { background: #0E2C22; color: var(--ok); }
+  .cmdstat.failed { background: #33161A; color: var(--bad); }
+  .kind.auto { background: #1D2735; color: #9DB8CC; }
+  .kind.manual { background: #33290E; color: var(--warn); }
+  .gap { text-transform: none; font-size: 12px; }
+  .gap.fine { background: #0E2C22; color: var(--ok); }
+  .gap.warn { background: #33290E; color: var(--warn); }
+  .gap.bad { background: #33161A; color: var(--bad); }
+  .empty { color: var(--muted); padding: 18px 16px; text-align: center; }
+
+  /* -- heat map ------------------------------------------------------------ */
+  .heatwrap { padding: 14px 16px; }
+  .heat-site { color: var(--muted); font-size: 13px; font-weight: 700; margin: 4px 0 8px; }
+  .heat-group { margin-bottom: 14px; }
+  .heat-group:last-child { margin-bottom: 0; }
+  .heatmap { display: flex; flex-wrap: wrap; gap: 8px; }
+  .tile {
+    width: 94px; border-radius: var(--radius-widget); padding: 7px 9px;
+    border: 2px solid transparent; background: var(--panel2); color: var(--text);
+  }
+  .tile .octet { font-size: 19px; font-weight: 800; line-height: 1.15; }
+  .tile .tt { font-size: 15px; font-weight: 700; }
+  .tile .hh { font-size: 11px; opacity: .85; white-space: nowrap; }
+  .tile.problem { border-color: var(--bad); }
+  .tile.offline { background: #1C1C22; border: 2px dashed #3F3F46; color: var(--muted); }
+
+  /* -- repairs -------------------------------------------------------------- */
+  .repairs-head {
+    padding: 12px 16px; font-weight: 800; background: var(--glass-head);
+    border-bottom: 1px solid var(--line);
+  }
+  .repair-form {
+    padding: 14px 16px; border-top: 1px solid var(--line);
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  }
+  .repair-form[hidden] { display: none; }
+  .repair-form .rf-title { width: 100%; color: var(--muted); font-size: 13px; }
+  .rf-msg { color: var(--ok); font-size: 12px; }
+
+  /* -- energy ------------------------------------------------------------------ */
+  .energy-sum { padding: 14px 16px; border-bottom: 1px solid var(--line); font-size: 15px; }
+  .energy-sum b { font-size: 20px; }
+  table.energy { min-width: 0; }
+  table.energy td, table.energy th { padding: 8px 16px; position: static; }
+
+  /* -- settings forms ----------------------------------------------------------- */
+  .form-panel { padding: 18px 20px; margin-bottom: 18px; }
+  .form-panel h3 { margin: 0 0 6px; font-size: 15px; font-weight: 800; }
+  .form-panel .sub-head { margin: 20px 0 4px; }
+  .hint { color: var(--muted); font-size: 13px; line-height: 1.55; margin: 6px 0 14px; }
+  .hint code { background: var(--panel2); padding: 1px 5px; border-radius: var(--radius-pill); }
+  .form-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 12px 14px; align-items: end;
+  }
+  .form-grid .f { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+  .form-grid .f-wide { grid-column: 1 / -1; }
+  .form-grid textarea { resize: vertical; }
+  .form-actions { display: flex; align-items: center; gap: 12px; }
+  .btn-primary {
+    background: var(--yellow); color: #000; border: 0; border-radius: var(--radius-widget);
+    padding: 10px 18px; font-weight: 700; cursor: pointer; font-size: 13.5px;
+    font-family: inherit;
+  }
+  .btn-primary:hover { filter: brightness(1.08); }
+  .btn-primary:disabled { opacity: .5; cursor: wait; }
+  .form-msg { color: var(--ok); font-size: 13px; }
+  .form-msg.err { color: var(--bad); }
+
+  /* -- agent management (v0.13) ------------------------------------------------- */
+  .agents-box {
+    border: 1px solid var(--glass-line); border-radius: var(--radius-card); overflow: hidden;
+    background: var(--glass-soft);
+    -webkit-backdrop-filter: var(--glass-blur-soft); backdrop-filter: var(--glass-blur-soft);
+  }
+  .agentrow {
+    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 13px;
+  }
+  .agentrow:last-child { border-bottom: 0; }
+  .agentrow .site-name { font-weight: 800; }
+  .agentrow .meta { color: var(--muted); font-size: 12.5px; }
+  .agentrow .spacer { flex: 1; }
+  .agentrow .revoked-tag {
+    color: var(--bad); font-weight: 800; font-size: 11.5px;
+    text-transform: uppercase; letter-spacing: .4px;
+  }
+  .btn-danger {
+    background: var(--glass-soft); color: var(--bad); border: 1px solid #4A2326;
+    -webkit-backdrop-filter: var(--glass-blur-soft); backdrop-filter: var(--glass-blur-soft);
+    border-radius: var(--radius-widget); padding: 5px 11px; font-size: 12px; font-weight: 700;
+    cursor: pointer; white-space: nowrap; font-family: inherit;
+  }
+  .btn-danger:hover { background: var(--bad); color: #000; }
+  .btn-danger:disabled { opacity: .45; cursor: wait; }
+  .key-panel {
+    border: 1px solid var(--warn); background: #241D08; border-radius: var(--radius-card);
+    padding: 14px 16px; margin-bottom: 16px;
+  }
+  .key-panel[hidden] { display: none; }
+  .key-warn { color: var(--warn); font-weight: 700; font-size: 13.5px; line-height: 1.55; margin-bottom: 4px; }
+  .key-panel label { display: block; color: var(--muted); font-size: 12.5px; margin: 12px 0 5px; }
+  .key-row { display: flex; gap: 8px; align-items: stretch; }
+  .key-row input {
+    flex: 1; min-width: 0; font-family: ui-monospace, Consolas, monospace;
+    font-size: 12.5px;
+  }
+  .key-panel .btn-link { margin-top: 12px; }
+
+  /* -- Liquid Glass fallbacks (v0.18) -------------------------------------------- */
+  /* No backdrop-filter support, or the user prefers reduced transparency:
+     re-point the glass tokens at the pre-v0.18 solid colours (and switch
+     the blur off) — every glass surface above degrades to the old flat
+     material with no layout change. */
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    :root {
+      --glass: #15151A; --glass-line: #232329;
+      --glass-soft: #1C1C22; --glass-line-soft: #232329;
+      --glass-chrome: #101014; --glass-head: #1C1C22;
+      --glass-hover: #191920;
+      --glass-blur: none; --glass-blur-soft: none;
+      --glass-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+    }
+    .agents-box { background: transparent; }
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    :root {
+      --glass: #15151A; --glass-line: #232329;
+      --glass-soft: #1C1C22; --glass-line-soft: #232329;
+      --glass-chrome: #101014; --glass-head: #1C1C22;
+      --glass-hover: #191920;
+      --glass-blur: none; --glass-blur-soft: none;
+      --glass-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+    }
+    .agents-box { background: transparent; }
+  }
+
+  /* -- small screens: sidebar becomes a top bar --------------------------------- */
+  @media (max-width: 900px) {
+    .layout { flex-direction: column; }
+    .sidebar {
+      width: 100%; flex: none; height: auto; position: static;
+      flex-direction: row; flex-wrap: wrap; align-items: center;
+      border-right: 0; border-bottom: 1px solid var(--line); padding: 12px 14px;
+    }
+    .brand { padding: 0 10px 0 0; }
+    .brand-sub { display: none; }
+    .nav-item { width: auto; padding: 8px 11px; }
+    .sidebar-foot { display: none; }
+    main { padding: 18px 16px 30px; }
+    .topbar { padding: 12px 16px; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand"><svg class="logo-mark" viewBox="-373.37 -15.87 198.58 198.58" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><g>
+	<circle cx="-274.08" cy="83.421" r="99.29"/>
+	<circle fill="#F4D600" cx="-274.08" cy="83.421" r="87.763"/>
+	<path d="M-207.439,26.24l-86.987,82.395l-1.26,1.194l-64.403-44.017c-1.149,5.665-1.753,11.528-1.753,17.532
+		c0,4.924,0.412,9.751,1.192,14.455l66.224,45.262l1.463,1l99.866-94.593C-196.66,40.961-201.524,33.137-207.439,26.24z"/>
+	<path d="M-293.376,83.199l73.07-69.213c-5.066-3.934-10.576-7.323-16.44-10.084l-57.681,54.636l-0.848,0.803l-46.539-31.808
+		c-3.945,4.783-7.391,9.992-10.264,15.546l57.651,39.402L-293.376,83.199z"/>
+	<path d="M-293.5,39.735l43.177-40.898c-6.461-1.813-13.225-2.9-20.197-3.179l-23.907,22.645l-0.724,0.686l-19.627-13.415
+		c-5.2,2.727-10.092,5.958-14.612,9.632l34.963,23.896L-293.5,39.735z"/>
+</g></svg><div class="brand-text"><div class="brand-name"><span class="bee">Bee</span>Sky <span class="cloud-word">Cloud</span></div><div class="brand-sub">Quản lý nhiều trại / xưởng từ xa</div></div></div>
+    <button class="nav-item active" type="button" data-view="overview"><svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>Tổng quan</button>
+    <button class="nav-item" type="button" data-view="miners"><svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>Máy đào</button>
+    <button class="nav-item" type="button" data-view="heatmap"><svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/></svg>Bản đồ nhiệt</button>
+    <button class="nav-item" type="button" data-view="energy"><svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Điện năng</button>
+    <button class="nav-item" type="button" data-view="repairs"><svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>Lịch sử sửa</button>
+    <button class="nav-item" type="button" data-view="events"><svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>Sự kiện</button>
+    <button class="nav-item" type="button" data-view="settings"><svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>Cài đặt</button>
+    <div class="sidebar-foot">Agent tại trại tự đẩy số liệu lên · Lệnh từ xa đi xuống qua agent của trại.<br>BeeSky Cloud v{{VERSION}}</div>
+  </aside>
+
+  <div class="main-col">
+    <div class="topbar">
+      <div class="topbar-title" id="view-title">Tổng quan</div>
+      <div class="spacer"></div>
+      <span class="last-update">Cập nhật lần cuối: <span id="last-update">–</span></span>
+      <label class="site-select">Trại: <select id="site-filter"><option value="">Tất cả các trại</option></select></label>
+      <a class="logout" href="/logout"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>Đăng xuất</a>
+    </div>
+
+    <main>
+      <!-- TỔNG QUAN ---------------------------------------------------- -->
+      <section class="view active" id="view-overview">
+        <div class="cards">
+          <div class="card"><div class="ic-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01"/><path d="M16 6h.01"/><path d="M12 6h.01"/><path d="M12 10h.01"/><path d="M12 14h.01"/><path d="M16 10h.01"/><path d="M16 14h.01"/><path d="M8 10h.01"/><path d="M8 14h.01"/></svg></div><div class="label">Tổng số trại</div><div class="value" id="card-sites">–</div></div>
+          <div class="card"><div class="ic-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/></svg></div><div class="label">Tổng số máy</div><div class="value" id="card-total">–</div></div>
+          <div class="card"><div class="ic-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div><div class="label">Tổng hashrate</div><div class="value" id="card-hashrate">–</div></div>
+          <div class="card" id="card-problems-wrap"><div class="ic-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg></div><div class="label">Máy có vấn đề</div><div class="value" id="card-problems">–</div></div>
+        </div>
+
+        <div class="panel chart-panel">
+          <div class="panel-head">
+            <h3>Hashrate toàn trại <span class="accent">· Farm hashrate, 24 giờ</span></h3>
+            <div class="chart-meta" id="chart-meta"></div>
+          </div>
+          <div id="chart-wrap">
+            <div class="empty">Đang tải…</div>
+          </div>
+        </div>
+
+        <h2 class="view-heading">Tổng quan các trại <span class="accent">· Sites</span></h2>
+        <div class="sites" id="sites-grid">
+          <div class="empty">Đang tải…</div>
+        </div>
+
+        <h2 class="view-heading">So sánh với pool <span class="accent">· Farm vs pool</span></h2>
+        <div class="panel listbox" id="pool-panel">
+          <div class="empty">Đang tải…</div>
+        </div>
+
+        <div class="panel-head-row">
+          <h2 class="view-heading">Sự kiện gần đây <span class="accent">· Events</span></h2>
+          <button class="btn-link" id="events-all-btn" type="button">Xem tất cả</button>
+        </div>
+        <div class="panel listbox" id="events-recent">
+          <div class="empty">Đang tải…</div>
+        </div>
+      </section>
+
+      <!-- MÁY ĐÀO ------------------------------------------------------- -->
+      <section class="view" id="view-miners">
+        <h2 class="view-heading">Danh sách máy <span class="accent">· Miners</span></h2>
+        <div class="tablewrap panel">
+          <table>
+            <thead>
+              <tr>
+                <th>Trại</th><th>IP</th><th>Model</th><th>Nguồn</th><th>Hashrate</th>
+                <th>Chip sống/tổng</th><th>Nhiệt độ max</th><th>Quạt (RPM)</th><th>Trạng thái</th>
+                <th>Thao tác</th>
+              </tr>
+            </thead>
+            <tbody id="miners-body">
+              <tr><td colspan="10" class="empty">Đang tải…</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 class="view-heading">Lệnh gần đây <span class="accent">· Remote actions</span></h2>
+        <div class="panel listbox" id="commands-list">
+          <div class="empty">Đang tải…</div>
+        </div>
+      </section>
+
+      <!-- BẢN ĐỒ NHIỆT -------------------------------------------------- -->
+      <section class="view" id="view-heatmap">
+        <h2 class="view-heading">Bản đồ nhiệt <span class="accent">· Heat map</span></h2>
+        <div class="heatwrap panel" id="heatmap">
+          <div class="empty">Đang tải…</div>
+        </div>
+      </section>
+
+      <!-- ĐIỆN NĂNG ----------------------------------------------------- -->
+      <section class="view" id="view-energy">
+        <h2 class="view-heading">Điện năng <span class="accent">· Energy</span></h2>
+        <div class="panel listbox" id="energy-panel">
+          <div class="empty">Đang tải…</div>
+        </div>
+      </section>
+
+      <!-- LỊCH SỬ SỬA CHỮA ---------------------------------------------- -->
+      <section class="view" id="view-repairs">
+        <h2 class="view-heading">Lịch sử sửa chữa <span class="accent">· Repair history</span></h2>
+        <div class="panel listbox">
+          <div class="repairs-head" id="repairs-title">Sửa chữa gần đây</div>
+          <div id="repairs-list">
+            <div class="empty">Đang tải…</div>
+          </div>
+          <form id="repair-form" class="repair-form" hidden>
+            <div class="rf-title">Thêm phiếu thủ công cho máy <b id="rf-miner"></b></div>
+            <input id="rf-title" type="text" placeholder="Tiêu đề (vd: Thay board 2)" required>
+            <input id="rf-detail" type="text" placeholder="Chi tiết (không bắt buộc)">
+            <input id="rf-cost" type="number" min="0" step="1000" placeholder="Chi phí (VNĐ)">
+            <input id="rf-tech" type="text" placeholder="Kỹ thuật viên">
+            <button type="submit" class="btn-action">Lưu phiếu</button>
+            <span class="rf-msg" id="rf-msg"></span>
+          </form>
+        </div>
+        <p class="hint">Mở mục Máy đào rồi bấm <b>Lịch sử</b> ở một máy để xem riêng lịch sử của máy đó và thêm phiếu thủ công.</p>
+      </section>
+
+      <!-- SỰ KIỆN -------------------------------------------------------- -->
+      <section class="view" id="view-events">
+        <h2 class="view-heading">Sự kiện <span class="accent">· Events</span></h2>
+        <div class="panel listbox" id="events-list">
+          <div class="empty">Đang tải…</div>
+        </div>
+      </section>
+
+      <!-- CÀI ĐẶT -------------------------------------------------------- -->
+      <section class="view" id="view-settings">
+        <h2 class="view-heading">Cài đặt <span class="accent">· Settings</span></h2>
+
+        <div class="panel form-panel" id="agents-panel">
+          <h3>Agent &amp; trại</h3>
+          <p class="hint">Mỗi trại chạy một chương trình <b>agent</b> trong mạng nội bộ của trại:
+            agent quét các máy đào rồi tự đẩy số liệu lên cloud này. Tạo agent ngay tại đây —
+            không cần chạy lệnh <code>beesky cloud-add-agent</code> trên máy chủ nữa.
+            Key của agent <b>chỉ hiện một lần</b> lúc tạo; cloud chỉ lưu bản băm SHA-256.
+            Thu hồi một agent = key của nó bị vô hiệu ngay, agent ở trại sẽ không đẩy dữ liệu lên được nữa.</p>
+          <div class="key-panel" id="agent-key-panel" hidden>
+            <div class="key-warn">Key chỉ hiện MỘT lần này — copy lưu lại ngay, cloud chỉ giữ bản băm SHA-256 nên không xem lại được.</div>
+            <label>Agent key — trại <b id="ak-site"></b></label>
+            <div class="key-row">
+              <input id="ak-key" type="text" readonly>
+              <button class="btn-action" id="ak-copy" type="button">Copy key</button>
+            </div>
+            <label>Lệnh chạy agent tại trại — sửa dải IP cho đúng mạng của trại trước khi chạy:</label>
+            <div class="key-row">
+              <input id="ak-cmd" type="text">
+              <button class="btn-action" id="ak-copy-cmd" type="button">Copy lệnh</button>
+            </div>
+            <button class="btn-link" id="ak-done" type="button">Đã lưu key — đóng khung này</button>
+          </div>
+          <form id="agent-form" class="form-grid">
+            <label class="f">Tên trại mới
+              <input id="ag-site" type="text" placeholder="vd: Xưởng 2" required>
+            </label>
+            <div class="form-actions">
+              <button type="submit" class="btn-primary">Tạo agent</button>
+              <span class="form-msg" id="ag-msg"></span>
+            </div>
+          </form>
+          <h3 class="sub-head">Agent đã đăng ký</h3>
+          <div class="agents-box" id="agents-list">
+            <div class="empty">Đang tải…</div>
+          </div>
+        </div>
+
+        <div class="panel form-panel">
+          <h3>So sánh pool — cấu hình theo trại</h3>
+          <p class="hint">Khai báo API của pool để cloud đối chiếu hashrate của trại với số pool ghi nhận
+            (lệch kéo dài sẽ sinh sự kiện POOL_GAP). Adapter <b>generic</b> đọc một URL JSON bất kỳ,
+            lấy hashrate theo đường dẫn chấm — vd URL <code>https://pool.example.com/api/stats</code>,
+            đường dẫn <code>data.hashrate</code>. Preset <b>emcd</b> tự điền URL / đường dẫn mẫu của EMCD
+            khi để trống; hãy đối chiếu tài liệu API của EMCD rồi sửa lại cho đúng tài khoản của bạn.</p>
+          <form id="pool-form" class="form-grid">
+            <label class="f">Trại
+              <input id="pc-site" type="text" placeholder="Tên trại (vd: Xưởng 1)" required>
+            </label>
+            <label class="f">Adapter
+              <select id="pc-adapter">
+                <option value="generic">generic — JSON tuỳ ý</option>
+                <option value="emcd">emcd — preset EMCD</option>
+              </select>
+            </label>
+            <label class="f">URL API của pool
+              <input id="pc-url" type="text" placeholder="https://pool.example.com/api/stats">
+            </label>
+            <label class="f">Đường dẫn JSON (JSON path)
+              <input id="pc-path" type="text" placeholder="data.hashrate">
+            </label>
+            <label class="f">Đơn vị hashrate
+              <select id="pc-unit">
+                <option value="TH/s">TH/s</option>
+                <option value="GH/s">GH/s</option>
+                <option value="PH/s">PH/s</option>
+              </select>
+            </label>
+            <label class="f">Lọc worker (tuỳ chọn)
+              <input id="pc-worker" type="text" placeholder="Để trống = mọi worker">
+            </label>
+            <label class="f">Ngưỡng lệch báo động (%)
+              <input id="pc-gap" type="number" min="0" step="0.5" value="10">
+            </label>
+            <label class="f f-wide">Headers (JSON, tuỳ chọn)
+              <textarea id="pc-headers" rows="3" placeholder='{"Authorization": "Bearer …"}'></textarea>
+            </label>
+            <p class="hint f-wide">Giá trị headers là bí mật (API key của pool): cloud chỉ lưu để gọi pool,
+              <b>không bao giờ hiển thị lại</b> — phần “Cấu hình hiện tại” bên dưới chỉ liệt kê <i>tên</i> header
+              đã đặt. Để trống ô này khi lưu = giữ nguyên headers đã lưu trước đó; muốn thay thì nhập lại JSON mới.</p>
+            <div class="form-actions f-wide">
+              <button type="submit" class="btn-primary">Lưu cấu hình pool</button>
+              <span class="form-msg" id="pc-msg"></span>
+            </div>
+          </form>
+          <h3 class="sub-head">Cấu hình hiện tại</h3>
+          <div id="pool-config-list">
+            <div class="empty">Đang tải…</div>
+          </div>
+        </div>
+
+        <div class="panel form-panel">
+          <h3>Giá điện</h3>
+          <p class="hint">Dùng để ước tính chi phí trong mục Điện năng.</p>
+          <form id="price-form" class="form-grid">
+            <label class="f">Giá điện (VNĐ / kWh)
+              <input id="st-price" type="number" min="0" step="10" required>
+            </label>
+            <div class="form-actions">
+              <button type="submit" class="btn-primary">Lưu giá điện</button>
+              <span class="form-msg" id="st-msg"></span>
+            </div>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <footer>BeeSky Cloud v{{VERSION}} — dữ liệu tự làm mới mỗi 10 giây · Agent tại trại quét &amp; đẩy lên, lệnh từ xa đi qua agent</footer>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+let selectedSite = "";
+let selectedMiner = null; // {site, ip} — drives the repair-history view
+
+// -- view switching -------------------------------------------------------
+const VIEW_TITLES = {
+  overview: "Tổng quan", miners: "Máy đào", heatmap: "Bản đồ nhiệt",
+  energy: "Điện năng", repairs: "Lịch sử sửa chữa", events: "Sự kiện",
+  settings: "Cài đặt"
+};
+function switchView(name) {
+  document.querySelectorAll(".nav-item").forEach((b) =>
+    b.classList.toggle("active", b.getAttribute("data-view") === name));
+  document.querySelectorAll(".view").forEach((v) =>
+    v.classList.toggle("active", v.id === "view-" + name));
+  $("view-title").textContent = VIEW_TITLES[name] || name;
+  window.scrollTo(0, 0);
+}
+document.querySelectorAll(".nav-item").forEach((b) =>
+  b.addEventListener("click", () => switchView(b.getAttribute("data-view"))));
+$("events-all-btn").addEventListener("click", () => switchView("events"));
+
+// -- heat map (v0.8) ------------------------------------------------------
+// Records already carry max_temp_c, so tiles render purely client-side
+// from the /api/miners payload. Colour scale by max temp (°C):
+//   < 60 green-dark · 60-70 yellow-green · 70-80 amber · 80-90 orange
+//   >= 90 red · offline grey · problem miners get a red border.
+function heatColor(t) {
+  if (t === null || t === undefined) return "#2c2c2c";
+  if (t < 60) return "#14532d";
+  if (t < 70) return "#4a5d23";
+  if (t < 80) return "#7a5a12";
+  if (t < 90) return "#8a4512";
+  return "#8a1f1a";
+}
+function ipSortKey(ip) {
+  return String(ip || "").split(".").map((p) => parseInt(p, 10) || 0);
+}
+function cmpIp(a, b) {
+  const ka = ipSortKey(a), kb = ipSortKey(b);
+  for (let i = 0; i < 4; i++) { if (ka[i] !== kb[i]) return ka[i] - kb[i]; }
+  return 0;
+}
+function minerOffline(m) {
+  if (m.online === false) return true;
+  return (m.problems || []).some((p) => p.code === "FETCH_ERROR");
+}
+function heatTile(m) {
+  const offline = minerOffline(m);
+  const problems = (m.problems || []).length;
+  const lastOctet = String(m.ip || "?").split(".").pop();
+  const temp = (m.max_temp_c === null || m.max_temp_c === undefined)
+    ? "–" : m.max_temp_c.toFixed(0) + " °C";
+  const ths = fmtRate0(m);
+  const tip = (m.ip || "") + " · " + (m.model || "") + " · " +
+    (offline ? "Mất kết nối" : (m.status === "OK" ? "OK" : "Cần kiểm tra")) +
+    (problems ? " · " + problems + " vấn đề" : "");
+  const cls = "tile" + (offline ? " offline" : "")
+    + (!offline && m.status !== "OK" ? " problem" : "");
+  const bg = offline ? "" : ' style="background:' + heatColor(m.max_temp_c) + '"';
+  return '<div class="' + cls + '"' + bg + ' title="' + esc(tip) + '">' +
+    '<div class="octet">' + esc(lastOctet) + "</div>" +
+    '<div class="tt">' + (offline ? "Offline" : temp) + "</div>" +
+    '<div class="hh">' + esc(m.ip || "") + " · " + ths + "</div></div>";
+}
+function renderHeatmap(miners) {
+  const wrap = $("heatmap");
+  if (!miners.length) {
+    wrap.innerHTML = '<div class="empty">Chưa có số liệu — agent tại trại chưa đẩy lên.</div>';
+    return;
+  }
+  const groups = new Map();
+  miners.forEach((m) => {
+    const site = m.site || "";
+    if (!groups.has(site)) groups.set(site, []);
+    groups.get(site).push(m);
+  });
+  wrap.innerHTML = Array.from(groups.entries()).map(([site, list]) =>
+    '<div class="heat-group">' +
+    (site ? '<div class="heat-site">Trại: ' + esc(site) + "</div>" : "") +
+    '<div class="heatmap">' +
+    list.slice().sort((a, b) => cmpIp(a.ip, b.ip)).map(heatTile).join("") +
+    "</div></div>").join("");
+}
+
+function fmtThs(v) {
+  if (v === null || v === undefined) return "–";
+  return v.toFixed(2) + " TH/s";
+}
+// Native-rate display (v0.20): records carry rate_value + rate_unit;
+// pre-v0.20 records fall back to their ths as TH/s. Totals group per
+// unit — a mixed fleet never sums unlike quantities together.
+function rateOf(m) {
+  if (m.rate_value !== null && m.rate_value !== undefined && m.rate_unit)
+    return [m.rate_value, m.rate_unit];
+  if (m.ths !== null && m.ths !== undefined) return [m.ths, "TH/s"];
+  return null;
+}
+function fmtRate(m) {
+  const r = rateOf(m);
+  return r ? r[0].toFixed(2) + " " + r[1] : "–";
+}
+function fmtRate0(m) {
+  const r = rateOf(m);
+  return r ? r[0].toFixed(0) + " " + r[1] : "–";
+}
+const RATE_UNIT_ORDER = ["TH/s", "GH/s", "MH/s", "ksol/s", "sol/s"];
+function fmtTotalsHtml(groups) {
+  const keys = RATE_UNIT_ORDER.filter((u) => groups.has(u));
+  if (!keys.length) return null;
+  return keys.map((u) => groups.get(u).toFixed(2) + " <small>" + u + "</small>").join(" · ");
+}
+function fmtSiteRates(s) {
+  if (Array.isArray(s.rate_totals) && s.rate_totals.length) {
+    if (s.rate_totals.length === 1)
+      return s.rate_totals[0].value.toFixed(2) + " " + s.rate_totals[0].unit;
+    return s.rate_totals.map((g) => g.value.toLocaleString("en-US",
+      { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " " + g.unit).join(" · ");
+  }
+  return (s.total_ths || 0).toFixed(2) + " TH/s";
+}
+function esc(s) {
+  return String(s === null || s === undefined ? "" : s)
+    .replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function siteParam() {
+  return selectedSite ? "?site=" + encodeURIComponent(selectedSite) : "";
+}
+
+async function refreshSites() {
+  try {
+    const r = await fetch("/api/sites");
+    if (r.status === 401) { location.href = "/login"; return; }
+    const data = await r.json();
+    if (data.generated_at) $("last-update").textContent = data.generated_at;
+    const sites = data.sites || [];
+    let totalMiners = 0, totalProblems = 0;
+    const totalGroups = new Map();
+    sites.forEach((s) => {
+      totalMiners += s.miner_count;
+      totalProblems += s.problem_count;
+      if (Array.isArray(s.rate_totals) && s.rate_totals.length) {
+        s.rate_totals.forEach((g) => totalGroups.set(
+          g.unit, (totalGroups.get(g.unit) || 0) + g.value));
+      } else if (s.total_ths) {
+        totalGroups.set("TH/s", (totalGroups.get("TH/s") || 0) + s.total_ths);
+      }
+    });
+    $("card-sites").textContent = sites.length;
+    $("card-total").textContent = totalMiners;
+    $("card-hashrate").innerHTML =
+      fmtTotalsHtml(totalGroups) || "0.00 <small>TH/s</small>";
+    $("card-problems").textContent = totalProblems;
+    $("card-problems-wrap").classList.toggle("alert", totalProblems > 0);
+
+    const sel = $("site-filter");
+    const known = Array.from(sel.options).map((o) => o.value);
+    sites.forEach((s) => {
+      if (!known.includes(s.site)) {
+        const opt = document.createElement("option");
+        opt.value = s.site; opt.textContent = s.site;
+        sel.appendChild(opt);
+      }
+    });
+    if (selectedSite && !sites.some((s) => s.site === selectedSite)) {
+      selectedSite = ""; sel.value = "";
+    }
+
+    $("sites-grid").innerHTML = sites.length
+      ? sites.map((s) =>
+          '<div class="site-card' + (selectedSite === s.site ? " selected" : "") +
+          '" data-site="' + esc(s.site) + '">' +
+          '<div class="name"><span class="dot' + (s.online ? "" : " stale") + '"></span>' +
+          esc(s.site) + "</div>" +
+          '<div class="stats">' +
+          (s.online ? "Đang trực tuyến" : "Mất tín hiệu") +
+          " · Báo cáo cuối: " + esc(s.last_seen || "chưa có") + "<br>" +
+          "Số máy: <b>" + s.miner_count + "</b> · Hashrate: <b>" + fmtSiteRates(s) + "</b><br>" +
+          'Máy có vấn đề: ' + (s.problem_count
+            ? '<span class="prob">' + s.problem_count + "</span>" : "<b>0</b>") +
+          " · Nhiệt độ cao nhất: <b>" + (s.max_temp === null || s.max_temp === undefined ? "–" : s.max_temp.toFixed(0) + " °C") + "</b>" +
+          "</div></div>").join("")
+      : '<div class="empty">Chưa có trại nào — mở mục <b>Cài đặt → Agent &amp; trại</b> để tạo agent ngay trên web (hoặc dùng lệnh <b>beesky cloud-add-agent</b>) rồi chạy agent tại trại.</div>';
+    document.querySelectorAll(".site-card").forEach((card) => {
+      card.addEventListener("click", () => {
+        selectedSite = card.getAttribute("data-site");
+        $("site-filter").value = selectedSite;
+        $("pc-site").value = selectedSite;
+        clearMinerSelection();
+        refreshAll();
+      });
+    });
+  } catch (e) { /* giữ nguyên dữ liệu cũ khi poll lỗi */ }
+}
+
+async function refreshMiners() {
+  try {
+    const r = await fetch("/api/miners" + siteParam());
+    const data = await r.json();
+    const miners = data.miners || [];
+    const rows = miners.map((m) => {
+      const fans = (m.fans_rpm || []).join(" / ") || "–";
+      const chips = m.chips_total ? (m.chips_alive + "/" + m.chips_total) : "–";
+      const temp = (m.max_temp_c === null || m.max_temp_c === undefined) ? "–" : m.max_temp_c.toFixed(0) + " °C";
+      const statusHtml = m.status === "OK"
+        ? '<span class="pill ok">OK</span>'
+        : '<span class="pill check">CẦN KIỂM TRA</span>';
+      const probHtml = (m.problems && m.problems.length)
+        ? '<div class="problems">' + m.problems.map((p) => "• " + esc(p.detail)).join("<br>") + "</div>"
+        : "";
+      const isSel = selectedMiner && selectedMiner.site === (m.site || "")
+        && selectedMiner.ip === m.ip;
+      return '<tr class="miner-row' + (isSel ? " selected" : "") +
+        '" data-site="' + esc(m.site || "") + '" data-ip="' + esc(m.ip) + '">' +
+        "<td>" + esc(m.site || "–") + "</td>" +
+        "<td>" + esc(m.ip) + "</td>" +
+        "<td>" + esc(m.model) + "</td>" +
+        "<td>" + esc(m.source || "–") + "</td>" +
+        "<td>" + fmtRate(m) + "</td>" +
+        "<td>" + chips + "</td>" +
+        "<td>" + temp + "</td>" +
+        "<td>" + esc(fans) + "</td>" +
+        "<td>" + statusHtml + probHtml + "</td>" +
+        '<td><button class="btn-action btn-reboot" data-site="' + esc(m.site || "") +
+        '" data-ip="' + esc(m.ip) + '">Khởi động lại</button> ' +
+        '<button class="btn-action btn-history" data-site="' + esc(m.site || "") +
+        '" data-ip="' + esc(m.ip) + '">Lịch sử</button></td></tr>';
+    });
+    $("miners-body").innerHTML = rows.length
+      ? rows.join("")
+      : '<tr><td colspan="10" class="empty">Chưa có số liệu — agent tại trại chưa đẩy lên hoặc trại được chọn chưa có máy.</td></tr>';
+    document.querySelectorAll(".btn-reboot").forEach((btn) => {
+      btn.addEventListener("click", (ev) => { ev.stopPropagation(); sendReboot(btn); });
+    });
+    document.querySelectorAll(".btn-history").forEach((btn) => {
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        selectMiner(btn.getAttribute("data-site"), btn.getAttribute("data-ip"));
+        switchView("repairs");
+      });
+    });
+    document.querySelectorAll("tr.miner-row").forEach((row) => {
+      row.addEventListener("click", () =>
+        selectMiner(row.getAttribute("data-site"), row.getAttribute("data-ip")));
+    });
+    renderHeatmap(miners);
+  } catch (e) { /* giữ nguyên dữ liệu cũ khi poll lỗi */ }
+}
+
+function selectMiner(site, ip) {
+  selectedMiner = { site: site || "", ip: ip };
+  document.querySelectorAll("tr.miner-row").forEach((row) => {
+    row.classList.toggle("selected",
+      row.getAttribute("data-site") === selectedMiner.site
+      && row.getAttribute("data-ip") === selectedMiner.ip);
+  });
+  $("repair-form").hidden = false;
+  $("rf-miner").textContent = ip + (site ? " (" + site + ")" : "");
+  $("rf-msg").textContent = "";
+  refreshRepairs();
+}
+
+async function sendReboot(btn) {
+  const site = btn.getAttribute("data-site");
+  const ip = btn.getAttribute("data-ip");
+  if (!window.confirm("Khởi động lại máy " + ip + " (trại " + site + ")?")) return;
+  btn.disabled = true;
+  try {
+    const r = await fetch("/api/commands", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ site: site, ip: ip, type: "reboot", payload: {} })
+    });
+    if (r.status === 401) { location.href = "/login"; return; }
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      window.alert("Không gửi được lệnh: " + (err.error || ("HTTP " + r.status)));
+    }
+  } catch (e) {
+    window.alert("Không gửi được lệnh: " + e);
+  } finally {
+    btn.disabled = false;
+    refreshCommands();
+  }
+}
+
+const SEV_LABEL = { info: "Thông tin", warning: "Cảnh báo", major: "Nghiêm trọng", critical: "Khẩn cấp" };
+const TYPE_LABEL = {
+  OFFLINE: "Mất kết nối", BACK_ONLINE: "Đã kết nối lại",
+  HASHRATE_DROP: "Sụt hashrate", OVER_TEMP: "Quá nhiệt",
+  CHIPS_LOST: "Mất chip", CHAIN_DOWN: "Board ngắt",
+  POOL_GAP: "Lệch pool"
+};
+
+function eventHtml(ev) {
+  return '<div class="event">' +
+    '<span class="time">' + esc(ev.time || "") + "</span>" +
+    '<span class="sev ' + esc(ev.severity) + '">' + esc(SEV_LABEL[ev.severity] || ev.severity) + "</span>" +
+    '<span class="site">' + esc(ev.site || "") + "</span>" +
+    '<span class="who">' + esc(ev.ip) + " · " + esc(TYPE_LABEL[ev.type] || ev.type) + "</span>" +
+    '<span class="detail">' + esc(ev.detail) + "</span>" +
+    "</div>";
+}
+
+async function refreshEvents() {
+  try {
+    const r = await fetch("/api/events?n=50" + (selectedSite ? "&site=" + encodeURIComponent(selectedSite) : ""));
+    const data = await r.json();
+    const events = data.events || [];
+    $("events-list").innerHTML = events.length
+      ? events.map(eventHtml).join("")
+      : '<div class="empty">Chưa có sự kiện nào.</div>';
+    $("events-recent").innerHTML = events.length
+      ? events.slice(0, 8).map(eventHtml).join("")
+      : '<div class="empty">Chưa có sự kiện nào.</div>';
+  } catch (e) { /* giữ nguyên dữ liệu cũ khi poll lỗi */ }
+}
+
+const CMD_STATUS_LABEL = { pending: "Chờ", sent: "Đang chạy", done: "Xong", failed: "Lỗi" };
+const CMD_TYPE_LABEL = { reboot: "Khởi động lại", switch_pool: "Đổi pool" };
+
+async function refreshCommands() {
+  try {
+    const r = await fetch("/api/commands?n=30" + (selectedSite ? "&site=" + encodeURIComponent(selectedSite) : ""));
+    if (r.status === 401) { location.href = "/login"; return; }
+    const data = await r.json();
+    const commands = data.commands || [];
+    $("commands-list").innerHTML = commands.length
+      ? commands.map((c) =>
+          '<div class="cmd">' +
+          '<span class="time">' + esc(c.created_at || "") + "</span>" +
+          '<span class="cmdstat ' + esc(c.status) + '">' + esc(CMD_STATUS_LABEL[c.status] || c.status) + "</span>" +
+          '<span class="site">' + esc(c.site || "") + "</span>" +
+          '<span class="who">' + esc(c.ip) + " · " + esc(CMD_TYPE_LABEL[c.type] || c.type) + "</span>" +
+          (c.result ? '<span class="result">' + esc(c.result) + "</span>" : "") +
+          "</div>").join("")
+      : '<div class="empty">Chưa có lệnh nào — bấm “Khởi động lại” ở mục Máy đào để gửi lệnh đầu tiên.</div>';
+  } catch (e) { /* giữ nguyên dữ liệu cũ khi poll lỗi */ }
+}
+
+function repairHtml(rp) {
+  const kindBadge = rp.kind === "manual"
+    ? '<span class="kind manual">Thủ công</span>'
+    : '<span class="kind auto">Tự động</span>';
+  const title = rp.kind === "auto_event"
+    ? (TYPE_LABEL[rp.title] || rp.title) : rp.title;
+  let extra = "";
+  if (rp.cost_vnd !== null && rp.cost_vnd !== undefined) {
+    extra += " · " + Number(rp.cost_vnd).toLocaleString("vi-VN") + " ₫";
+  }
+  if (rp.technician) extra += " · KTV: " + esc(rp.technician);
+  return '<div class="repair">' +
+    '<span class="time">' + esc(rp.created_at || "") + "</span>" +
+    kindBadge +
+    '<span class="site">' + esc(rp.site || "") + "</span>" +
+    '<span class="who">' + esc(rp.ip) + " · " + esc(title) + "</span>" +
+    (rp.detail ? '<span class="detail">' + esc(rp.detail) + "</span>" : "") +
+    (extra ? '<span class="detail">' + extra + "</span>" : "") +
+    "</div>";
+}
+
+async function refreshRepairs() {
+  try {
+    let url, title;
+    if (selectedMiner) {
+      url = "/api/repairs?n=50&site=" + encodeURIComponent(selectedMiner.site)
+        + "&ip=" + encodeURIComponent(selectedMiner.ip);
+      title = "Lịch sử sửa chữa — " + selectedMiner.ip
+        + (selectedMiner.site ? " · " + selectedMiner.site : "");
+    } else {
+      url = "/api/repairs?n=20"
+        + (selectedSite ? "&site=" + encodeURIComponent(selectedSite) : "");
+      title = "Sửa chữa gần đây"
+        + (selectedSite ? " — trại " + selectedSite : " — tất cả các trại")
+        + " · bấm vào một máy để xem riêng";
+    }
+    const r = await fetch(url);
+    if (r.status === 401) { location.href = "/login"; return; }
+    const data = await r.json();
+    $("repairs-title").textContent = title;
+    const repairs = data.repairs || [];
+    $("repairs-list").innerHTML = repairs.length
+      ? repairs.map(repairHtml).join("")
+      : '<div class="empty">Chưa có phiếu sửa chữa nào.</div>';
+  } catch (e) { /* giữ nguyên dữ liệu cũ khi poll lỗi */ }
+}
+
+$("repair-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  if (!selectedMiner) return;
+  const costRaw = $("rf-cost").value.trim();
+  const payload = {
+    site: selectedMiner.site, ip: selectedMiner.ip,
+    title: $("rf-title").value.trim(),
+    detail: $("rf-detail").value.trim() || null,
+    cost_vnd: costRaw ? parseInt(costRaw, 10) : null,
+    technician: $("rf-tech").value.trim() || null
+  };
+  if (!payload.title) return;
+  try {
+    const r = await fetch("/api/repairs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (r.status === 401) { location.href = "/login"; return; }
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      $("rf-msg").textContent = "Lỗi: " + (err.error || ("HTTP " + r.status));
+      return;
+    }
+    $("rf-title").value = ""; $("rf-detail").value = "";
+    $("rf-cost").value = ""; $("rf-tech").value = "";
+    $("rf-msg").textContent = "Đã lưu phiếu.";
+    refreshRepairs();
+  } catch (e) {
+    $("rf-msg").textContent = "Lỗi: " + e;
+  }
+});
+
+// -- farm vs pool comparison (v0.9) ------------------------------------
+function gapBadge(gap) {
+  if (gap === null || gap === undefined) return "";
+  const cls = gap > 10 ? "bad" : (gap > 5 ? "warn" : "fine");
+  const sign = gap > 0 ? "−" : "+";
+  return '<span class="gap ' + cls + '">Lệch ' + sign + Math.abs(gap).toFixed(1) + "%</span>";
+}
+function poolRowHtml(site, latest) {
+  if (!latest) {
+    return '<div class="poolrow"><span class="site">' + esc(site) + "</span>" +
+      '<span class="when">Đã cấu hình pool — đang chờ lần kiểm tra đầu tiên…</span></div>';
+  }
+  return '<div class="poolrow"><span class="site">' + esc(site) + "</span>" +
+    '<span class="num">Trại: ' + latest.farm_ths.toFixed(2) + " <small>TH/s</small></span>" +
+    '<span class="num">Pool: ' + latest.pool_ths.toFixed(2) + " <small>TH/s</small></span>" +
+    gapBadge(latest.gap_pct) +
+    '<span class="when">Kiểm tra lúc ' + esc(latest.time || "") + "</span></div>";
+}
+async function refreshPool() {
+  try {
+    const r = await fetch("/api/pool" + siteParam());
+    if (r.status === 401) { location.href = "/login"; return; }
+    const data = await r.json();
+    const panel = $("pool-panel");
+    if (selectedSite) {
+      const cfg = await (await fetch("/api/pool-config?site=" + encodeURIComponent(selectedSite))).json();
+      if (!(cfg.configs || []).length) {
+        panel.innerHTML = '<div class="empty">Chưa cấu hình pool cho trại này — ' +
+          "mở mục Cài đặt để khai báo API của pool cho trại.</div>";
+        return;
+      }
+      panel.innerHTML = poolRowHtml(selectedSite, data.latest);
+    } else {
+      const pools = data.pools || [];
+      panel.innerHTML = pools.length
+        ? pools.map((p) => poolRowHtml(p.site, p.latest)).join("")
+        : '<div class="empty">Chưa có trại nào cấu hình pool — mở mục Cài đặt để khai báo API của pool.</div>';
+    }
+  } catch (e) { /* giữ nguyên dữ liệu cũ khi poll lỗi */ }
+}
+
+// -- energy report (v0.9) ----------------------------------------------
+function fmtVnd(v) {
+  return Number(v || 0).toLocaleString("vi-VN") + " ₫";
+}
+async function refreshEnergy() {
+  try {
+    const r = await fetch("/api/energy?days=7" + (selectedSite ? "&site=" + encodeURIComponent(selectedSite) : ""));
+    if (r.status === 401) { location.href = "/login"; return; }
+    const data = await r.json();
+    const panel = $("energy-panel");
+    if (!data.total_kwh) {
+      panel.innerHTML = '<div class="empty">Chưa có dữ liệu điện — nguồn máy chưa báo ' +
+        "công suất (W) hoặc agent chưa đẩy đủ hai bản ghi liên tiếp để tích lũy. " +
+        "Máy chạy VNish/HashCore báo công suất qua API; máy gốc đời cũ thường không có số này.</div>";
+      return;
+    }
+    const dayRows = (data.per_day || []).slice().reverse().map((d) =>
+      "<tr><td>" + esc(d.day) + "</td><td>" + d.kwh.toFixed(2) + " kWh</td><td>" +
+      fmtVnd(d.est_cost_vnd) + "</td></tr>").join("");
+    const top = (data.per_miner || []).slice(0, 5).map((m) =>
+      "<tr><td>" + esc(m.site || "") + "</td><td>" + esc(m.ip) + "</td><td>" +
+      m.kwh.toFixed(2) + " kWh</td><td>" + fmtVnd(m.est_cost_vnd) + "</td></tr>").join("");
+    panel.innerHTML =
+      '<div class="energy-sum">Hôm nay: <b>' + data.today.kwh.toFixed(2) + " kWh</b>" +
+      " · ước tính <b>" + fmtVnd(data.today.est_cost_vnd) + "</b>" +
+      ' <span style="color:var(--muted);font-size:12px">(giá điện ' +
+      fmtVnd(data.electricity_price_vnd_kwh) + "/kWh · 7 ngày: " +
+      data.total_kwh.toFixed(2) + " kWh ≈ " + fmtVnd(data.total_est_cost_vnd) + ")</span></div>" +
+      '<table class="energy"><thead><tr><th>Ngày</th><th>Điện năng</th><th>Ước tính</th></tr></thead>' +
+      "<tbody>" + dayRows + "</tbody></table>" +
+      (top ? '<table class="energy"><thead><tr><th>Trại</th><th>Máy tốn điện nhất (7 ngày)</th><th>Điện năng</th><th>Ước tính</th></tr></thead>' +
+        "<tbody>" + top + "</tbody></table>" : "");
+  } catch (e) { /* giữ nguyên dữ liệu cũ khi poll lỗi */ }
+}
+
+// -- farm hashrate history chart (v0.12) ---------------------------------
+function fmtClock(ts) {
+  const d = new Date(ts * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  return p(d.getHours()) + ":" + p(d.getMinutes());
+}
+function drawChart(points) {
+  const wrap = $("chart-wrap"), meta = $("chart-meta");
+  let series;
+  if (selectedSite) {
+    series = points.map((p) => ({ ts: p.ts, ths: p.total_ths }));
+  } else {
+    // No site filter: the endpoint returns every site's rows — sum the
+    // per-minute buckets so the chart shows the whole fleet.
+    const buckets = new Map();
+    points.forEach((p) => {
+      const key = Math.floor(p.ts / 60);
+      const cur = buckets.get(key) || { ts: p.ts, ths: 0 };
+      cur.ths += p.total_ths;
+      cur.ts = Math.max(cur.ts, p.ts);
+      buckets.set(key, cur);
+    });
+    series = Array.from(buckets.values()).sort((a, b) => a.ts - b.ts);
+  }
+  if (series.length < 2) {
+    wrap.innerHTML = '<div class="empty">Chưa đủ dữ liệu — cần agent chạy thêm vài phút để vẽ biểu đồ hashrate.</div>';
+    meta.textContent = series.length
+      ? "Hiện tại: " + series[series.length - 1].ths.toFixed(2) + " TH/s"
+      : "";
+    return;
+  }
+  const W = 720, H = 200, PADL = 6, PADR = 6, PADT = 12, PADB = 6;
+  const t0 = series[0].ts, t1 = series[series.length - 1].ts;
+  let rawMn = Infinity, rawMx = -Infinity;
+  series.forEach((s) => {
+    rawMn = Math.min(rawMn, s.ths); rawMx = Math.max(rawMx, s.ths);
+  });
+  let mn = rawMn, mx = rawMx;
+  if (mx - mn < 1) { mx += 0.5; mn -= 0.5; }
+  const X = (ts) => PADL + (ts - t0) / Math.max(1, t1 - t0) * (W - PADL - PADR);
+  const Y = (v) => PADT + (mx - v) / (mx - mn) * (H - PADT - PADB);
+  const line = series.map((s, i) =>
+    (i ? "L" : "M") + X(s.ts).toFixed(1) + "," + Y(s.ths).toFixed(1)).join(" ");
+  const area = line + " L" + X(t1).toFixed(1) + "," + (H - PADB) +
+    " L" + X(t0).toFixed(1) + "," + (H - PADB) + " Z";
+  const last = series[series.length - 1];
+  wrap.innerHTML = '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" role="img" aria-label="Biểu đồ hashrate 24 giờ">' +
+    '<path d="' + area + '" fill="#F5D800" fill-opacity="0.12"/>' +
+    '<path d="' + line + '" fill="none" stroke="#F5D800" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>';
+  meta.textContent = "Thấp nhất " + rawMn.toFixed(2) + " · Cao nhất " + rawMx.toFixed(2) +
+    " · Hiện tại " + last.ths.toFixed(2) + " TH/s · " +
+    fmtClock(t0) + " → " + fmtClock(t1);
+}
+async function refreshHistory() {
+  try {
+    const r = await fetch("/api/history?hours=24" + (selectedSite ? "&site=" + encodeURIComponent(selectedSite) : ""));
+    if (r.status === 401) { location.href = "/login"; return; }
+    const data = await r.json();
+    drawChart(data.points || []);
+  } catch (e) { /* giữ nguyên biểu đồ cũ khi poll lỗi */ }
+}
+
+// -- agent management (v0.13) ----------------------------------------------
+function agentRowHtml(a) {
+  let status;
+  if (a.revoked) {
+    status = '<span class="revoked-tag">Đã thu hồi</span>';
+  } else if (a.online) {
+    status = '<span class="dot"></span><span>Đang trực tuyến</span>';
+  } else {
+    status = '<span class="dot stale"></span><span>Mất tín hiệu</span>';
+  }
+  const action = a.revoked ? ""
+    : '<button class="btn-danger btn-revoke" type="button" data-id="' + a.id +
+      '" data-site="' + esc(a.site) + '">Thu hồi</button>';
+  return '<div class="agentrow">' + status +
+    '<span class="site-name">' + esc(a.site) + "</span>" +
+    '<span class="meta">Tạo lúc ' + esc(a.created_at || "–") +
+    " · Online cuối: " + esc(a.last_seen || "chưa có") + "</span>" +
+    '<span class="spacer"></span>' + action + "</div>";
+}
+async function refreshAgents() {
+  try {
+    const r = await fetch("/api/agents");
+    if (r.status === 401) { location.href = "/login"; return; }
+    const data = await r.json();
+    const agents = data.agents || [];
+    $("agents-list").innerHTML = agents.length
+      ? agents.map(agentRowHtml).join("")
+      : '<div class="empty">Chưa có agent nào — điền tên trại ở biểu mẫu phía trên để tạo agent đầu tiên.</div>';
+    document.querySelectorAll(".btn-revoke").forEach((btn) => {
+      btn.addEventListener("click", () => revokeAgent(btn));
+    });
+  } catch (e) { /* giữ nguyên danh sách cũ khi poll lỗi */ }
+}
+
+async function revokeAgent(btn) {
+  const id = parseInt(btn.getAttribute("data-id"), 10);
+  const site = btn.getAttribute("data-site");
+  if (!window.confirm("Thu hồi agent của trại \"" + site + "\"?\n" +
+      "Key hiện tại sẽ bị vô hiệu NGAY — agent ở trại sẽ không đẩy dữ liệu lên được nữa. " +
+      "Muốn trại hoạt động lại phải tạo agent mới và chạy lại với key mới.")) return;
+  btn.disabled = true;
+  try {
+    const r = await fetch("/api/agents/revoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: id })
+    });
+    if (r.status === 401) { location.href = "/login"; return; }
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      window.alert("Không thu hồi được: " + (err.error || ("HTTP " + r.status)));
+    }
+  } catch (e) {
+    window.alert("Không thu hồi được: " + e);
+  } finally {
+    btn.disabled = false;
+    refreshAgents();
+    refreshSites();
+  }
+}
+
+function copyField(input, btn) {
+  const done = () => {
+    const old = btn.textContent;
+    btn.textContent = "Đã copy ✓";
+    setTimeout(() => { btn.textContent = old; }, 1600);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(input.value).then(done, () => {
+      input.select();
+      try { document.execCommand("copy"); } catch (e) { /* chọn sẵn để copy tay */ }
+      done();
+    });
+  } else {
+    input.select();
+    try { document.execCommand("copy"); } catch (e) { /* chọn sẵn để copy tay */ }
+    done();
+  }
+}
+$("ak-copy").addEventListener("click", () => copyField($("ak-key"), $("ak-copy")));
+$("ak-copy-cmd").addEventListener("click", () => copyField($("ak-cmd"), $("ak-copy-cmd")));
+$("ak-done").addEventListener("click", () => { $("agent-key-panel").hidden = true; });
+
+$("agent-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const msg = $("ag-msg");
+  msg.classList.remove("err");
+  const site = $("ag-site").value.trim();
+  if (!site) { msg.textContent = "Chưa nhập tên trại."; msg.classList.add("err"); return; }
+  try {
+    const r = await fetch("/api/agents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ site: site })
+    });
+    if (r.status === 401) { location.href = "/login"; return; }
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      msg.textContent = "Lỗi: " + (err.error || ("HTTP " + r.status));
+      msg.classList.add("err");
+      return;
+    }
+    const data = await r.json();
+    $("ag-site").value = "";
+    msg.textContent = "Đã tạo agent cho trại " + site + " — copy key bên dưới ngay.";
+    $("ak-site").textContent = site;
+    $("ak-key").value = data.key;
+    $("ak-cmd").value = "beesky agent 192.168.1.10-192.168.1.60 --cloud " +
+      location.origin + " --key " + data.key + " --site \"" + site + "\"";
+    $("agent-key-panel").hidden = false;
+    refreshAgents();
+    refreshSites();
+  } catch (e) {
+    msg.textContent = "Lỗi: " + e;
+    msg.classList.add("err");
+  }
+});
+
+// -- settings (v0.12): pool configs + electricity price --------------------
+let priceLoaded = false;
+function cfgHtml(c) {
+  const headers = c.headers_set
+    ? "đã đặt: " + esc((c.header_names || []).join(", ") || "—")
+    : "chưa đặt";
+  return '<div class="cfgrow">' +
+    '<span class="site">' + esc(c.site) + "</span>" +
+    "<span>" + esc(c.adapter) + "</span>" +
+    '<span class="cfg-url">' + esc(c.url || "—") + "</span>" +
+    "<span>path: " + esc(c.json_path || "—") + "</span>" +
+    "<span>" + esc(c.unit || "") + "</span>" +
+    (c.worker_filter ? "<span>worker: " + esc(c.worker_filter) + "</span>" : "") +
+    "<span>ngưỡng lệch: " + c.notify_gap_pct + "%</span>" +
+    "<span>Headers " + headers + "</span>" +
+    "</div>";
+}
+async function refreshPoolConfigs() {
+  try {
+    const r = await fetch("/api/pool-config");
+    if (r.status === 401) { location.href = "/login"; return; }
+    const data = await r.json();
+    const configs = data.configs || [];
+    $("pool-config-list").innerHTML = configs.length
+      ? configs.map(cfgHtml).join("")
+      : '<div class="empty">Chưa có cấu hình pool nào — điền biểu mẫu phía trên để thêm.</div>';
+    if (!priceLoaded) {
+      const s = await (await fetch("/api/settings")).json();
+      if (s && s.electricity_price_vnd_kwh !== undefined) {
+        $("st-price").value = s.electricity_price_vnd_kwh;
+        priceLoaded = true;
+      }
+    }
+  } catch (e) { /* giữ nguyên khi poll lỗi */ }
+}
+
+$("pool-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const msg = $("pc-msg");
+  msg.classList.remove("err");
+  const site = $("pc-site").value.trim();
+  if (!site) { msg.textContent = "Chưa nhập tên trại."; msg.classList.add("err"); return; }
+  let gap = parseFloat($("pc-gap").value);
+  if (isNaN(gap) || gap < 0) gap = 10;
+  const payload = {
+    site: site,
+    adapter: $("pc-adapter").value,
+    url: $("pc-url").value.trim(),
+    json_path: $("pc-path").value.trim(),
+    unit: $("pc-unit").value,
+    worker_filter: $("pc-worker").value.trim() || null,
+    notify_gap_pct: gap
+  };
+  const headersRaw = $("pc-headers").value.trim();
+  if (headersRaw) {
+    let parsed;
+    try { parsed = JSON.parse(headersRaw); }
+    catch (e) {
+      msg.textContent = "Headers chưa phải JSON hợp lệ — chưa lưu gì.";
+      msg.classList.add("err");
+      return;
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      msg.textContent = "Headers phải là một đối tượng JSON — chưa lưu gì.";
+      msg.classList.add("err");
+      return;
+    }
+    payload.headers = parsed;
+  }
+  try {
+    const r = await fetch("/api/pool-config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (r.status === 401) { location.href = "/login"; return; }
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      msg.textContent = "Lỗi: " + (err.error || ("HTTP " + r.status));
+      msg.classList.add("err");
+      return;
+    }
+    $("pc-headers").value = ""; // secrets are never shown back — clear the box
+    msg.textContent = "Đã lưu cấu hình pool cho trại " + site + ".";
+    refreshPoolConfigs();
+    refreshPool();
+  } catch (e) {
+    msg.textContent = "Lỗi: " + e;
+    msg.classList.add("err");
+  }
+});
+
+$("price-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const msg = $("st-msg");
+  msg.classList.remove("err");
+  const price = parseFloat($("st-price").value);
+  if (isNaN(price) || price < 0) {
+    msg.textContent = "Giá điện chưa hợp lệ.";
+    msg.classList.add("err");
+    return;
+  }
+  try {
+    const r = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ electricity_price_vnd_kwh: price })
+    });
+    if (r.status === 401) { location.href = "/login"; return; }
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      msg.textContent = "Lỗi: " + (err.error || ("HTTP " + r.status));
+      msg.classList.add("err");
+      return;
+    }
+    msg.textContent = "Đã lưu giá điện " + fmtVnd(price) + "/kWh.";
+    refreshEnergy();
+  } catch (e) {
+    msg.textContent = "Lỗi: " + e;
+    msg.classList.add("err");
+  }
+});
+
+async function refreshAll() {
+  await Promise.all([refreshSites(), refreshMiners(), refreshEvents(), refreshCommands(), refreshRepairs(), refreshPool(), refreshEnergy(), refreshHistory(), refreshPoolConfigs(), refreshAgents()]);
+}
+
+function clearMinerSelection() {
+  selectedMiner = null;
+  $("repair-form").hidden = true;
+}
+
+$("site-filter").addEventListener("change", () => {
+  selectedSite = $("site-filter").value;
+  $("pc-site").value = selectedSite;
+  clearMinerSelection();
+  refreshAll();
+});
+
+refreshAll();
+setInterval(refreshAll, 10000);
+</script>
+</body>
+</html>

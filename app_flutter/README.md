@@ -1,9 +1,9 @@
-# BeeSky App (Flutter) — stage 1
+# BeeSky App (Flutter)
 
 The Flutter rewrite of the BeeSky desktop app, stage 1 of the programme
-the owner approved on 2026-11-11 ("cú lớn"). The Tk app
-(`beesky/gui.py`) remains shipped and supported as the fallback; nothing
-about it changed.
+the owner approved on 2026-11-11 ("cú lớn"); the layout was redesigned
+in v0.22 (see "Layout" below). The Tk app (`beesky/gui.py`) remains
+shipped and supported as the fallback; nothing about it changed.
 
 ## Architecture: shell + sidecar
 
@@ -44,12 +44,29 @@ in stage 1; the Tk installers keep shipping unchanged.
   rate totals; the widget test drives splash → empty state → mock scan →
   auto-selected detail panel.
 
+## Layout (v0.22 — table-first)
+
+The v0.21 layout (header + scan card + 4 big stat tiles + table) was
+rejected by the owner after one run: the tiles ate the screen —
+"người ta muốn thấy máy đào" (people want to SEE THE MINERS). The
+structure now mirrors the HashCore Toolkit, keeping BeeSky's palette:
+a 228px left sidebar (logo, "BeeSky", "Quản lý máy đào", nav, version
++ sidecar status dot at the foot), a slim 52px header with the view
+title and the fleet stats as compact chips in ONE row (total / OK /
+check / error / grouped hashrate / max temp), one slim scan bar
+(target pre-filled from sysinfo, user/password, Quét ngay, Xuất phiếu
+sửa, Mở web local), and the miners table filling all remaining space
+(~34px rows). Row detail is a 300px right panel that only takes width
+while a row is selected (close button returns the width to the table);
+the first row still auto-selects after a scan. Sidebar entries for
+Bản đồ nhiệt / Điện năng / Lịch sử sửa / Sự kiện are greyed with a
+"sau" tag — visible roadmap, no fake functionality.
+
 ## Stage-1 scope vs TODO
 
-Covered: splash, header/version, scan card (target pre-filled from
-sysinfo, user/password), 4 stat tiles (totals grouped by native unit),
-miners table with status chips, detail panel (issues + boards), empty
-state, auto-select first row, export tickets, open local web.
+Covered: splash, sidebar + header chips, scan bar, miners table with
+status chips, detail panel (issues + boards), empty state, auto-select
+first row, export tickets, open local web.
 
 TODO (marked in code): a dedicated tickets verb so export doesn't need
 a second scan pass; `url_launcher` instead of the OS-shell browser open;
