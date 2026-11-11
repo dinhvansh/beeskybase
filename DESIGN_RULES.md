@@ -150,3 +150,11 @@ Các màu light đề xuất trong master prompt:
 - Chuyển cả kệ giữa tầng phải giữ nguyên định danh máy và ô trong kệ. Có cách nhập vị trí bằng biểu mẫu thay cho kéo.
 - Rê chuột vào máy hiển thị IP, model, serial, nhiệt độ/trạng thái, tầng xưởng và vị trí trong kệ; chỉ dùng thông tin đã có.
 - Kích thước sàn của bản duyệt là ô lưới, không tự gán đơn vị mét hoặc coi là số đo hiện trường.
+
+### Nhóm máy và model 3D (bổ sung)
+
+- Nhãn riêng và nhóm theo bộ tản/đường nước gắn bằng ID ổn định, không theo ô rack.
+- Nhóm chỉ gồm máy trong cùng xưởng, có thể qua nhiều kệ/tầng; thao tác nhóm không đổi vị trí máy.
+- Lọc nhóm làm nổi máy khớp, giữ ngữ cảnh bố trí; có thể bỏ lọc. Có đường thao tác qua danh sách/2D và bàn phím.
+- Model hiển thị có thể chọn riêng, không đổi nhận diện/model máy báo về. Dùng model tối ưu, cache hình học/textures giữa các máy.
+- Hiển thị rõ giới hạn lưu trong phiên; đường nước/bộ tản là thông tin người dùng nhập, không giả lập điều khiển thực tế.

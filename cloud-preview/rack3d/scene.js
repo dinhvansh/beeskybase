@@ -1,5 +1,16 @@
 import * as T from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+
+const minerTemplates=new Map();
+function minerTemplate(kind){
+  if(!minerTemplates.has(kind)){
+    const url=kind==='hydro'?'assets/models/s21-hydro.glb':'assets/models/s19-pro-air.glb';
+    const promise=new GLTFLoader().loadAsync(url).then(gltf=>{gltf.scene.traverse(o=>{if(o.geometry)o.geometry.userData.minerShared=true;for(const mat of Array.isArray(o.material)?o.material:[o.material])if(mat)for(const value of Object.values(mat))if(value?.isTexture)value.userData.minerShared=true});return gltf.scene}).catch(error=>{minerTemplates.delete(kind);throw error});
+    minerTemplates.set(kind,promise);
+  }
+  return minerTemplates.get(kind);
+}
 
 // Render only when the camera, size or selection changes. Data stays in the host.
 export function mount(host,api){
@@ -16,6 +27,7 @@ export function mount(host,api){
   scene.add(new T.HemisphereLight(0xffffff,0x657080,2.4));
   const light=new T.DirectionalLight(0xffffff,3);light.position.set(5,12,8);scene.add(light);
   const slots=[],groups=[],rackMeshes=[],ray=new T.Raycaster(),pointer=new T.Vector2();
+  const modelLoads=[];let loadedModels=0;
   const frameMat=new T.MeshStandardMaterial({color:c.frame,roughness:.65,metalness:.35});
   const shelfMat=new T.MeshStandardMaterial({color:c.shelf,roughness:.8});
   const fanMat=new T.MeshStandardMaterial({color:c.fan,roughness:.9});
@@ -41,7 +53,21 @@ export function mount(host,api){
       const mat=new T.MeshStandardMaterial({color,roughness:.6,metalness:d ? .2 : 0,transparent:true,opacity:d?1:.3});
       const m=block(g,(col-(r.cols-1)/2)*1.18,(r.rows-row-.5)*1.12+.2,.08,1,.86,1.1,mat);
       m.userData={r,i,d,original:color};slots.push(m);
-      if(d){const fan=new T.Mesh(fanGeo,fanMat);fan.rotation.x=Math.PI/2;fan.position.set(0,0,.515);m.add(fan);const hub=new T.Mesh(hubGeo,frameMat);hub.rotation.x=Math.PI/2;hub.position.set(0,0,.54);m.add(hub)}
+      if(d){
+        const fan=new T.Mesh(fanGeo,fanMat);fan.rotation.x=Math.PI/2;fan.position.set(0,0,.515);m.add(fan);const hub=new T.Mesh(hubGeo,frameMat);hub.rotation.x=Math.PI/2;hub.position.set(0,0,.54);m.add(hub);
+        const kind=api.visualModel(d);
+        if(kind==='air'||kind==='hydro')modelLoads.push(()=>minerTemplate(kind).then(template=>{
+          if(disposed)return;
+          m.remove(fan,hub);
+          const clone=template.clone(true),holder=new T.Group();
+          holder.scale.set(1/m.scale.x,1/m.scale.y,1/m.scale.z);
+          const materials=[];
+          clone.traverse(o=>{if(o.isMesh){o.material=(Array.isArray(o.material)?o.material:[o.material]).map(mat=>{const owned=mat.clone();owned.transparent=true;materials.push(owned);return owned});if(o.material.length===1)o.material=o.material[0]}});
+          holder.add(clone);m.add(holder);m.userData.hasModel=true;m.userData.modelMaterials=materials;
+          const strip=new T.Mesh(box,new T.MeshBasicMaterial({color}));strip.position.set(0,.45,.53);strip.scale.set(.85,.035,.03);m.add(strip);
+          loadedModels++;host.dataset.loadedModels=String(loadedModels);reset();draw();
+        }).catch(()=>{if(!disposed)api.status('Không tải được model '+(kind==='hydro'?'máy nước':'máy gió')+'. Vẫn có thể dùng sơ đồ và sắp xếp vị trí.')}));
+      }
     }
     g.traverse(o=>{if(o.isMesh){o.userData.rackGroup=g;rackMeshes.push(o)}});
     label(r.name+' · '+r.slots.filter(Boolean).length+'/'+r.slots.length,0,h+.65,0,Math.min(w,7),g);
@@ -83,7 +109,7 @@ export function mount(host,api){
   function hitRack(e){aim(e);return ray.intersectObjects(rackMeshes,false)[0]?.object.userData.rackGroup}
   const groundPlane=new T.Plane(new T.Vector3(0,1,0),0);
   function ground(e){aim(e);return ray.ray.intersectPlane(groundPlane,new T.Vector3())}
-  function reset(){const ids=api.matches();slots.forEach(m=>{m.material.emissive.set(ids.has(m.userData.d?.id)?c.selected:0x000000);m.material.opacity=api.query()&&!ids.has(m.userData.d?.id) ? .2 : m.userData.d?1:.3})}
+  function reset(){const ids=api.matches();slots.forEach(m=>{const dim=api.query()&&!ids.has(m.userData.d?.id);m.material.emissive.set(ids.has(m.userData.d?.id)?c.selected:0x000000);m.material.opacity=dim ? .12 : m.userData.hasModel ? .045 : m.userData.d ? 1 : .3;for(const material of m.userData.modelMaterials||[])material.opacity=dim ? .15 : 1})}
   function describe(m){if(m){const {r,i,d}=m.userData;api.status((d?d.ip+' · '+(d.offline?'Mất kết nối':d.temp+'°C'):'Ô trống')+' · '+api.position(r,i))}}
   function start(e){if(e.button!==0)return;const m=hit(e);down={x:e.clientX,y:e.clientY,m};if(api.mode()==='racks'){const g=hitRack(e),p=ground(e);if(g&&p){api.selectRack(g.userData.r.id);selectRack(g.userData.r.id);rackDrag={g,old:g.position.clone(),offset:p.sub(g.position),next:null,error:'',moved:false};controls.enabled=false;canvas.setPointerCapture(e.pointerId);canvas.focus({preventScroll:true})}}else if(api.edit()&&m?.userData.d){controls.enabled=false;canvas.setPointerCapture(e.pointerId)}}
   function move(e){
@@ -102,5 +128,6 @@ export function mount(host,api){
   resize();view(api.mode()==='racks'?'top':'overview');selectRack(api.selectedRack());
   if(api.camera){camera.position.fromArray(api.camera.position);controls.target.fromArray(api.camera.target);controls.update()}
   reset();draw();
-  return {view,selectRack,focusDevice,highlight(){reset();draw()},cameraState(){return{position:camera.position.toArray(),target:controls.target.toArray()}},dispose(){if(disposed)return;disposed=true;observer.disconnect();controls.dispose();window.removeEventListener('keydown',escape);api.hover(null);const geometries=new Set(),materials=new Set();scene.traverse(o=>{if(o.geometry)geometries.add(o.geometry);if(o.material)materials.add(o.material)});materials.forEach(m=>{m.map?.dispose();m.dispose()});geometries.forEach(g=>g.dispose());renderer.dispose();renderer.forceContextLoss();canvas.remove()}};
+  modelLoads.forEach(load=>load());
+  return {view,selectRack,focusDevice,highlight(){reset();draw()},cameraState(){return{position:camera.position.toArray(),target:controls.target.toArray()}},dispose(){if(disposed)return;disposed=true;observer.disconnect();controls.dispose();window.removeEventListener('keydown',escape);api.hover(null);const geometries=new Set(),materials=new Set();scene.traverse(o=>{if(o.geometry&&!o.geometry.userData.minerShared)geometries.add(o.geometry);for(const material of Array.isArray(o.material)?o.material:[o.material])if(material)materials.add(material)});materials.forEach(m=>{for(const texture of Object.values(m))if(texture?.isTexture&&!texture.userData.minerShared)texture.dispose();m.dispose()});geometries.forEach(g=>g.dispose());renderer.dispose();renderer.forceContextLoss();canvas.remove()}};
 }

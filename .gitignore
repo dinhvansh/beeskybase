@@ -22,3 +22,6 @@ node_modules/
 # Local browser verification artifacts
 .playwright-cli/
 output/playwright/
+
+# Local model conversion inputs and portable tools
+/work/

@@ -199,3 +199,11 @@ packaging/
   build-windows.yml # windows-latest runner: PyInstaller + Inno Setup ->
                     # BeeSky-Windows artifact; Releases on v* tags
 ```
+
+### Nhãn, nhóm làm mát và model máy
+
+Xưởng 3D dùng model S21 Hydro/S19 Pro từ hai archive người dùng cung cấp; tải mỗi loại một lần và dùng chung hình học. Model chưa nhận diện dùng khối đơn giản. Trong chi tiết máy có thể chọn model hiển thị mà không sửa model máy báo về.
+
+Mở **Nhãn & nhóm** để tạo nhóm theo bộ tản/đường nước, chọn nhiều máy (lọc riêng máy nước/máy gió), hoặc gắn nhãn từng máy. Bộ lọc và tìm kiếm hỗ trợ nhãn, tên nhóm, bộ tản và đường nước. Nhóm liên kết bằng ID máy, đi qua nhiều kệ/tầng trong một xưởng và giữ nguyên khi đổi vị trí. Xóa nhóm không xóa máy.
+
+Dữ liệu nhóm, nhãn và bố trí hiện chỉ nằm trong phiên duyệt; tải lại trang sẽ mất thay đổi. Liên kết làm mát nhập thủ công, chưa kết nối backend hay điều khiển đường nước/bộ tản.

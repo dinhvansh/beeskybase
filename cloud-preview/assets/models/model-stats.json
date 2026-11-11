@@ -1,0 +1,14 @@
+[
+  {
+    "file": "s21-hydro.glb",
+    "source_triangles": 4998942,
+    "web_triangles": 20450,
+    "bytes": 659156
+  },
+  {
+    "file": "s19-pro-air.glb",
+    "source_triangles": 187126,
+    "web_triangles": 14988,
+    "bytes": 691000
+  }
+]
