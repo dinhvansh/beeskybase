@@ -57,7 +57,16 @@ DEFAULT_PORT = 80
 
 
 class DashdError(Exception):
-    """Raised when a dashd host cannot be reached or does not answer sanely."""
+    """Raised when a dashd host cannot be reached or does not answer sanely.
+
+    ``status`` carries the HTTP status when the failure was an HTTP
+    response (e.g. 401 from an auth-gated dashd) so callers can tell
+    "locked dashd" apart from "not a dashd host at all" (v0.23).
+    """
+
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
 
 
 class DashdClient:
@@ -104,8 +113,8 @@ class DashdClient:
                     detail = f" ({parsed['err']})"
             except Exception:  # noqa: BLE001 — body is best-effort context
                 pass
-            raise DashdError(f"{method} {path} -> HTTP {exc.code}{detail}") \
-                from exc
+            raise DashdError(f"{method} {path} -> HTTP {exc.code}{detail}",
+                             status=exc.code) from exc
         except (urllib.error.URLError, OSError) as exc:
             raise DashdError(f"cannot reach {url} ({exc})") from exc
         if not body.strip():
@@ -182,8 +191,8 @@ class DashdClient:
                     detail = f" ({parsed['err']})"
             except Exception:  # noqa: BLE001 — body is best-effort context
                 pass
-            raise DashdError(f"POST {path} -> HTTP {exc.code}{detail}") \
-                from exc
+            raise DashdError(f"POST {path} -> HTTP {exc.code}{detail}",
+                             status=exc.code) from exc
         except (urllib.error.URLError, OSError) as exc:
             raise DashdError(f"cannot reach {url} ({exc})") from exc
         if not raw.strip():
@@ -223,11 +232,19 @@ class DashdClient:
         "miner" key (AntmMinerStats or null) — stock Bitmain CGI hosts 404
         this path, generic web servers do not produce this shape.
         """
+        summary, _status = self.probe_detail()
+        return summary
+
+    def probe_detail(self) -> tuple[dict | None, int | None]:
+        """Probe like :meth:`probe`, but also report the HTTP status when
+        the summary call failed — 401 means an auth-gated dashd (v0.23
+        multi-credential discovery keys the "locked dashd" case off it).
+        Returns (summary_or_None, failure_status_or_None)."""
         try:
             data = self.summary()
-        except DashdError:
-            return None
-        return data if "miner" in data else None
+        except DashdError as exc:
+            return None, exc.status
+        return (data if "miner" in data else None), None
 
     # -- record building -------------------------------------------------------
     def fetch_record(self, ip: str | None = None) -> dict:

@@ -30,8 +30,15 @@ void main() {
       expect(find.text('Sự kiện'), findsOneWidget);
       expect(find.text('Cài đặt'), findsOneWidget);
       expect(find.text('SAU'), findsNWidgets(5));
-      expect(find.text('BeeSky v0.22.0'), findsOneWidget);
+      expect(find.text('BeeSky v0.23.0'), findsOneWidget);
       expect(find.text('Ruột quét: dữ liệu mẫu'), findsOneWidget);
+
+      // v0.23 scan bar: the local-web button is GONE (a miner row
+      // double-click opens the miner's own web instead), and the
+      // single user/password pair is replaced by the saved-sets
+      // button — mock mode seeds 3 demo sets.
+      expect(find.text('Mở web local'), findsNothing);
+      expect(find.text('Tài khoản: 3 bộ'), findsOneWidget);
 
       // The v0.21 stat tiles are GONE — stats live in header chips now.
       expect(find.text('Tổng số máy'), findsNothing);
@@ -104,6 +111,11 @@ void main() {
       // its sub line is "ip • source", unique to the panel.
       expect(find.text('192.168.2.101 • VNish'), findsOneWidget);
       expect(find.textContaining('Quét xong: tìm thấy 4 máy'), findsOneWidget);
+
+      // The mock S19 authenticated with a saved set: the panel names
+      // the winning login (v0.23 cred_label).
+      expect(find.text('Đăng nhập'), findsOneWidget);
+      expect(find.text('VNish trại A'), findsOneWidget);
 
       // Selecting the L9 shows its issue box and its boards, each
       // board line carrying that board's OWN temperature.

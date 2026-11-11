@@ -22,21 +22,28 @@ abstract class BeeSkyBridge {
   /// from "beesky.exe missing next to the app".
   String? get exePath;
   Future<SysInfo> sysinfo();
-  Future<ScanResult> scan(
-    String target, {
-    String user = '',
-    String password = '',
-  });
+
+  /// One scan pass. [credsFile] is the app's saved credential-sets
+  /// file (the --creds-file schema) or null when no sets are saved —
+  /// passwords never travel on the command line (v0.23).
+  Future<ScanResult> scan(String target, {String? credsFile});
 
   /// Exports repair tickets; returns a human-readable destination.
-  Future<String> exportTickets(
-    String target, {
-    String user = '',
-    String password = '',
-  });
+  Future<String> exportTickets(String target, {String? credsFile});
+}
 
-  /// Starts the local web dashboard (`beesky serve`) and opens a browser.
-  Future<void> openLocalWeb(String target);
+/// Opens [url] in the OS default browser — used for a miner's own
+/// web admin on row double-click (BTC Tools-style). Windows goes
+/// through `cmd /c start`, macOS through `open`, Linux `xdg-open`.
+Future<void> openUrlInBrowser(String url) async {
+  if (Platform.isWindows) {
+    await Process.start('cmd', ['/c', 'start', '', url],
+        mode: ProcessStartMode.detached);
+  } else if (Platform.isMacOS) {
+    await Process.start('open', [url], mode: ProcessStartMode.detached);
+  } else {
+    await Process.start('xdg-open', [url], mode: ProcessStartMode.detached);
+  }
 }
 
 class SidecarException implements Exception {
@@ -110,27 +117,34 @@ class SidecarBridge implements BeeSkyBridge {
     return SysInfo.fromJson(doc);
   }
 
-  @override
-  Future<ScanResult> scan(
-    String target, {
-    String user = '',
-    String password = '',
-  }) async {
+  /// Argument list for a bridge scan — factored out so tests can pin
+  /// the contract: the creds file is referenced by PATH only; no
+  /// credential value ever appears in argv (v0.23).
+  static List<String> scanArgs(String target, {String? credsFile}) {
     final args = <String>['scan', target, '--json'];
-    // Credentials are only forwarded when non-empty (the CLI treats an
-    // empty --user/--password as "not provided").
-    if (user.isNotEmpty) args.addAll(['--user', user]);
-    if (password.isNotEmpty) args.addAll(['--password', password]);
-    final doc = await _runJson(args);
+    if (credsFile != null) args.addAll(['--creds-file', credsFile]);
+    return args;
+  }
+
+  /// Argument list for the tickets pass (a scan with --tickets).
+  static List<String> ticketsArgs(
+    String target,
+    String dirPath, {
+    String? credsFile,
+  }) {
+    final args = <String>['scan', target, '--tickets', dirPath];
+    if (credsFile != null) args.addAll(['--creds-file', credsFile]);
+    return args;
+  }
+
+  @override
+  Future<ScanResult> scan(String target, {String? credsFile}) async {
+    final doc = await _runJson(scanArgs(target, credsFile: credsFile));
     return ScanResult.fromJson(doc);
   }
 
   @override
-  Future<String> exportTickets(
-    String target, {
-    String user = '',
-    String password = '',
-  }) async {
+  Future<String> exportTickets(String target, {String? credsFile}) async {
     // There is no standalone "tickets" verb in the CLI: tickets are a
     // post-step of `scan` (--tickets DIR prints one .txt per problem
     // miner). Stage 1 therefore runs a scan pass with that flag next to
@@ -142,9 +156,7 @@ class SidecarBridge implements BeeSkyBridge {
         exePath.contains(Platform.pathSeparator) ? exeFile.parent.path : '.';
     final dir = Directory('$baseDir${Platform.pathSeparator}tickets');
     await dir.create(recursive: true);
-    final args = <String>['scan', target, '--tickets', dir.path];
-    if (user.isNotEmpty) args.addAll(['--user', user]);
-    if (password.isNotEmpty) args.addAll(['--password', password]);
+    final args = ticketsArgs(target, dir.path, credsFile: credsFile);
     final result = await Process.run(exePath, args, stdoutEncoding: utf8);
     if (result.exitCode != 0) {
       final err = ('${result.stderr}').trim();
@@ -162,39 +174,6 @@ class SidecarBridge implements BeeSkyBridge {
     return '${dir.path} ($count phiếu)';
   }
 
-  @override
-  Future<void> openLocalWeb(String target) async {
-    // Mirrors the Tk app: `beesky serve <target> --port 8787` detached,
-    // then the OS browser on http://localhost:8787.
-    // TODO(stage-2): the url_launcher plugin would open the browser more
-    // cleanly than the OS shell; kept dependency-free for stage 1.
-    const port = 8787;
-    await Process.start(
-        exePath,
-        [
-          'serve',
-          target,
-          '--port',
-          '$port',
-        ],
-        mode: ProcessStartMode.detached);
-    final url = 'http://localhost:$port';
-    if (Platform.isWindows) {
-      await Process.start(
-          'cmd',
-          [
-            '/c',
-            'start',
-            '',
-            url,
-          ],
-          mode: ProcessStartMode.detached);
-    } else if (Platform.isMacOS) {
-      await Process.start('open', [url], mode: ProcessStartMode.detached);
-    } else {
-      await Process.start('xdg-open', [url], mode: ProcessStartMode.detached);
-    }
-  }
 }
 
 /// Dev/demo bridge: canned data, no process. Enabled with the BEESKY_MOCK
@@ -220,6 +199,7 @@ class MockBridge implements BeeSkyBridge {
               {"index": 2, "temp_c": 63.0, "chips_alive": 114, "chips_total": 114}],
    "fans_rpm": [4120, 4080, 4150, 4090], "chips_alive": 342, "chips_total": 342,
    "max_temp_c": 65.0, "problems": [], "status": "OK",
+   "cred_label": "VNish trại A",
    "rate_value": 110.5, "rate_unit": "TH/s", "ths": 110.5},
   {"ip": "192.168.2.102", "model": "Antminer L9", "source": "cgminer",
    "chains": [{"index": 0, "temp_c": 57.0, "chips_alive": 123, "chips_total": 123},
@@ -252,28 +232,17 @@ class MockBridge implements BeeSkyBridge {
 
   @override
   Future<SysInfo> sysinfo() async =>
-      const SysInfo(version: '0.22.0', defaultTarget: '192.168.2.0/24');
+      const SysInfo(version: '0.23.0', defaultTarget: '192.168.2.0/24');
 
   @override
-  Future<ScanResult> scan(
-    String target, {
-    String user = '',
-    String password = '',
-  }) async {
+  Future<ScanResult> scan(String target, {String? credsFile}) async {
     await Future<void>.delayed(const Duration(milliseconds: 600));
     return ScanResult.fromJson(jsonDecode(_sampleJson) as Map<String, dynamic>);
   }
 
   @override
-  Future<String> exportTickets(
-    String target, {
-    String user = '',
-    String password = '',
-  }) async =>
+  Future<String> exportTickets(String target, {String? credsFile}) async =>
       '(mock) không ghi file phiếu thật';
-
-  @override
-  Future<void> openLocalWeb(String target) async {}
 }
 
 /// Bridge selection for the real app: mock when BEESKY_MOCK is set in the

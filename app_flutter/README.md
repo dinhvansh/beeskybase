@@ -54,19 +54,69 @@ a 228px left sidebar (logo, "BeeSky", "Quản lý máy đào", nav, version
 + sidecar status dot at the foot), a slim 52px header with the view
 title and the fleet stats as compact chips in ONE row (total / OK /
 check / error / grouped hashrate / max temp), one slim scan bar
-(target pre-filled from sysinfo, user/password, Quét ngay, Xuất phiếu
-sửa, Mở web local), and the miners table filling all remaining space
-(~34px rows). Row detail is a 300px right panel that only takes width
-while a row is selected (close button returns the width to the table);
-the first row still auto-selects after a scan. Sidebar entries for
-Bản đồ nhiệt / Điện năng / Lịch sử sửa / Sự kiện are greyed with a
-"sau" tag — visible roadmap, no fake functionality.
+(target pre-filled from sysinfo, Quét ngay, a "Tài khoản: N bộ"
+button opening the credential-sets editor, Xuất phiếu sửa), and the
+miners table filling all remaining space (~34px rows). Row detail is
+a 300px right panel that only takes width while a row is selected
+(close button returns the width to the table); the first row still
+auto-selects after a scan. Sidebar entries for Bản đồ nhiệt / Điện
+năng / Lịch sử sửa / Sự kiện are greyed with a "sau" tag — visible
+roadmap, no fake functionality.
+
+v0.23 changes: the scan bar's old single user/password fields and
+the "Mở web local" button are gone (the CLI `serve` command itself
+stays). Double-clicking a miner row opens that miner's own web
+admin (`http://<ip>`) in the OS default browser, BTC Tools-style;
+a single click still just selects the row. When a scan record was
+authenticated by a saved credential set, the detail panel names it
+("Đăng nhập: <label>").
+
+## Credential sets (v0.23)
+
+A farm runs several machine lines with different web logins, so the
+app keeps MANY saved sets (the model follows the HashCore Toolkit:
+unlock methods keyed by firmware vendor). The "Tài khoản: N bộ"
+button opens the editor: one row per set — label, user, password
+(obscured), a machine-type dropdown (Mọi loại máy / Antminer gốc /
+VNish), delete; "Thêm bộ" adds a row; blank rows are dropped on
+save. VNish rows additionally show an optional "API key (không bắt
+buộc)" field: when filled, that set authenticates to VNish's dashd
+with the `x-api-key` header INSTEAD of a user/password login.
+
+Persistence: the sets live in `beesky-creds.json` NEXT TO the app
+executable (the bundle folder, beside beesky.exe). When that folder
+is not writable, saving falls back to
+`%APPDATA%\BeeSky\beesky-creds.json`. Loading reads the primary file
+when it exists, else the fallback, else starts empty. The file uses
+EXACTLY the CLI's `--creds-file` schema — a bare JSON list:
+
+```json
+[{"label": "VNish trại A", "user": "root", "password": "...",
+  "type": "vnish", "api_key": "..."},
+ {"label": "Kho S19 gốc", "user": "root", "password": "...",
+  "type": "stock"},
+ {"label": "Dự phòng chung", "user": "root", "password": "...",
+  "type": "any"}]
+```
+
+(`api_key` is optional and omitted when empty; a missing/unknown
+`type` reads as `any`.) The app passes only the file's PATH to the
+sidecar (`scan --creds-file <path>`) — passwords never appear on a
+command line. With no sets saved, scans run without the flag and
+the core's built-in defaults apply.
+
+Try order per miner (the probe detects the family first): sets
+tagged for that family, in saved order → `any` sets → all remaining
+sets, so a wrong tag costs time but never locks a machine out. The
+winning set's label lands on the record as `cred_label`.
 
 ## Stage-1 scope vs TODO
 
 Covered: splash, sidebar + header chips, scan bar, miners table with
-status chips, detail panel (issues + boards), empty state, auto-select
-first row, export tickets, open local web.
+status chips, detail panel (issues + boards + winning cred label),
+empty state, auto-select first row, export tickets, saved
+credential sets (editor dialog + file persistence + `--creds-file`
+hand-off), double-click a row to open that miner's web admin.
 
 TODO (marked in code): a dedicated tickets verb so export doesn't need
 a second scan pass; `url_launcher` instead of the OS-shell browser open;

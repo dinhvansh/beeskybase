@@ -96,6 +96,12 @@ class MinerRecord {
   final String? rateUnit;
   final double? legacyThs;
 
+  /// Label of the saved credential set that authenticated to this
+  /// miner (v0.23, wire key `cred_label`). Null for cgminer-RPC
+  /// miners (no auth), anonymous/default-cred reads and error
+  /// records — the detail panel only shows a login that was proven.
+  final String? credLabel;
+
   const MinerRecord({
     required this.ip,
     required this.model,
@@ -110,6 +116,7 @@ class MinerRecord {
     required this.rateValue,
     required this.rateUnit,
     required this.legacyThs,
+    this.credLabel,
   });
 
   factory MinerRecord.fromJson(Map<String, dynamic> json) {
@@ -133,6 +140,7 @@ class MinerRecord {
       rateValue: (json['rate_value'] as num?)?.toDouble(),
       rateUnit: json['rate_unit'] as String?,
       legacyThs: (json['ths'] as num?)?.toDouble(),
+      credLabel: json['cred_label'] as String?,
     );
   }
 

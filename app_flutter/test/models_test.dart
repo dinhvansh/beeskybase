@@ -11,6 +11,7 @@ const sampleEnvelope = '''
    "chains": [{"index": 0, "temp_c": 65.0, "chips_alive": 114, "chips_total": 114}],
    "fans_rpm": [4120, 4080], "chips_alive": 342, "chips_total": 342,
    "max_temp_c": 65.0, "problems": [], "status": "OK",
+   "cred_label": "VNish trại A",
    "rate_value": 110.5, "rate_unit": "TH/s", "ths": 110.5},
   {"ip": "192.168.2.105", "model": "Antminer S21", "source": "vnish",
    "chains": [], "fans_rpm": [4200], "chips_alive": 324, "chips_total": 324,
@@ -96,6 +97,14 @@ void main() {
       expect(byIp['192.168.2.104']!.fansText, '—');
       expect(byIp['192.168.2.104']!.tempText, '—');
     });
+
+    test('cred_label parses when present, null when absent (v0.23)', () {
+      final byIp = {for (final r in result.records) r.ip: r};
+      expect(byIp['192.168.2.101']!.credLabel, 'VNish trại A');
+      // cgminer RPC has no auth -> never a label.
+      expect(byIp['192.168.2.102']!.credLabel, isNull);
+      expect(byIp['192.168.2.104']!.credLabel, isNull);
+    });
   });
 
   group('legacy records (pre-0.21, ths only)', () {
@@ -179,10 +188,10 @@ void main() {
   group('sysinfo', () {
     test('parses version + default target', () {
       final info = SysInfo.fromJson(const {
-        'version': '0.22.0',
+        'version': '0.23.0',
         'default_target': '192.168.2.0/24',
       });
-      expect(info.version, '0.22.0');
+      expect(info.version, '0.23.0');
       expect(info.defaultTarget, '192.168.2.0/24');
     });
   });

@@ -2420,3 +2420,175 @@ header chips shift accordingly (OK 1 / Cần kiểm tra 2 /
 Max 88 °C). Python pin suite unchanged and green:
 mock_agent_bg_test 52 PASS / 0 FAIL ("versions in sync at
 0.22.0").
+
+---
+
+# v0.23.0 — saved multi-credential scan; double-click opens miner web; drop local-web button
+
+The owner's three requests (2026-11-11): (1) remove the
+Flutter app's "Mở web local" button; (2) double-click a
+miner row to open that miner's web admin (http://<ip>) in
+the default browser, BTC Tools-style; (3) multi-credential
+support — the fleet has many machine lines with different
+logins, so the app must store MANY credential sets and the
+scan must try them automatically. Two owner amendments
+landed during the build: each set carries a machine-type
+tag so detection picks the right set first (not blind
+order), and — after the HashCore Toolkit re-analysis
+(research/hashcore/UI-ANALYSIS.md) — the model is keyed
+like theirs: one unlock method family PER FIRMWARE
+VENDOR, selected by the detected firmware, with an
+API-key method for VNish.
+
+PYTHON CORE (beesky/core/discover.py, dashd.py, cli.py):
+
+  * `scan` (and watch/serve/agent, via the shared common
+    args) gains `--creds-file <path>`: a JSON list
+    [{"label": ..., "user": ..., "password": ...}] — the
+    same schema the Flutter app writes. Legacy
+    --user/--password stays a one-entry list; no creds at
+    all keeps the previous behaviour byte-identical
+    (probe_host(creds=None)). A malformed file exits 2
+    before any scanning.
+  * Each entry may carry "type": "stock" | "vnish" |
+    "any" (missing/unknown reads as "any") — the vendor
+    key. The probe already knows a miner's family before
+    auth, and tries, in order: (a) sets keyed to that
+    family, in saved order; (b) "any" sets; (c) all
+    remaining sets — a wrong tag costs attempts, never
+    locks a machine out. VNish/dashd sets are tried via
+    /unlock (password method) unless the set carries
+    "api_key", in which case the adapter authenticates
+    with the x-api-key header INSTEAD (the VNish API-key
+    method). Stock sets go through the web digest auth.
+    cgminer RPC needs no auth and is untouched.
+  * On success the record gains "cred_label" (the winning
+    set's label); RPC wins, anonymous dashd wins and
+    default-credential wins stay label-free. In creds
+    mode only, a dashd that refuses anonymously with 401
+    and matches no set still surfaces as a candidate, so
+    the fetch reports the 401 FETCH_ERROR — a locked
+    VNish box stays visible instead of vanishing.
+  * Bridge `--json` carries cred_label like any record
+    field (asserted in the creds suite against a real
+    subprocess scan).
+
+FLUTTER APP (app_flutter/):
+
+  * Scan bar: the single user/password fields and the
+    "Mở web local" button (and its serve shell-out) are
+    REMOVED — the CLI `serve` command itself stays. In
+    their place, one button: "Tài khoản: N bộ".
+  * Creds editor dialog: one row per set (label, user,
+    obscured password, type dropdown — Mọi loại máy /
+    Antminer gốc / VNish — delete), "Thêm bộ" adds a
+    row, blank rows drop on save. VNish rows show an
+    optional "API key (không bắt buộc)" field. The sets
+    persist to beesky-creds.json NEXT TO the executable
+    (fallback %APPDATA%\BeeSky\ when the bundle folder
+    is not writable); the app passes only the file PATH
+    to `scan --creds-file` — passwords never appear on
+    a command line. Empty list = scan without the flag.
+  * Row clicks are read at the pointer level: every
+    pointer-down selects instantly; a second down on the
+    same row within 400 ms opens http://<ip> through an
+    injectable opener (production: the OS default browser
+    via cmd /c start on Windows). A plain double-tap
+    gesture recogniser was rejected: it holds the single
+    click hostage until the double-click window expires.
+  * Detail panel: "Đăng nhập: <label>" appears when the
+    record carries cred_label.
+
+DIVERGENCES FROM HASHCORE'S MODEL (deliberate):
+
+  * Multiple sets per vendor type remain allowed — one
+    farm often runs the same firmware with different
+    passwords per hall/batch; HashCore solves that with
+    a per-GROUP override layer (farms.json) over global
+    per-vendor settings. The group layer is NOT built
+    here; it is the v0.24 candidate if per-group logins
+    become a real need.
+  * HashCore's DoNotUnlock / DoNotDiscover method
+    variants are not modelled (no BeeSky workflow needs
+    them yet).
+
+(a) VERIFIED LOCALLY (this sandbox):
+
+  * mock_creds_test — ordering units, creds-file loader
+    normalisation (api_key-only entry valid, label
+    "api_key", unknown type -> any), validation exit 2,
+    and subprocess bridge scans against mock dashd +
+    stock endpoints: family-first wins (and the attempt
+    log proves the foreign family's set is never tried
+    first), wrong-tag rescue via the remaining-sets tier,
+    "any" rescue, api-key-only dashd (the password set
+    can unlock but not read; the api_key set wins and is
+    labelled), all-fail -> the 401 FETCH_ERROR record
+    with no label, legacy paths unchanged. Full output:
+
+```
+PASS: order: stock family first, then any, then the rest
+PASS: order: vnish family first, then any, then the rest
+PASS: load: label defaults to the user name
+PASS: load: missing/unknown type normalises to any
+PASS: load: a real family tag survives
+PASS: load: an api_key-only entry is valid (no login needed)
+PASS: load: api_key-only entry's label falls back to 'api_key'
+PASS: validation: malformed JSON exits 2 with a creds message
+PASS: validation: non-list top level exits 2 with a creds message
+PASS: validation: entry without password exits 2 with a creds message
+PASS: validation: missing file exits 2 with a creds message
+PASS: dashd: locked miner found via the creds file
+PASS: dashd: record is the vnish S19, healthy
+PASS: dashd: cred_label names the winning vnish set (bridge JSON)
+PASS: dashd: only the vnish set was tried as a login
+PASS: dashd rescue: a wrong tag never locks the machine out
+PASS: dashd rescue: family set tried first, rescue set second
+PASS: dashd all-fail: the locked miner still surfaces
+PASS: dashd all-fail: it reports its auth error (401 FETCH_ERROR)
+PASS: dashd all-fail: no cred_label on an error record
+PASS: dashd legacy: locked dashd stays invisible (unchanged)
+PASS: dashd api-key: key-only miner found, healthy
+PASS: dashd api-key: cred_label names the api_key set
+PASS: dashd api-key: password set tried first (unlock ok, read no)
+PASS: dashd api-key: the winning key reached /summary
+PASS: stock: digest miner found via the creds file
+PASS: stock: record is stock + cred_label names the stock set
+PASS: stock: the stock set authenticated; vnish user never tried
+PASS: stock rescue: the 'any' set wins after the family set fails
+PASS: stock rescue: family set was attempted before the rescue
+PASS: stock legacy: --user/--password still works, no label
+PASS: stock legacy: a wrong password finds nothing (unchanged)
+
+CREDS TEST PASSED
+```
+
+  * Regression spot-checks at the v0.23.0 code:
+
+    mock_bridge_test: 24 PASS / 0 FAIL (standalone)
+    mock_units_test: 50 PASS / 0 FAIL (standalone)
+    mock_cloud_test: 15 PASS / 0 FAIL (standalone)
+    mock_web_test: 8 PASS / 0 FAIL (standalone)
+    mock_agent_bg_test: 52 PASS / 0 FAIL (standalone)
+
+  * Flutter (SDK 3.47.9 at ~/workspace/flutter-sdk):
+    flutter analyze: clean; flutter test: 24 PASS / 0 FAIL (local SDK 3.47.9) — model parsing incl. cred_label,
+    the v0.22 layout suite, creds store round-trip +
+    fallback, argv contract (path only, no secrets),
+    double-click opener URL, and the dialog's
+    add/edit/delete/type-retag/api-key persistence.
+    Two test-harness lessons are baked into the tests:
+    dart:io futures started in a widget test's fake-async
+    zone never complete (temp dirs are created sync, and
+    the creds store does its tiny file IO sync), and a
+    focused field's blinking cursor never lets
+    pumpAndSettle settle (bounded pumps in the dialog
+    test).
+
+(b) VERIFIED ONLY BY CI (.github/workflows/
+build-flutter.yml):
+
+  * flutter build windows --release on a real Windows
+    runner and the BeeSkyFlutter-<tag>-win64.zip asset.
+    The app remains compile-verified only until the
+    owner runs it on real Windows (as since v0.21).

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import 'creds.dart';
 import 'models.dart';
 import 'sidecar.dart';
 import 'theme.dart';
@@ -17,16 +18,53 @@ import 'theme.dart';
 /// sidecar wiring are unchanged — structure changed, identity didn't.
 class HomePage extends StatefulWidget {
   final BeeSkyBridge bridge;
-  const HomePage({super.key, required this.bridge});
+
+  /// Credential-store override (tests point it at a temp dir); the
+  /// real app uses [CredStore.appDefault] — beesky-creds.json beside
+  /// the executable.
+  final CredStore? credStore;
+
+  /// Row double-click opener override (tests record the URL instead
+  /// of launching a browser); defaults to [openUrlInBrowser].
+  final Future<void> Function(String url)? urlOpener;
+
+  const HomePage({
+    super.key,
+    required this.bridge,
+    this.credStore,
+    this.urlOpener,
+  });
 
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
+/// Demo credential sets for the MOCK shell only: the dialog shows a
+/// realistic mix (one vnish, one stock, one "any") instead of an
+/// empty list. In-memory — persisted only if the user saves them.
+final _demoCreds = [
+  CredSet(
+    label: 'VNish trại A',
+    user: 'root',
+    secret: 'vnish-pw',
+    type: 'vnish',
+  ),
+  CredSet(
+    label: 'Kho S19 gốc',
+    user: 'root',
+    secret: 'root',
+    type: 'stock',
+  ),
+  CredSet(
+    label: 'Dự phòng chung',
+    user: 'root',
+    secret: 'root',
+    type: 'any',
+  ),
+];
+
 class _HomePageState extends State<HomePage> {
   final _targetCtrl = TextEditingController();
-  final _userCtrl = TextEditingController(text: 'root');
-  final _passCtrl = TextEditingController();
 
   SysInfo? _sysinfo;
   bool _sysinfoFailed = false;
@@ -37,18 +75,69 @@ class _HomePageState extends State<HomePage> {
   bool _busy = false;
   String _status = 'Sẵn sàng.';
 
+  late final CredStore _store = widget.credStore ?? CredStore.appDefault();
+  List<CredSet> _creds = const [];
+  File? _credsFile;
+
   @override
   void initState() {
     super.initState();
+    // The mock shell shows its demo sets instantly (the mixed-type
+    // list is part of the demo); the file load below still replaces
+    // them when a real creds file exists.
+    if (widget.bridge.isMock) {
+      _creds = _demoCreds.map((c) => c.copy()).toList();
+    }
     _loadSysinfo();
+    _loadCreds();
   }
 
   @override
   void dispose() {
     _targetCtrl.dispose();
-    _userCtrl.dispose();
-    _passCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadCreds() async {
+    final (creds, file) = await _store.load();
+    if (!mounted) return;
+    // An existing file wins over the mock demo seed; an empty load
+    // leaves the seed (mock) or the empty list (real) untouched.
+    if (creds.isEmpty) return;
+    setState(() {
+      _creds = creds;
+      _credsFile = file;
+    });
+  }
+
+  /// The creds-file path a scan should use, or null: no sets saved,
+  /// or the mock bridge (which never reads files). In-memory-only
+  /// sets are persisted on first use so the sidecar can read them.
+  Future<String?> _credsFileForScan() async {
+    if (_creds.isEmpty || widget.bridge.isMock) return null;
+    if (_credsFile != null) return _credsFile!.path;
+    final file = await _store.save(_creds);
+    _credsFile = file;
+    return file.path;
+  }
+
+  Future<void> _editCreds() async {
+    final result = await showCredsDialog(context, _creds);
+    if (result == null || !mounted) return;
+    File? file;
+    try {
+      file = await _store.save(result);
+    } on FileSystemException {
+      // Saving failed everywhere — keep the sets for this session;
+      // scans will persist on demand via _credsFileForScan.
+      file = null;
+    }
+    if (!mounted) return;
+    setState(() {
+      _creds = result;
+      _credsFile = file;
+      _status = 'Đã lưu ${result.length} bộ tài khoản máy đào.';
+    });
   }
 
   Future<void> _loadSysinfo() async {
@@ -87,8 +176,7 @@ class _HomePageState extends State<HomePage> {
     try {
       final result = await widget.bridge.scan(
         _target,
-        user: _userCtrl.text.trim(),
-        password: _passCtrl.text,
+        credsFile: await _credsFileForScan(),
       );
       if (!mounted) return;
       setState(() {
@@ -119,8 +207,7 @@ class _HomePageState extends State<HomePage> {
     try {
       final dest = await widget.bridge.exportTickets(
         _target,
-        user: _userCtrl.text.trim(),
-        password: _passCtrl.text,
+        credsFile: await _credsFileForScan(),
       );
       if (!mounted) return;
       setState(() => _status = 'Đã xuất phiếu sửa vào: $dest');
@@ -134,15 +221,13 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _openWeb() async {
-    try {
-      await widget.bridge.openLocalWeb(_target);
-      if (!mounted) return;
-      setState(() => _status = 'Đã mở web tại chỗ: http://localhost:8787');
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _status = 'Lỗi mở web: $e');
-    }
+  /// Double-click a row: open that miner's own web admin in the OS
+  /// browser (BTC Tools-style), and select the row as a single click
+  /// would.
+  void _openMinerWeb(MinerRecord rec) {
+    setState(() => _selected = rec);
+    final opener = widget.urlOpener ?? openUrlInBrowser;
+    opener('http://${rec.ip}');
   }
 
   void _showSnack(String message) {
@@ -497,42 +582,25 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
             ),
-            SizedBox(
-              width: 120,
-              child: TextField(
-                controller: _userCtrl,
-                decoration: const InputDecoration(
-                  hintText: 'User',
-                  contentPadding: fieldPad,
-                ),
-              ),
-            ),
-            SizedBox(
-              width: 120,
-              child: TextField(
-                controller: _passCtrl,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  hintText: 'Mật khẩu',
-                  contentPadding: fieldPad,
-                ),
-              ),
-            ),
             FilledButton.icon(
               onPressed: _busy ? null : _runScan,
               icon: const Icon(Icons.radar, size: 17),
               label: const Text('Quét ngay'),
               style: _scanBtnStyle,
             ),
+            // Saved credential sets live behind this one button now
+            // (v0.23): the fleet has many machine lines with many
+            // logins — a single user/password pair is not enough.
+            OutlinedButton.icon(
+              onPressed: _busy ? null : _editCreds,
+              icon: const Icon(Icons.key, size: 16),
+              label: Text('Tài khoản: ${_creds.length} bộ'),
+              style: _ghostBtnStyle,
+            ),
             OutlinedButton(
               onPressed: _busy ? null : _exportTickets,
               style: _ghostBtnStyle,
               child: const Text('Xuất phiếu sửa'),
-            ),
-            OutlinedButton(
-              onPressed: _busy ? null : _openWeb,
-              style: _ghostBtnStyle,
-              child: const Text('Mở web local'),
             ),
           ],
         ),
@@ -694,9 +762,18 @@ class _HomePageState extends State<HomePage> {
     final bg = selected
         ? BeeSkyColors.selectBg
         : (i.isOdd ? BeeSkyColors.tableZebra : Colors.transparent);
-    return InkWell(
-      onTap: () => setState(() => _selected = rec),
-      child: Container(
+    // Row clicks are read at the pointer level (v0.23): every
+    // pointer-down selects instantly, and a second down on the
+    // same row inside the double-click window opens the miner's
+    // web admin. (A GestureDetector double-tap would hold the
+    // single click back until the window expires — the lag BTC
+    // Tools does not have.) The InkWell keeps the ripple and the
+    // keyboard/accessibility activation path.
+    return Listener(
+      onPointerDown: (_) => _rowPointerDown(rec),
+      child: InkWell(
+        onTap: () => setState(() => _selected = rec),
+        child: Container(
         decoration: BoxDecoration(
           color: bg,
           // The prototype marks the selected row with a 3px accent bar.
@@ -721,8 +798,26 @@ class _HomePageState extends State<HomePage> {
             Expanded(flex: 2, child: _statusChip(rec)),
           ],
         ),
+        ),
       ),
     );
+  }
+
+  /// Pointer-level row click (v0.23): select on every down; a
+  /// second down on the SAME row within the double-click window
+  /// also opens that miner's web admin in the default browser.
+  String? _lastRowIp;
+  DateTime? _lastRowTapAt;
+
+  void _rowPointerDown(MinerRecord rec) {
+    final now = DateTime.now();
+    final isDouble = _lastRowIp == rec.ip &&
+        _lastRowTapAt != null &&
+        now.difference(_lastRowTapAt!) < const Duration(milliseconds: 400);
+    _lastRowIp = rec.ip;
+    _lastRowTapAt = now;
+    setState(() => _selected = rec);
+    if (isDouble) _openMinerWeb(rec);
   }
 
   Widget _cell(String text, int flex) {
@@ -878,6 +973,9 @@ class _HomePageState extends State<HomePage> {
                       ? BeeSkyColors.bad
                       : BeeSkyColors.warn,
             ),
+            // Which saved login authenticated to this machine
+            // (v0.23) — only present when a creds-file set won.
+            if (rec.credLabel != null) _kv('Đăng nhập', rec.credLabel!),
             const SizedBox(height: 4),
             if (rec.issues.isEmpty)
               const Text(

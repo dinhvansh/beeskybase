@@ -3,6 +3,7 @@
     python -m beesky scan <target> [--json [out.json]] [--tickets dir/]
                                    [--timeout 1.5] [--workers 64]
                                    [--user root] [--password root]
+                                   [--creds-file sets.json]
                                    [--api-key KEY] [--token JWT]
                                    [--http-port 80] [--cgminer-port 4028]
                                    (--json with no FILE prints one JSON
@@ -73,31 +74,123 @@ from .core.events import EventEngine
 from .web.server import MonitorService, run_server
 
 
+def _load_creds_file(path: str) -> list[dict]:
+    """Read a --creds-file: a JSON list of credential sets (v0.23).
+
+    Schema: [{"label": "...", "user": "...", "password": "...",
+    "type": "any"|"stock"|"vnish", "api_key": "..."}, ...]. An entry
+    needs a login+password pair OR an "api_key" (the VNish API-key
+    unlock method — HashCore keys methods per vendor the same way).
+    "label" defaults to the user name (or "api_key"); a
+    missing/unknown "type" normalises to "any". Raises ValueError
+    with an operator-readable message — a typo'd file must fail
+    loud, never silently scan with wrong logins.
+    """
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot read creds file {path}: {exc}") from exc
+    if not isinstance(data, list):
+        raise ValueError(
+            f"creds file {path}: top level must be a JSON list of "
+            "{\"label\", \"user\", \"password\", \"type\"} objects")
+    creds: list[dict] = []
+    for idx, item in enumerate(data):
+        if not isinstance(item, dict):
+            raise ValueError(
+                f"creds file {path}: entry {idx} must be an object")
+        user = item.get("user")
+        secret = item.get("password")
+        api_key = item.get("api_key")
+        has_login = isinstance(user, str) and isinstance(secret, str)
+        has_key = isinstance(api_key, str) and bool(api_key)
+        if not has_login and not has_key:
+            raise ValueError(
+                f"creds file {path}: entry {idx} needs string "
+                "\"user\" + \"password\", or an \"api_key\"")
+        label = item.get("label")
+        raw_type = item.get("type")
+        creds.append({
+            "label": str(label) if label else (
+                user if has_login else "api_key"),
+            "user": user if isinstance(user, str) else "",
+            "password": secret if isinstance(secret, str) else "",
+            "api_key": api_key if has_key else None,
+            "type": raw_type if raw_type in ("stock", "vnish") else "any",
+        })
+    return creds
+
+
+def _scan_creds(args: argparse.Namespace) -> list[dict] | None:
+    """Credential sets for one scan-family command (v0.23).
+
+    --creds-file wins when given (its sets, in file order); otherwise
+    None — discover() then applies the legacy single --user/--password
+    pair exactly as before. The file is read once per process and
+    cached on the args namespace, so watch/serve/agent loops don't
+    re-read it every pass (and can't crash mid-loop on a deleted
+    file). Raises ValueError for a malformed file; command handlers
+    validate up front and turn that into exit 2 before scanning.
+    """
+    if getattr(args, "_creds_loaded", False):
+        return getattr(args, "_creds_cache", None)
+    path = getattr(args, "creds_file", None)
+    creds = _load_creds_file(path) if path else None
+    args._creds_cache = creds
+    args._creds_loaded = True
+    return creds
+
+
+def _validate_creds(args: argparse.Namespace, command: str) -> int | None:
+    """Resolve --creds-file early; an exit code when it is malformed."""
+    try:
+        _scan_creds(args)
+    except ValueError as exc:
+        print(f"{command}: {exc}", file=sys.stderr)
+        return 2
+    return None
+
+
 def _fetch_record(cand: Candidate, args: argparse.Namespace) -> dict:
     """Pull full health data for one candidate via its claiming adapter."""
     ip, timeout = cand.ip, max(args.timeout, 2.0)
     if cand.source == "vnish":
         client = DashdClient(ip, port=cand.http_port, timeout=timeout,
-                             api_key=args.api_key, token=args.token)
+                             api_key=args.api_key or cand.dashd_api_key,
+                             token=args.token or cand.dashd_token)
         try:
-            return client.fetch_record(ip)
+            record = client.fetch_record(ip)
         except DashdError as exc:
-            return report.error_record(ip, str(exc), source="vnish")
-    if cand.source == "stock":
+            record = report.error_record(ip, str(exc), source="vnish")
+    elif cand.source == "stock":
+        # The fetch reuses the exact set that won the probe (v0.23) —
+        # cand.username/password carry it; they default to the scan's
+        # legacy pair for candidates claimed any other way.
         client = BitmainClient(ip, port=cand.http_port, timeout=timeout,
-                               username=args.user, password=args.password)
+                               username=cand.username,
+                               password=cand.password)
         try:
-            return client.fetch_record(ip, status_data=cand.status_data or None)
+            record = client.fetch_record(ip,
+                                         status_data=cand.status_data or None)
         except BitmainError as exc:
-            return report.error_record(ip, str(exc), source="stock")
-    # cgminer RPC (also the fallback for port-open-but-silent candidates).
-    client = CgminerClient(ip, port=cand.cgminer_port, timeout=timeout)
-    try:
-        summary = client.summary()
-        stats = client.stats()
-    except CgminerError as exc:
-        return report.error_record(ip, str(exc), source="cgminer")
-    return report.build_record(ip, summary, stats, source="cgminer")
+            record = report.error_record(ip, str(exc), source="stock")
+    else:
+        # cgminer RPC (also the fallback for port-open-but-silent
+        # candidates) — no auth, so never a cred_label.
+        client = CgminerClient(ip, port=cand.cgminer_port, timeout=timeout)
+        try:
+            summary = client.summary()
+            stats = client.stats()
+        except CgminerError as exc:
+            record = report.error_record(ip, str(exc), source="cgminer")
+        else:
+            record = report.build_record(ip, summary, stats, source="cgminer")
+    # The winning set's label rides the record (v0.23) so the apps can
+    # show which login a machine line uses; error records and RPC /
+    # default-cred records stay label-free.
+    if cand.cred_label and not _is_error_record(record):
+        record["cred_label"] = cand.cred_label
+    return record
 
 
 def _scan_records(args: argparse.Namespace) -> list[dict]:
@@ -106,7 +199,8 @@ def _scan_records(args: argparse.Namespace) -> list[dict]:
         args.target, timeout=args.timeout, workers=args.workers,
         http_port=args.http_port, cgminer_port=args.cgminer_port,
         username=args.user, password=args.password,
-        api_key=args.api_key, token=args.token)
+        api_key=args.api_key, token=args.token,
+        creds=_scan_creds(args))
     return [_fetch_record(c, args) for c in candidates]
 
 
@@ -154,7 +248,11 @@ def cmd_scan(args: argparse.Namespace) -> int:
     # output is suppressed or moved to stderr in that mode.
     bridge = getattr(args, "json", None) == "-"
     started = time.monotonic()
-    records = _scan_records(args)
+    try:
+        records = _scan_records(args)
+    except ValueError as exc:
+        print(f"scan: {exc}", file=sys.stderr)
+        return 2
     elapsed = time.monotonic() - started
 
     if bridge:
@@ -231,6 +329,9 @@ def _is_error_record(record: dict) -> bool:
 
 
 def cmd_watch(args: argparse.Namespace) -> int:
+    bad = _validate_creds(args, "watch")
+    if bad is not None:
+        return bad
     config: dict = {}
     if args.notify:
         try:
@@ -296,6 +397,9 @@ def _load_notify_config(path: str | None) -> dict | None:
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
+    bad = _validate_creds(args, "serve")
+    if bad is not None:
+        return bad
     config = _load_notify_config(args.notify)
     if config is None:
         return 2
@@ -318,6 +422,9 @@ def cmd_agent(args: argparse.Namespace) -> int:
         print("agent: missing --key (or BEESKY_AGENT_KEY) — mint one on "
               "the cloud with `beesky cloud-add-agent`", file=sys.stderr)
         return 2
+    bad = _validate_creds(args, "agent")
+    if bad is not None:
+        return bad
     config = _load_notify_config(args.notify)
     if config is None:
         return 2
@@ -552,6 +659,16 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
                         help="stock-firmware web username (default root)")
     parser.add_argument("--password", default="root",
                         help="stock-firmware web password (default root)")
+    parser.add_argument("--creds-file", metavar="FILE",
+                        help="JSON file with several credential sets to "
+                             "try per miner, in family order: "
+                             "[{\"label\": ..., \"user\": ..., \"password\": "
+                             "..., \"type\": \"any|stock|vnish\", "
+                             "\"api_key\": ...}, ...] — a vnish set with "
+                             "api_key authenticates by x-api-key instead "
+                             "of login (v0.23; takes precedence over "
+                             "--user/--password; the winning set's label "
+                             "lands on the record as cred_label)")
     parser.add_argument("--api-key", metavar="KEY",
                         help="dashd (VNish) x-api-key header, if the miner requires it")
     parser.add_argument("--token", metavar="JWT",
