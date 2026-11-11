@@ -1,5 +1,17 @@
 # BeeSky Cloud — bản duyệt giao diện
 
+## Xưởng 3D (Three.js)
+
+Mở `/#/farms?farm=bt`, chọn **Sắp xếp vị trí** rồi kéo máy sang ô trống cùng rack hoặc rack khác trong cùng xưởng. Có **Hoàn tác**, Esc hủy kéo và góc nhìn phối cảnh / mặt trước / từ trên. Có thể kéo máy chưa xếp từ thanh bên hoặc bấm **Chọn vị trí** rồi chọn ô trống. Ô đã có máy không nhận thả. Chuyển sang **2D** để thao tác bằng bàn phím hoặc dùng biểu mẫu vị trí.
+
+Tìm IP/model/serial/tên rack rồi chọn kết quả để đưa camera tới máy. 2D và 3D dùng chung dữ liệu, không tạo bản sao máy. Vị trí vẫn chỉ lưu trong phiên bản duyệt, tải lại trang sẽ khôi phục mẫu.
+
+Three.js được đóng gói cục bộ trong `rack-scene.js`, chỉ tải khi mở xưởng 3D, không cần CDN. Sửa cảnh trong `rack3d/scene.js`; cài và build bằng `npm ci --prefix cloud-preview/rack3d` rồi `npm run build --prefix cloud-preview/rack3d`. Adapter là `rack-3d.js`, giao diện là `rack-3d.css`. Cảnh đứng yên chỉ render khi tương tác/resize; giải phóng WebGL khi đổi trang. Mất WebGL có đường về 2D.
+
+Tham khảo hướng không gian và camera: [Warehouse Journey 3D](https://github.com/hiobuy/warehouse-journey-3d), [Smart Warehouse](https://github.com/Xxcool/smart-warehouse). Cảnh BeeSky dựng bằng hình học riêng, không sao chép model hoặc asset của hai repo.
+
+Đã kiểm tra trình duyệt: kéo 3D trong cùng rack và giữa rack, không trùng ID, hoàn tác, chặn ô có máy, Esc hủy, kéo máy chưa xếp vào 3D; tìm máy và camera định vị; sáng/tối, desktop 1366×768 và mobile 390×844 (không tràn ngang). Build thành công, không có lỗi console trong các luồng đã kiểm tra. Chưa có lưu vị trí backend.
+
 Prototype local để duyệt trước khi triển khai backend nhiều khách hàng. Không phải hệ thống đăng nhập thật; không gửi email, không kết nối máy đào và không lưu mật khẩu. Dữ liệu và các thay đổi mẫu chỉ tồn tại trong bộ nhớ trang, tải lại sẽ khôi phục bản mẫu.
 
 Chạy từ repository:

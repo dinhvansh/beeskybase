@@ -18,3 +18,7 @@ tests/tickets_v2/
 
 # Local workflow editor dependencies
 node_modules/
+
+# Local browser verification artifacts
+.playwright-cli/
+output/playwright/

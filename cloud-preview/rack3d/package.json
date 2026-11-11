@@ -1,0 +1,1 @@
+{"name":"beesky-rack3d","private":true,"type":"module","scripts":{"build":"node build.mjs"},"dependencies":{"three":"0.182.0"},"devDependencies":{"esbuild":"^0.28.2"}}

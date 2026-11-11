@@ -131,3 +131,12 @@ Các màu light đề xuất trong master prompt:
 ### Thuật ngữ giao diện
 
 - Dùng **Xưởng** cho địa điểm vận hành trong menu, tiêu đề, biểu mẫu, dữ liệu mẫu và thông báo. Không dùng tên gọi cũ.
+
+### Xưởng 3D và di chuyển máy
+
+- Dùng Three.js cho cảnh xưởng; tham khảo không gian kho của `hiobuy/warehouse-journey-3d` và `Xxcool/smart-warehouse`. Giữ token, menu và nghiệp vụ BeeSky.
+- Rack/tầng/ô và định danh máy dùng chung một nguồn dữ liệu cho 2D và 3D.
+- Chỉ kéo máy khi bật sắp xếp; thả vào ô trống cùng xưởng. Ô đã có máy hoặc thả ngoài rack không được làm mất máy. Esc hủy kéo, có hoàn tác.
+- Duy trì cách bấm chọn vị trí và sơ đồ 2D cho bàn phím hoặc khi không có WebGL.
+- Không chạy vòng lặp animation khi cảnh đứng yên; giải phóng tài nguyên khi đổi trang. Tải Three.js khi mở xưởng 3D.
+- Bản duyệt phải nói rõ vị trí chỉ lưu trong phiên; không giả nhận đã lưu server hoặc di chuyển máy ngoài thực tế.
