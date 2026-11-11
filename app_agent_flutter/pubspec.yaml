@@ -1,0 +1,27 @@
+name: beesky_agent_app
+description: "BeeSky Agent — Cấu hình agent tại trại (bản Flutter, stage 2)."
+publish_to: "none"
+# Mirror of the Python package version (0.31.0) + first Flutter build
+# of the agent app (its own build counter, like the main app's +N).
+version: 0.31.0+1
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+
+# Same stage rule as the main app: ZERO third-party packages. Only
+# dart:core / dart:io / dart:convert plus the Flutter SDK, so
+# `pub get` never needs to fetch a hosted dependency beyond the SDK.
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+  assets:
+    # The owner's official logo (packaging/assets/beesky-logo-512.png),
+    # copied — never redrawn. Same asset as the main app ships.
+    - assets/beesky-logo.png

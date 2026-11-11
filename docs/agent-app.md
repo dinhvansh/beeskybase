@@ -1,5 +1,20 @@
 # BeeSky Agent — app agent riêng tại trại (v0.14, chạy ngầm + bảo mật v0.16)
 
+> **v0.31 — bản Flutter + bộ cài hợp nhất:** cửa sổ cấu hình có thêm
+> bản Flutter (`beesky_agent_app.exe`, shortcut *BeeSky Agent
+> (Flutter)*) — cùng file cấu hình, cùng trạng thái chạy ngầm, nút
+> *Chạy thử* / *Bật tự khởi động* gọi đúng các lệnh của
+> `beesky-agent.exe` bên dưới; cửa sổ gốc trong tài liệu này vẫn
+> đi kèm làm bản dự phòng. Bộ cài chính `BeeSkySetup` nay gồm cả
+> agent (mục cài đặt *BeeSky Agent*, thư mục con `agent\`), và cả
+> hai bộ cài đều có **trang ghép nối tuỳ chọn lúc cài đặt** (Cloud
+> URL + Agent key + Tên trại — để trống thì cấu hình sau trong app
+> như bình thường; trang chỉ hiện khi máy chưa có file cấu hình).
+> Một khác biệt đã biết của bản Flutter: key đang lưu dạng DPAPI
+> thì ô key hiện trống kèm ghi chú "để trống để giữ nguyên, nhập
+> mới để thay" (bản gốc giải mã và hiện key). Chi tiết đối chiếu:
+> `docs/agent-app-mapping.md`.
+
 Từ v0.14, agent tại trại là **một app riêng** (`beesky-agent.exe`,
 bộ cài `BeeSkyAgentSetup-<version>.exe`) thay vì chỉ là một lệnh con
 của bộ công cụ chính. Máy PC ở trại chỉ cần cài đúng app này: mở lên,

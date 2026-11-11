@@ -4104,3 +4104,146 @@ plus the Type prefix; field semantics beyond it
 device session to close. Whatsminer token actions
 stay unbuilt until the token computation is
 evidenced (a farm session or a fuller dissection).
+# v0.31.0 — Flutter stage 2: agent config app + unified installer
+
+The port source this time is OUR OWN Tk agent app
+(beesky/agent_gui.py + agent_app.py + agent_config.py):
+its behaviour was dissected FIRST and the mapping written
+to docs/agent-app-mapping.md (Tk behaviour -> Flutter
+behaviour, divergences D1-D8 named) BEFORE any code. The
+Python core is the spec and is UNTOUCHED — git shows zero
+changes under beesky/ except the __init__ version pin.
+
+WHAT SHIPPED:
+
+  * app_agent_flutter/ — beesky_agent_app.exe: the Tk
+    window 1:1 (header + version pill; cards "Kết nối
+    cloud" / "Quét tại trại" / "Trạng thái chạy ngầm";
+    Lưu cấu hình / Chạy thử / Bật-Tắt tự khởi động; test
+    pill; footer status line). Config load/save mirrors
+    agent_config.py exactly (tolerant parse incl. the
+    absent-key-keeps-dataclass-default rule the tests
+    caught for user/password='root'; disk-as-base + five
+    form fields; core field order on disk; missing-fields
+    and interval validation with the Tk texts verbatim).
+    Process work drives the core's OWN verbs:
+    beesky-agent test (overlay flags) / install-task /
+    remove-task, schtasks /Query for the task state,
+    beesky sysinfo --json for the first-run prefill.
+    Mock mode (BEESKY_MOCK) with fixture config + status.
+  * Unified BeeSkySetup (packaging/installer.iss):
+    components main / agent (Types full = both, compact =
+    main only, both checked by default); {app} holds the
+    CLI + Tk GUI + the main Flutter bundle; {app}\agent
+    holds beesky-agent.exe/agentw + the agent Flutter
+    bundle. Existing shortcuts unchanged ("BeeSky" ->
+    Tk GUI, "BeeSky Agent" -> beesky-agent.exe); the
+    Flutter faces get their own shortcuts.
+  * BeeSkyAgentSetup (packaging/agent.iss) kept for
+    agent-only farm PCs, now also embedding the agent
+    Flutter bundle in {app}; its pinned shortcut text is
+    byte-identical to before.
+  * OPTIONAL install-time pairing (the Pulse pattern,
+    mapping §2): both installers offer a Cloud URL +
+    Agent key + Tên trại page — all three or none, only
+    when no config file exists — and write
+    %APPDATA%\BeeSky\agent-config.json post-install
+    (ASCII-escaped JSON; the target stays for the app's
+    first-run prefill). Pulse requires the pair; BeeSky's
+    page is optional (divergence D8 in the mapping).
+  * build-windows.yml builds both Flutter apps and
+    stages dist\flutter-main / dist\flutter-agent for
+    Inno; build-flutter.yml gains the mirror job that
+    produces BeeSkyAgentFlutter-<tag>-win64.zip.
+
+BEHAVIOUR-PARITY TABLE vs the Tk app (details + the
+D1-D8 divergences in docs/agent-app-mapping.md):
+
+  config fields / file / path resolution ... SAME (Dart mirror)
+  validation + status texts ................ VERBATIM
+  status-card derivation ................... SAME (poll 2 s, D7)
+  http cloud hint .......................... SAME function, mirrored
+  test / auto-start controls ............... SAME outcomes via the
+                                             core's CLI verbs (D3/D4)
+  first-run target prefill ................. via sidecar sysinfo;
+                                             blank on agent-only
+                                             installs (D5)
+  DPAPI key display/edit ................... NOT replicable in
+                                             Dart: protected key =
+                                             empty field + keep-or-
+                                             replace hint; typed key
+                                             stored in the core's
+                                             legacy plain form (D2)
+                                             <- the port's one real
+                                             security downgrade,
+                                             stated not hidden
+  native window title ...................... no version in it (D8)
+
+FINAL RELEASE ASSET LIST (tag build; was 7, now 8):
+
+  build-windows.yml -> BeeSkySetup-0.31.0.exe,
+    BeeSkyAgentSetup-0.31.0.exe, beesky.exe,
+    beesky-gui.exe, beesky-agent.exe, beesky-agentw.exe
+  build-flutter.yml -> BeeSkyFlutter-v0.31.0-win64.zip,
+    BeeSkyAgentFlutter-v0.31.0-win64.zip
+  (+ update-manifest.json/.sig on tag builds when the
+  UPDATE_SIGNING_KEY secret is configured — the manifest
+  itself is unchanged: exes + installers only, the
+  Flutter zips were never part of the self-update
+  channel.)
+
+(a) VERIFIED LOCALLY (this machine):
+
+  * Python (tests/run_mock_test_v31.sh, standalone
+    tallies — the core is untouched, so this is the
+    full regression set at established counts):
+    mock_vendors_test 51 PASS / 0 FAIL; pin suite
+    mock_agent_bg_test 52 PASS / 0 FAIL (under xvfb;
+    "versions in sync at 0.31.0"); mock_bridge_test 24;
+    mock_creds_test 32; mock_groups_test 39;
+    mock_units_test 50; mock_ops_test 32;
+    mock_ops2_test 34; mock_inspect_test 33;
+    mock_pools_test 43 — all 0 FAIL. Packaging-pin
+    suite mock_agent_app_test also run standalone:
+    34 PASS / 0 FAIL (agent.iss shortcut + workflow
+    asset counts intact after the packaging edits).
+  * Flutter (SDK 3.47.9 at ~/workspace/flutter-sdk):
+    main app — flutter analyze clean; flutter test
+    125 PASS / 0 FAIL (unchanged; only its version pins
+    moved). Agent app — flutter analyze clean;
+    flutter test 34 PASS / 0 FAIL (NEW: config parse /
+    round-trips incl. DPAPI-blob keep + typed-key
+    replace, missing-fields order, status derivation
+    cases incl. missing status, warning + path +
+    interval-format units; argv contracts for the test /
+    install-task / remove-task verbs incl. the
+    protected-key --key omission; widget tests — full
+    window render from fixtures, save over disk base,
+    both refusal messages, test cycle landing the
+    verdict, protected-key flow, auto-start toggle,
+    first-run sysinfo prefill, key masking toggle,
+    live http hint).
+
+(b) VERIFIED ONLY BY CI:
+
+  * Both Flutter Windows builds + both zips
+    (build-flutter.yml), and the two Inno installers
+    with the staged bundles (build-windows.yml). The
+    Inno [Code] pairing page is conservative, standard
+    Pascal Script (CreateCustomPage / TNewEdit /
+    TNewPasswordEdit / SaveStringToFile) but is NOT
+    compilable in this sandbox — the first CI run of
+    build-windows on this tag is its first compile;
+    if ISCC rejects it, the .iss [Code] blocks are the
+    only suspects. Both apps remain compile-verified
+    only until the owner runs them on real Windows
+    (as since v0.21).
+
+(c) HARDWARE / WINDOWS-UNCONFIRMED:
+
+  * The Flutter agent app against a real DPAPI-written
+    config (the protected-state flow is unit-tested
+    against the format, not against a live crypt32
+    blob), the schtasks probe + task verbs from the
+    Flutter process, and the unified installer's
+    component selection + pairing write on a real PC.

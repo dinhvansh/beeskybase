@@ -1,8 +1,8 @@
 name: beesky_app
 description: "BeeSky — Giám sát & chẩn đoán máy đào ASIC (bản Flutter, stage 1)."
 publish_to: "none"
-# Mirror of the Python package version (0.30.0) + tenth Flutter build.
-version: 0.30.0+10
+# Mirror of the Python package version (0.31.0) + eleventh Flutter build.
+version: 0.31.0+11
 
 environment:
   sdk: ">=3.5.0 <4.0.0"

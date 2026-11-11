@@ -1,20 +1,27 @@
-# BeeSky Flutter app — Windows build (programme stage 1, v0.21).
+# BeeSky Flutter apps — Windows builds (stage 1 v0.21; stage 2 v0.31
+# added the agent app job below).
 #
 # The Flutter shell (app_flutter/) drives the Python sidecar exe; it
 # ships as its OWN release asset, BeeSkyFlutter-<version>-win64.zip,
 # next to — never instead of — the Tk installer assets produced by
-# build-windows.yml. This workflow is deliberately a SEPARATE file
-# with a single independent job (no `needs:` on anything): if the
-# Flutter build breaks, the Python release still publishes exactly
-# as before, and the failure is visible here on its own. The Tk
-# apps remain the supported fallback until the Flutter shell proves
-# itself at the farm.
+# build-windows.yml. The agent app (app_agent_flutter/, stage 2)
+# mirrors it as BeeSkyAgentFlutter-<version>-win64.zip. This
+# workflow is deliberately a SEPARATE file with independent jobs
+# (no `needs:` on anything): if a Flutter build breaks, the Python
+# release still publishes exactly as before, and the failure is
+# visible here on its own. The Tk apps remain the supported
+# fallback until the Flutter shells prove themselves at the farm.
+# (Since v0.31 the installers ALSO embed both bundles — that
+# staging lives in build-windows.yml; these zips stay the
+# no-installer route.)
 #
-# The zip holds the Flutter runner folder only (beesky_app.exe +
-# flutter_windows.dll + data/). At runtime the shell looks for the
-# Python sidecar beesky.exe NEXT TO beesky_app.exe — drop the
-# beesky.exe from the same release beside it (see
-# app_flutter/README.md).
+# The zips hold the Flutter runner folders only (beesky_app.exe /
+# beesky_agent_app.exe + flutter_windows.dll + data/). At runtime
+# the main shell looks for the Python sidecar beesky.exe NEXT TO
+# beesky_app.exe — drop the beesky.exe from the same release beside
+# it (see app_flutter/README.md); the agent app resolves
+# beesky-agent.exe beside itself or one folder up (see
+# app_agent_flutter/README.md).
 #
 # Runs:
 #   * on every tag v* (same trigger as the installer workflow)
@@ -71,4 +78,48 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: BeeSkyFlutter-*.zip
+          fail_on_unmatched_files: true
+
+  # Stage 2 (v0.31): the agent config app — the exact mirror of the
+  # main app's job, for app_agent_flutter/.
+  build-agent-flutter-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build Windows release
+        working-directory: app_agent_flutter
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+          flutter build windows --release
+
+      - name: Zip the runner folder
+        shell: pwsh
+        run: |
+          $name = "BeeSkyAgentFlutter-${{ github.ref_name }}-win64"
+          Compress-Archive `
+            -Path "app_agent_flutter/build/windows/x64/runner/Release/*" `
+            -DestinationPath "$name.zip"
+          Write-Host "packed $name.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BeeSky-Agent-Flutter-Windows
+          path: BeeSkyAgentFlutter-*.zip
+          if-no-files-found: error
+
+      - name: Attach to GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: BeeSkyAgentFlutter-*.zip
           fail_on_unmatched_files: true

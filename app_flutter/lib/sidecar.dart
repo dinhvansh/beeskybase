@@ -467,7 +467,7 @@ class MockBridge implements BeeSkyBridge {
 
   @override
   Future<SysInfo> sysinfo() async =>
-      const SysInfo(version: '0.30.0', defaultTarget: '192.168.2.0/24');
+      const SysInfo(version: '0.31.0', defaultTarget: '192.168.2.0/24');
 
   @override
   Future<ScanResult> scan(String target, {String? credsFile}) async {
