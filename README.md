@@ -213,3 +213,9 @@ Dữ liệu nhóm, nhãn và bố trí hiện chỉ nằm trong phiên duyệt; 
 Thanh chọn kệ luôn có **Xoay trái / Xoay phải** theo bước 90°, **Vị trí & tầng**, và hoàn tác. Bật **Bố trí kệ** để kéo trên sàn; R xoay kệ đang chọn khi canvas có focus. Kiểm tra va chạm và giới hạn sàn vẫn áp dụng.
 
 **Toàn xưởng** hiển thị chung hai loại model máy trong nhà xưởng dạng cắt mái, với thông gió, bộ tản minh họa, ống cấp/hồi và lối đi. **Cận kệ** quay lại góc nhìn tập trung vào thiết bị. Thiết bị phụ trợ chỉ minh họa, không tự xác lập kết nối làm mát thực tế.
+
+### Hiệu ứng hoạt động trong xưởng
+
+Nút **Hiệu ứng: Bật/Tắt** điều khiển coin Bitcoin / `+ HASH` nổi lên, rotor minh họa ở máy gió, dòng hạt nước ở máy hydro và LED hoạt động. Máy offline không phát coin hay chạy rotor. Hiệu ứng theo máy khi đổi bố trí và theo bộ lọc đang dùng; coin/hash chỉ là trang trí, không phải số dư hay thu nhập thật.
+
+Cảnh giới hạn 30 khung/giây, tối đa 27 sprite coin/hash, dừng vòng vẽ khi tắt hiệu ứng, ra ngoài vùng xem hoặc ẩn tab. Tôn trọng cài đặt giảm chuyển động của hệ thống. Dọn vòng hoạt ảnh và listener khi chuyển tầng, đổi cảnh hoặc đóng 3D.

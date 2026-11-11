@@ -1,5 +1,6 @@
 import * as T from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {miningEffects} from './mining-effects.js';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 
 const minerTemplates=new Map();
@@ -18,7 +19,7 @@ export function mount(host,api){
   scene.background=new T.Color(c.bg);
   const renderer=new T.WebGLRenderer({antialias:true});
   renderer.setPixelRatio(Math.min(devicePixelRatio,2));
-  renderer.shadowMap.enabled=true;renderer.shadowMap.type=T.PCFSoftShadowMap;renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=1.15;
+  renderer.shadowMap.enabled=true;renderer.shadowMap.autoUpdate=false;renderer.shadowMap.type=T.PCFSoftShadowMap;renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=1.15;
   host.prepend(renderer.domElement);
   const canvas=renderer.domElement;
   canvas.tabIndex=0;canvas.setAttribute('aria-label','Xưởng 3D: kéo nền để xoay, cuộn để zoom. Dùng sơ đồ 2D để thao tác bằng bàn phím.');
@@ -128,7 +129,7 @@ export function mount(host,api){
   const size=extent.isEmpty()?new T.Vector3(20,5,12):extent.getSize(new T.Vector3());
   const selection=new T.BoxHelper(new T.Object3D(),c.selected);selection.visible=false;scene.add(selection);
   function selectRack(id){const g=groups.find(g=>g.userData.r.id===id);selection.visible=!!g;if(g)selection.setFromObject(g);draw()}
-  function draw(){renderer.render(scene,camera)}
+  function draw(){renderer.shadowMap.needsUpdate=true;renderer.render(scene,camera)}
   function view(mode='hall'){
     if(mode==='hall'){controls.target.set(0,1.5,0);const dist=Math.max(floorWidth*1.05,floorDepth*1.5)*Math.max(1,1.25/camera.aspect);camera.position.set(dist*.58,dist*.65,dist*.85);controls.update();draw();return}
     controls.target.copy(center);const dist=Math.max(12,size.x*.95,size.z*.95,height*2)*Math.max(1,1.6/camera.aspect);
@@ -165,6 +166,7 @@ export function mount(host,api){
   resize();view(api.mode()==='racks'?'top':'hall');selectRack(api.selectedRack());
   if(api.camera){camera.position.fromArray(api.camera.position);controls.target.fromArray(api.camera.target);controls.update()}
   reset();draw();
+  const effects=miningEffects(scene,slots,host,{...api,enabled:api.effects},()=>renderer.render(scene,camera));
   modelLoads.forEach(load=>load());
-  return {view,selectRack,focusDevice,highlight(){reset();draw()},cameraState(){return{position:camera.position.toArray(),target:controls.target.toArray()}},dispose(){if(disposed)return;disposed=true;observer.disconnect();controls.dispose();window.removeEventListener('keydown',escape);api.hover(null);const geometries=new Set(),materials=new Set();scene.traverse(o=>{if(o.geometry&&!o.geometry.userData.minerShared)geometries.add(o.geometry);for(const material of Array.isArray(o.material)?o.material:[o.material])if(material)materials.add(material)});materials.forEach(m=>{for(const texture of Object.values(m))if(texture?.isTexture&&!texture.userData.minerShared)texture.dispose();m.dispose()});geometries.forEach(g=>g.dispose());renderer.dispose();renderer.forceContextLoss();canvas.remove()}};
+  return {view,selectRack,focusDevice,setEffects(value){effects.setEnabled(value)},highlight(){reset();effects.refresh();draw()},cameraState(){return{position:camera.position.toArray(),target:controls.target.toArray()}},dispose(){if(disposed)return;disposed=true;effects.dispose();observer.disconnect();controls.dispose();window.removeEventListener('keydown',escape);api.hover(null);const geometries=new Set(),materials=new Set();scene.traverse(o=>{if(o.geometry&&!o.geometry.userData.minerShared)geometries.add(o.geometry);for(const material of Array.isArray(o.material)?o.material:[o.material])if(material)materials.add(material)});materials.forEach(m=>{for(const texture of Object.values(m))if(texture?.isTexture&&!texture.userData.minerShared)texture.dispose();m.dispose()});geometries.forEach(g=>g.dispose());renderer.dispose();renderer.forceContextLoss();canvas.remove()}};
 }
