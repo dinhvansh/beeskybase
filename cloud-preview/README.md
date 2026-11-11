@@ -2,6 +2,19 @@
 
 ## Xưởng 3D (Three.js)
 
+### Engine bố trí, tầng và toàn màn hình
+
+- **Toàn màn hình** mở vùng 3D có đủ camera, tầng và công cụ; **Thu nhỏ** trở về trang. Trình duyệt không hỗ trợ Fullscreen API vẫn có chế độ mở rộng trong trang.
+- **Thêm tầng**, đặt tên và kích thước sàn theo ô lưới; chọn tầng từ dropdown. Có đổi tên và xóa tầng trống, không xóa tầng đang có kệ hoặc tầng cuối cùng.
+- **Khám phá**: xoay/zoom camera, rê chuột xem IP/model/serial/nhiệt độ/trạng thái/tầng xưởng/vị trí; bấm máy mở chi tiết.
+- **Di chuyển máy**: kéo từng máy vào ô trống, dùng hoàn tác máy như trước.
+- **Bố trí kệ**: kéo cả kệ trên sàn (gợi ý dùng góc Từ trên), bám lưới 0,5; chọn kệ, xoay 90°, nhập tọa độ hoặc chuyển tầng qua **Vị trí & tầng**. Có **Hoàn tác kệ**; Esc hủy kéo, R xoay khi canvas có focus. Máy giữ nguyên ô khi kệ di chuyển/chuyển tầng.
+- Engine kiểm tra va chạm và biên sàn trước khi cập nhật. Mọi thao tác bị từ chối giữ nguyên dữ liệu. Mỗi xưởng/tầng có bố trí riêng. Tọa độ không phải kích thước đo thực tế.
+
+Logic độc lập ở `warehouse-engine.js`, cảnh Three.js ở `rack3d/scene.js`, adapter UI ở `rack-3d.js`. Chạy kiểm tra bố trí bằng `node --test tests/warehouse-engine.test.cjs` (8 ca: giữ máy khi di chuyển/undo, va chạm, biên, xoay, chuyển tầng, cách ly xưởng, undo lỗi thời, cấu hình tầng).
+
+Đã thử trên trình duyệt: Fullscreen API và thu nhỏ, hover chi tiết, kéo kệ trên sàn, chặn va chạm, Esc hủy, xoay/undo, tạo tầng và chuyển kệ bằng biểu mẫu trong toàn màn hình; kéo/undo máy sau thay đổi engine; bàn phím 2D; desktop 1366×768, mobile 390×844 và sáng/tối. Không thấy lỗi console trong các luồng đã thử. Vẫn là dữ liệu mẫu và chỉ lưu trong phiên.
+
 Mở `/#/farms?farm=bt`, chọn **Sắp xếp vị trí** rồi kéo máy sang ô trống cùng rack hoặc rack khác trong cùng xưởng. Có **Hoàn tác**, Esc hủy kéo và góc nhìn phối cảnh / mặt trước / từ trên. Có thể kéo máy chưa xếp từ thanh bên hoặc bấm **Chọn vị trí** rồi chọn ô trống. Ô đã có máy không nhận thả. Chuyển sang **2D** để thao tác bằng bàn phím hoặc dùng biểu mẫu vị trí.
 
 Tìm IP/model/serial/tên rack rồi chọn kết quả để đưa camera tới máy. 2D và 3D dùng chung dữ liệu, không tạo bản sao máy. Vị trí vẫn chỉ lưu trong phiên bản duyệt, tải lại trang sẽ khôi phục mẫu.

@@ -140,3 +140,13 @@ Các màu light đề xuất trong master prompt:
 - Duy trì cách bấm chọn vị trí và sơ đồ 2D cho bàn phím hoặc khi không có WebGL.
 - Không chạy vòng lặp animation khi cảnh đứng yên; giải phóng tài nguyên khi đổi trang. Tải Three.js khi mở xưởng 3D.
 - Bản duyệt phải nói rõ vị trí chỉ lưu trong phiên; không giả nhận đã lưu server hoặc di chuyển máy ngoài thực tế.
+
+### Engine bố trí xưởng
+
+- Có toàn màn hình, giữ chế độ này khi đổi tầng, kéo kệ, mở hộp thoại và hoàn tác. Khi thu nhỏ phải khôi phục tương tác/bàn phím của trang.
+- Tầng xưởng tách biệt với tầng trong kệ. Mỗi xưởng có danh sách tầng và bố trí riêng; không trộn dữ liệu giữa các xưởng.
+- Ba chế độ rõ ràng: Khám phá / Di chuyển máy / Bố trí kệ. Kéo camera không được vô tình đổi bố trí.
+- Kệ có tọa độ X/Z và góc xoay theo 90°. Bám lưới 0,5; kiểm tra biên sàn và va chạm trước khi lưu. Bị từ chối hoặc Esc phải giữ nguyên vị trí cũ.
+- Chuyển cả kệ giữa tầng phải giữ nguyên định danh máy và ô trong kệ. Có cách nhập vị trí bằng biểu mẫu thay cho kéo.
+- Rê chuột vào máy hiển thị IP, model, serial, nhiệt độ/trạng thái, tầng xưởng và vị trí trong kệ; chỉ dùng thông tin đã có.
+- Kích thước sàn của bản duyệt là ô lưới, không tự gán đơn vị mét hoặc coi là số đo hiện trường.
