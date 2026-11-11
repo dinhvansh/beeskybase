@@ -88,21 +88,30 @@ class ChainInfo {
   bool get isHot => tempC != null && tempC! >= tempLimitC;
 }
 
-/// One pool slot as a future core may emit it (wire key `pools`).
-/// Today's records carry NO pool data (see docs/grid-mapping.md
-/// §3.2) — the parse is defensive so the grid's pool columns light
-/// up unchanged when the core grows the field.
+/// One pool slot of a scan record (wire key `pools`). Since
+/// v0.28 the core fills it during a normal scan for the
+/// families that expose pools there — dashd from the summary
+/// it already fetched, cgminer via its RPC `pools` command;
+/// stock records omit the field (docs/presets-ipreport-
+/// mapping.md §4). [status] passes through verbatim from the
+/// firmware ("alive" / "Alive" — never remapped).
 class PoolInfo {
   final String url;
   final String worker;
-  const PoolInfo({required this.url, required this.worker});
+  final String? status;
+  const PoolInfo({required this.url, required this.worker, this.status});
 
   factory PoolInfo.fromJson(Map<String, dynamic> json) => PoolInfo(
         url: (json['url'] ?? '') as String,
         worker: (json['worker'] ?? json['user'] ?? '') as String,
+        status: json['status'] as String?,
       );
 
-  Map<String, dynamic> toJson() => {'url': url, 'worker': worker};
+  Map<String, dynamic> toJson() => {
+        'url': url,
+        'worker': worker,
+        if (status != null) 'status': status,
+      };
 }
 
 class MinerRecord {
@@ -146,9 +155,18 @@ class MinerRecord {
   /// one); parsed so the column/search light up if it ever lands.
   final String? mac;
 
-  /// Pool slots (wire `pools`) — a DATA-GAP today: scan records
-  /// carry no pool data. Empty until the core grows the field.
+  /// Pool slots (wire `pools`) — filled by the core since
+  /// v0.28 for vnish + cgminer records; empty for stock (no
+  /// scan-time source) and for error records.
   final List<PoolInfo> pools;
+
+  /// The operator's device note (v0.27 detail tab), decorated
+  /// APP-SIDE from the note store — never on the wire: the
+  /// core neither emits nor reads it, and [toJson] does not
+  /// serialise it. It exists so the grid's GHI CHÚ column
+  /// (v0.28) reads the note through the record like every
+  /// other cell (docs/presets-ipreport-mapping.md §6).
+  final String note;
 
   const MinerRecord({
     required this.ip,
@@ -170,7 +188,33 @@ class MinerRecord {
     this.powerW,
     this.mac,
     this.pools = const [],
+    this.note = '',
   });
+
+  /// A copy carrying [note] (the app-side decoration above);
+  /// every wire field is preserved untouched.
+  MinerRecord withNote(String note) => MinerRecord(
+        ip: ip,
+        model: model,
+        source: source,
+        chains: chains,
+        fansRpm: fansRpm,
+        chipsAlive: chipsAlive,
+        chipsTotal: chipsTotal,
+        maxTempC: maxTempC,
+        issues: issues,
+        status: status,
+        rateValue: rateValue,
+        rateUnit: rateUnit,
+        legacyThs: legacyThs,
+        credLabel: credLabel,
+        elapsedS: elapsedS,
+        ghs5s: ghs5s,
+        powerW: powerW,
+        mac: mac,
+        pools: pools,
+        note: note,
+      );
 
   factory MinerRecord.fromJson(Map<String, dynamic> json) {
     return MinerRecord(
@@ -354,8 +398,8 @@ class MinerRecord {
     return t == null ? '—' : '${t.toStringAsFixed(0)}°';
   }
 
-  /// Pool slot [i]'s URL / worker — empty strings while the record
-  /// carries no pool data (the v0.25 DATA-GAP).
+  /// Pool slot [i]'s URL / worker — empty strings when the record
+  /// carries no pool data (stock records, error records).
   String poolUrlAt(int i) => (i < pools.length) ? pools[i].url : '';
   String poolWorkerAt(int i) => (i < pools.length) ? pools[i].worker : '';
 
@@ -379,11 +423,13 @@ class MinerRecord {
 
   /// Everything the grid search matches against (HashCore: "Search
   /// by IP / MAC, Pool or Worker"; BeeSky adds model + worker from
-  /// every slot). MAC/pool parts are empty while they are gaps.
+  /// every slot + the device note). MAC parts are empty while the
+  /// MAC gap stands; pools are real data since v0.28.
   String get searchHaystack => [
         ip,
         mac ?? '',
         model,
+        note,
         for (final p in pools) ...[p.url, p.worker],
       ].join(' ').toLowerCase();
 }

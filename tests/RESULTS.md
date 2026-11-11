@@ -3413,3 +3413,310 @@ build-flutter.yml):
     runner and the BeeSkyFlutter-<tag>-win64.zip asset.
     The app remains compile-verified only until the
     owner runs it on real Windows (as since v0.21).
+
+---
+
+# v0.28.0 — Pool presets, clone config, scan-record pools, IP-Report (the final parity-sprint leg)
+
+The parity push closes its planned arc (owner's bar:
+99% of HashCore Toolkit in one month). Following the
+dissect-before-porting rule, the Toolkit's presets /
+clone / IP-Report mechanisms were dissected FIRST from
+the shipped materials (the en.json presets_center /
+pools_preset / ip_report keys, the Dart file map, the
+AOT string pools — incl. the change-pool help text that
+carries the worker-pattern list) and the behaviour
+mapping written to docs/presets-ipreport-mapping.md
+BEFORE any code — every behaviour graded VERIFIED /
+INFERRED / UNKNOWN, divergences named D1–D7, gaps
+G1–G2. The headline outcome of the dissection: pool
+presets and the pattern tokens are fully evidenced;
+the IP-Report WIRE FORMAT is not — no port, packet
+shape, or payload field is attributable to the
+Toolkit's listener anywhere in the materials — so
+IP-Report is a documented RESEARCH-GAP (§5 of the
+mapping) and was NOT built. Nothing was invented to
+fill it: no `beesky ipreport`, no app toggle, no fake
+fixture.
+
+PYTHON CORE:
+
+  * beesky/core/patterns.py (NEW): the worker-pattern
+    expander — the dissected token set, verified from
+    TWO sources (the AOT change-pool help text + the
+    enum.change_pool_pattern keys): {account} / {worker}
+    (the current pool-1 user split at its first dot;
+    no dot -> account is the whole string, worker is
+    empty), {ip:<divider>} (generalised divider),
+    {ip1}..{ip4}, {n[:start[:step]]} / {nn} / {nnn},
+    {pool-host} / {port} / {proto-str} (parsed from the
+    current pool URL), {mac} / {host} / {h}. A token
+    whose source data the device does not carry raises
+    PatternError (the device fails honestly) — never a
+    silent empty/guessed expansion (divergence D3;
+    HashCore's own behaviour here is UNKNOWN). {n}
+    counts the device's 1-based position in the job's
+    target list (D5 — HashCore's counting is UNKNOWN).
+    {mac}/{host} have no BeeSky scan-data source (D4).
+  * Scan-record pool enrichment (mapping §4): dashd
+    fetch_record attaches `pools` from the /summary it
+    already downloads (miner.pools, PoolStats) — ZERO
+    extra I/O; the cgminer family's CgminerClient gains
+    pools_normalised() over the previously scan-unused
+    RPC `pools` command (+1 RPC call inside the fetch's
+    existing timeout budget; ANY failure -> the field
+    is omitted, the record is untouched); stock scan
+    records OMIT pools (G2 — no scan-time source: the
+    status CGI carries none, and a stock candidate
+    exists precisely because its RPC did not claim the
+    host; inspect remains the deep path). One record
+    shape for both enriched families:
+    [{url, worker, status}] with worker normalised
+    from dashd `user` / cgminer `User` and status
+    VERBATIM ("alive" / "Alive" — no case folding).
+    Records without data omit the key (the v0.25 parse
+    already tolerated both). This lights up the v0.25
+    Pools columns + Pools view mode + grid search and
+    the v0.27 Pools tab with no app-side fetch.
+  * beesky/core/ops.py: switch_pool jobs accept a
+    `pools` payload — 1–3 slots {url, user, password?},
+    validated BEFORE any I/O (mutually exclusive with
+    the legacy pool_id/url/user payload -> exit 2;
+    legacy jobs stay byte-compatible). Slots execute
+    in order per device through the existing
+    actions.execute (pool_id = slot position),
+    stopping at the first failed slot; worker strings
+    expand per device via patterns.py ({n} index =
+    position in the validated, de-duplicated target
+    list). `clone_from` rides the job as information
+    only. The ops fetch path enriches records exactly
+    like the scan's, so {account}/{worker} expansion
+    reads the device's CURRENT pool.
+
+FLUTTER APP (app_flutter/):
+
+  * lib/presets.dart (NEW): PoolSlot / PoolPreset and
+    the Dart mirror of patterns.py (expandWorkerPattern
+    + PatternContext + PatternException) — pinned to
+    the SAME case table as the Python suite by both
+    test suites. lib/presets_dialogs.dart (NEW): the
+    Presets center ("Trung tâm mẫu" on the miners
+    toolbar) — ONE dialog, HashCore's two tabs: Bộ lọc
+    (the v0.25 filter presets: duplicate / delete with
+    confirm) and Pools (create / edit / duplicate /
+    delete); the pool-preset editor (name, description,
+    3 slot rows, the pattern help — HashCore's "Show
+    available patterns" — and a live worker Preview
+    against the first selected device); saving requires
+    slot 1 filled (the original's rule) and a same-name
+    save replaces after an inline warning.
+  * Storage: GridConfig gains `pool_presets` beside
+    `filter_presets` in beesky-grid.json (D1 — the
+    field SET is the dissected one; HashCore's own
+    storage keys are UNKNOWN).
+  * Apply: the Operations bar gains "Áp mẫu pool" —
+    pick a preset -> ONE switch_pool task (the v0.26
+    runner + confirm dialog + history) whose payload
+    carries the slots with worker patterns RAW
+    (expansion is core-side, per device). "Chép cấu
+    hình pool" — the clone: source = the detailed miner
+    when selected, else the first selected (HashCore's
+    first-device rule); its pools are read through the
+    v0.27 inspect path and applied to the selection
+    MINUS the source as a normal switch_pool task.
+    Clone is pools-only (D6 — HashCore clones the whole
+    settings profile; BeeSky has no write primitive for
+    the rest) and cloned slots carry no password, so a
+    target keeps its own per-slot password (D7).
+    Families without the config-write primitive fail
+    honestly per device (the mock bridge mirrors the
+    core: switch_pool on non-vnish sources fails).
+  * Stretch (mapping §6): the grid gains the `note`
+    column (GHI CHÚ, at the universe tail) fed app-side
+    — records are decorated from the note store
+    (deviceKeyFor keying, exactly like the store) on
+    scan landing, rescan replacement, and note save;
+    the wire never carries it and toJson never emits
+    it. The v0.25 pool columns' dataGap flags come off
+    (data is real for vnish/cgminer now). Group merge
+    ("Gộp nhóm" on the groups screen; mergeGroups —
+    keep's identity/autoscan, target union, cred union
+    by label+user+type+apiKey, newer lastScan wins;
+    HashCore's merge internals are UNKNOWN, its
+    existence/menu are VERIFIED) and "Lưu & quét" in
+    the group editor (save, then enter + scan the
+    group — a named BeeSky UX addition).
+  * Drive-by flake fix (disclosed, NOT a v0.28
+    feature): the row double-click detector measured
+    its 400 ms window with DateTime.now() (real wall
+    clock) while tests advance fake time — under load
+    the two taps landed >400 ms apart in real time and
+    the pre-existing home_actions double-click test
+    failed (opened == []) while passing in isolation
+    and in this release's baseline run. The window is
+    now measured on the pointer events' own monotonic
+    timeStamps; the contract (same row, <400 ms) is
+    unchanged and no test was edited.
+
+PER-ITEM MATCH / DIVERGENCE / GAP vs HASHCORE
+(full register: docs/presets-ipreport-mapping.md §7):
+
+  Pool presets: MATCH on shape (name + optional
+  description, <=3 slots of url+worker+password),
+  the Presets center's two tabs, the apply path
+  (Pool change dialog -> task), the slot-1-required
+  save rule, the first-device preview rule.
+  D1 storage keys (theirs UNKNOWN). D2 no stored
+  per-slot Don't change/Edit/Delete markers (dialog
+  state in the original too). D3 pattern failure =
+  per-device honest failure (theirs UNKNOWN).
+  D4 {mac}/{host}: tokens exist, data does not.
+  D5 {n} semantics: named BeeSky choice.
+  Clone: D6 pools-only scope; D7 target keeps its
+  own password.
+  Enrichment: not a HashCore feature — it removes a
+  BeeSky-side DATA-GAP named since v0.25.
+  IP-Report: G1 RESEARCH-GAP, NOT BUILT (mapping
+  §5.2 lists exactly what evidence is missing: the
+  listener's transport + port, the packet field
+  names, the sender set; the only evidenced DTOs are
+  Auradine's miner-side device API).
+  Stock pools in scans: G2 (inspect covers on
+  demand).
+
+FINAL PARITY CHECKLIST — v0.24–v0.28 vs the
+UI-ANALYSIS copy-list (the sprint's roll-up):
+
+  v0.24 Network groups: groups home screen, farms-
+  style store, cards + MỚI tag, per-group creds over
+  global, per-group autoscan, export/import — SHIPPED.
+  Its named leftovers: group merge — SHIPPED v0.28;
+  "Save and scan" — SHIPPED v0.28 ("Lưu & quét");
+  IP-Report -> group — OPEN (G1, wire evidence);
+  combined view / group search / reset-statistics /
+  rescan-all / per-group timeout — OPEN (not ported).
+  v0.25 Data grid: view axes + Overview heat-grid,
+  29 configurable columns (30 with v0.28's NOTE),
+  sort/search/filter model + presets, grouping,
+  selection + isolate, hotkey intents — SHIPPED.
+  Its named leftovers: Presets center — SHIPPED
+  v0.28; pool columns' data — SHIPPED v0.28 (vnish +
+  cgminer; stock OPEN, G2); Note column — SHIPPED
+  v0.28; zoom / command palette — OPEN (named gaps
+  since v0.25); MAC / S/N columns — OPEN (no core
+  data source).
+  v0.26 Operations: task runner (NDJSON, bounded
+  workers, stagger, cooperative cancel), confirm
+  dialog, progress + Stop, persistent history —
+  SHIPPED for rescan / reboot / switch_pool /
+  export. Its named leftovers: cloneSettings —
+  SHIPPED v0.28 (pools-only, D6); updateNote —
+  SHIPPED v0.27; pause / resume / findMiner /
+  resetFirmware / removeFirmware / resetAutotune* /
+  throttle / configureApiKey / diagnosticReport —
+  OPEN (dashd-documented, no BeeSky code path);
+  bulk firmware — DEFERRED by design to
+  `beesky fw install`; unlock — GAP-GATED by design
+  (the CLI's three hard gates, never a bulk action);
+  conditionalRestart / changePassword /
+  configureNetwork — OPEN (semantics unverified).
+  v0.27 Device detail: six tabs (Số liệu / Biểu đồ /
+  Board / Pools / Quạt / Ghi chú), inspect bridge,
+  vnish grade split, per-family honest unsupported
+  sections — SHIPPED. Its named leftovers: grid Note
+  column — SHIPPED v0.28; Pools from the record —
+  SHIPPED v0.28; Hotel Fee — NOT APPLICABLE (no such
+  concept in BeeSky); PCB temp — inspect-only (the
+  record carries chip temp alone); MAC keying —
+  'when present' (no adapter emits a MAC today).
+  v0.28 (this release): pool presets + Presets
+  center, pattern expansion, clone pool config,
+  scan-record enrichment — SHIPPED; IP-Report —
+  RESEARCH-GAP (G1). Also observed in the Toolkit,
+  noted, not ported: CSV bulk network-config import
+  (8 documented columns).
+
+  What remains between BeeSky and the Toolkit after
+  the sprint is therefore: one feature blocked on
+  evidence (IP-Report), one family blocked on data
+  (stock scan pools), the dashd-documented ops tail
+  (pause/resume/find/reset/throttle family), and
+  polish items (zoom, command palette, group
+  combined view/search). Everything else on the
+  copy-list is shipped and test-covered on both
+  sides (core + app).
+
+(a) VERIFIED LOCALLY (this sandbox):
+
+  * Python suites at the v0.28.0 pins (the release
+    sweep, tests/run_mock_test_v28.sh):
+
+    mock_pools_test: 43 PASS / 0 FAIL (standalone)
+    mock_agent_bg_test: 52 PASS / 0 FAIL (standalone)
+    mock_bridge_test: 24 PASS / 0 FAIL (standalone)
+    mock_creds_test: 32 PASS / 0 FAIL (standalone)
+    mock_groups_test: 39 PASS / 0 FAIL (standalone)
+    mock_units_test: 50 PASS / 0 FAIL (standalone)
+    mock_ops_test: 32 PASS / 0 FAIL (standalone)
+    mock_inspect_test: 33 PASS / 0 FAIL (standalone)
+
+    mock_pools_test (NEW) covers: the pattern case
+    table (literal passthrough; {account}/{worker}
+    split incl. the no-dot rule; {ip:.} + octets;
+    {n}/{nn}/{nnn} incl. start/step and index-0;
+    {pool-host}/{port}/{proto-str}; honest failures
+    for missing current pool, {mac}, {host}, unknown
+    and malformed tokens; needs_current_pool);
+    pools_normalised's never-raise contract (error
+    reply / transport failure / no POOLS -> None);
+    scan enrichment end to end (dashd record ==
+    [{pool.example.com:3333, mockworker.001, "alive"}]
+    verbatim; cgminer == [{..., "Alive"}]; the stock
+    record omits the key); ops validation (pools
+    payload accepted, mixed payloads exit 2 incl.
+    through the CLI); apply end to end over two dashd
+    mocks (slots in order; {account} reuses the
+    device's own account; {nn} numbers farm.01 /
+    farm.02 in TARGET-LIST order across two targets;
+    {ip4} in slot 2; a {mac} job fails the device and
+    writes nothing; stock apply = not supported;
+    a clone-shaped payload keeps the target's own
+    password). All regression suites keep their exact
+    v0.27 counts — no existing suite pinned the
+    absence of record pools.
+
+  * Flutter (SDK 3.47.9 at ~/workspace/flutter-sdk):
+    flutter analyze: clean; flutter test: 110 PASS /
+    0 FAIL (local SDK 3.47.9; 94 pre-existing + 16 new
+    presets tests) — the Dart pattern table identical
+    to the Python one (incl. {n} ordering across
+    indices and every failure mode); PoolPreset /
+    GridConfig JSON round-trips incl. the pool_presets
+    key + GridStore persistence; empty-slot dropping
+    + the job form's password omission; mergeGroups
+    semantics (union, dedup, newer lastScan, one-sided
+    and both-null scans). Widget level: the Presets
+    center's two tabs; pool CRUD reporting through
+    onChanged (create / duplicate suffix / confirmed
+    delete); the editor's slot-1 rule, clash warning,
+    and live Preview; the center opening from the
+    toolbar; apply (seeded preset -> picker -> confirm
+    -> a switch_pool entry in the history file);
+    clone (S19 + L9 checked -> the confirm lists ONLY
+    the target -> history targets exclude the source
+    and the cgminer result is an honest failure);
+    enrichment rendering (Pools view mode shows the
+    record pools; the detail Pools tab renders the
+    S19's pools + both 'alive' statuses with no
+    inspect); the note column showing a seeded note;
+    "Lưu & quét" saving and landing in the group's
+    scan. Pre-existing tests touched: only the
+    version pin in widget_test.dart (v0.28.0).
+
+(b) VERIFIED ONLY BY CI (.github/workflows/
+build-flutter.yml):
+
+  * flutter build windows --release on a real Windows
+    runner and the BeeSkyFlutter-<tag>-win64.zip asset.
+    The app remains compile-verified only until the
+    owner runs it on real Windows (as since v0.21).

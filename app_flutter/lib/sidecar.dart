@@ -418,6 +418,10 @@ class MockBridge implements BeeSkyBridge {
    "fans_rpm": [4120, 4080, 4150, 4090], "chips_alive": 342, "chips_total": 342,
    "max_temp_c": 65.0, "problems": [], "status": "OK",
    "cred_label": "VNish trại A",
+   "pools": [{"url": "stratum+tcp://pool.example.com:3333",
+              "worker": "mockworker.001", "status": "alive"},
+             {"url": "stratum+tcp://backup.example.com:3333",
+              "worker": "mockworker.002", "status": "alive"}],
    "rate_value": 110.5, "rate_unit": "TH/s", "ths": 110.5},
   {"ip": "192.168.2.102", "model": "Antminer L9", "source": "cgminer",
    "chains": [{"index": 0, "temp_c": 57.0, "chips_alive": 123, "chips_total": 123},
@@ -427,6 +431,8 @@ class MockBridge implements BeeSkyBridge {
    "max_temp_c": 59.0,
    "problems": [{"code": "MISSING_CHIPS", "severity": "warn",
                  "detail": "board 1: 84/123 chip"}],
+   "pools": [{"url": "stratum+tcp://pool.example.com:3333",
+              "worker": "mockworker.001", "status": "Alive"}],
    "status": "CHECK", "rate_value": 14.54, "rate_unit": "MH/s", "ths": null},
   {"ip": "192.168.2.103", "model": "Antminer Z15", "source": "cgminer",
    "chains": [{"index": 0, "temp_c": 71.0, "chips_alive": 24, "chips_total": 24},
@@ -450,7 +456,7 @@ class MockBridge implements BeeSkyBridge {
 
   @override
   Future<SysInfo> sysinfo() async =>
-      const SysInfo(version: '0.27.0', defaultTarget: '192.168.2.0/24');
+      const SysInfo(version: '0.28.0', defaultTarget: '192.168.2.0/24');
 
   @override
   Future<ScanResult> scan(String target, {String? credsFile}) async {

@@ -13,6 +13,7 @@ import 'groups.dart';
 import 'models.dart';
 import 'ops.dart';
 import 'ops_dialogs.dart';
+import 'presets_dialogs.dart';
 import 'sidecar.dart';
 import 'theme.dart';
 
@@ -253,8 +254,32 @@ class _HomePageState extends State<HomePage> {
   Future<void> _loadNotes() async {
     final loaded = await _noteStore.load();
     if (!mounted) return;
-    setState(() => _notes = loaded);
+    setState(() {
+      _notes = loaded;
+      // Notes may land after a scan already rendered: re-decorate
+      // so the GHI CHÚ column catches up (v0.28 wiring).
+      if (_records.isNotEmpty) {
+        _records = _decorateNotes(_records);
+        final sel = _selected;
+        if (sel != null) {
+          _selected = _records.firstWhere(
+            (r) => r.ip == sel.ip,
+            orElse: () => sel,
+          );
+        }
+      }
+    });
   }
+
+  /// Decorate records with the operator's notes (v0.28): the
+  /// note store is keyed exactly like history (deviceKeyFor),
+  /// and the decorated copy is what the grid renders — the
+  /// GHI CHÚ column (and search) read rec.note. Wire data is
+  /// untouched; the note never leaves the app.
+  List<MinerRecord> _decorateNotes(List<MinerRecord> records) => [
+        for (final rec in records)
+          rec.withNote(_notes[deviceKeyFor(rec)] ?? ''),
+      ];
 
   Future<void> _saveHistory() async {
     try {
@@ -381,8 +406,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _editGroup({NetGroup? existing}) async {
-    final result = await showGroupEditorDialog(context, existing: existing);
-    if (result == null || !mounted) return;
+    final outcome = await showGroupEditorDialog(context, existing: existing);
+    if (outcome == null || !mounted) return;
+    final (result, scanAfter) = outcome;
     final clash = _groups.any(
       (g) => g.name == result.name && g.id != result.id,
     );
@@ -405,6 +431,99 @@ class _HomePageState extends State<HomePage> {
         if (_activeGroup?.id == existing.id) _activeGroup = result;
         _status = 'Đã sửa nhóm ${result.name}.';
       }
+    });
+    await _saveGroups();
+    // "Lưu & quét" (v0.28): enter the saved group and scan it
+    // through the normal group-scan path.
+    if (scanAfter && mounted) _scanGroup(result);
+  }
+
+  /// "Gộp nhóm" (v0.28): merge one group into another
+  /// (mergeGroups' stated semantics) — pick the surviving
+  /// group and the group folded into it, confirm, save.
+  Future<void> _mergeGroupFlow() async {
+    if (_groups.length < 2 || _busy) return;
+    var keep = _groups.first;
+    var other = _groups[1];
+    final merged = await showDialog<NetGroup>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          backgroundColor: BeeSkyColors.panel2,
+          title: const Text('Gộp nhóm mạng'),
+          content: SizedBox(
+            width: 440,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Nhóm được giữ lại sẽ nhận toàn bộ dải quét và '
+                  'tài khoản riêng của nhóm bị gộp; nhóm bị gộp '
+                  'sẽ bị xóa.',
+                  style: TextStyle(
+                      color: BeeSkyColors.muted, fontSize: 12.5),
+                ),
+                const SizedBox(height: 12),
+                const Text('Giữ nhóm:'),
+                DropdownButton<NetGroup>(
+                  value: keep,
+                  isExpanded: true,
+                  items: [
+                    for (final g in _groups)
+                      DropdownMenuItem(value: g, child: Text(g.name)),
+                  ],
+                  onChanged: (g) => setLocal(() {
+                    keep = g ?? keep;
+                    if (other.id == keep.id) {
+                      other = _groups.firstWhere(
+                        (x) => x.id != keep.id,
+                        orElse: () => other,
+                      );
+                    }
+                  }),
+                ),
+                const SizedBox(height: 8),
+                const Text('Gộp nhóm này vào:'),
+                DropdownButton<NetGroup>(
+                  value: other,
+                  isExpanded: true,
+                  items: [
+                    for (final g in _groups)
+                      if (g.id != keep.id)
+                        DropdownMenuItem(value: g, child: Text(g.name)),
+                  ],
+                  onChanged: (g) => setLocal(() => other = g ?? other),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Hủy'),
+            ),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.of(ctx).pop(mergeGroups(keep, other)),
+              child: const Text('Gộp nhóm'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (merged == null || !mounted) return;
+    setState(() {
+      _groups = [
+        for (final g in _groups)
+          if (g.id == merged.id)
+            merged
+          else if (g.id != other.id)
+            g,
+      ];
+      if (_activeGroup?.id == other.id) _activeGroup = merged;
+      if (_activeGroup?.id == merged.id) _activeGroup = merged;
+      _status = 'Đã gộp nhóm ${other.name} vào ${merged.name}.';
     });
     await _saveGroups();
   }
@@ -550,10 +669,10 @@ class _HomePageState extends State<HomePage> {
   void _applyScanResult(ScanResult result) {
     _appendHistorySamples(result.records);
     setState(() {
-      _records = result.records;
+      _records = _decorateNotes(result.records);
       _lastScan = result;
       _scanned = true;
-      _selected = result.records.isEmpty ? null : result.records.first;
+      _selected = _records.isEmpty ? null : _records.first;
       // Checkbox selections for machines that left the fleet are
       // dropped (the selection model stays honest across rescans).
       _selection.retainOnly(result.records);
@@ -651,9 +770,12 @@ class _HomePageState extends State<HomePage> {
   Future<void> _startOps(
     OpsTaskType type, {
     Map<String, dynamic>? payload,
+    List<String>? targetsOverride,
   }) async {
     if (_runningTask != null || _busy) return;
-    final targets = _selectedTargets();
+    // Clone (v0.28) runs over the selection MINUS its source —
+    // the one caller that does not target the raw selection.
+    final targets = targetsOverride ?? _selectedTargets();
     if (targets.isEmpty) return;
     if (type.needsConfirm) {
       final confirmed = await showOpsConfirmDialog(context, type, targets);
@@ -726,12 +848,14 @@ class _HomePageState extends State<HomePage> {
       // way), and the detail panel follows if it shows this miner.
       final fresh = event.record;
       if (fresh != null) {
+        final decorated =
+            fresh.withNote(_notes[deviceKeyFor(fresh)] ?? '');
         final idx = _records.indexWhere((r) => r.ip == fresh.ip);
         if (idx >= 0) {
           final next = [..._records];
-          next[idx] = fresh;
+          next[idx] = decorated;
           _records = next;
-          if (_selected?.ip == fresh.ip) _selected = fresh;
+          if (_selected?.ip == fresh.ip) _selected = decorated;
         }
       }
     });
@@ -888,6 +1012,138 @@ class _HomePageState extends State<HomePage> {
           });
         },
       ),
+    );
+  }
+
+  /// The first checkbox-selected record in table order.
+  MinerRecord? _firstSelectedRecord() {
+    for (final rec in _records) {
+      if (_selection.isSelected(rec.ip)) return rec;
+    }
+    return null;
+  }
+
+  /// The Presets center (v0.28): both preset kinds in one
+  /// dialog; mutations land on the grid config and persist
+  /// through the grid store like every other grid change.
+  Future<void> _openPresetsCenter() async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => PresetsCenterDialog(
+        config: _grid,
+        previewRecord: _firstSelectedRecord() ?? _selected,
+        onChanged: (cfg) {
+          setState(() {
+            _grid.filterPresets = cfg.filterPresets;
+            _grid.poolPresets = cfg.poolPresets;
+          });
+          _saveGrid();
+        },
+      ),
+    );
+  }
+
+  /// "Áp mẫu pool" (v0.28): pick a saved pool preset and run
+  /// it over the selection as ONE switch_pool task — the
+  /// worker patterns ride raw in the job payload and expand
+  /// core-side per device (docs/presets-ipreport-mapping.md
+  /// §3). The confirm dialog is _startOps' own (switchPool
+  /// is a mutating type).
+  Future<void> _applyPoolPreset() async {
+    if (_grid.poolPresets.isEmpty) {
+      _showSnack(
+        'Chưa có mẫu pool nào — tạo mẫu trong Trung tâm mẫu trước.',
+      );
+      return;
+    }
+    final preset = await showPoolPresetPickerDialog(
+      context,
+      presets: _grid.poolPresets,
+    );
+    if (preset == null || !mounted) return;
+    final slots = preset.activeSlots;
+    if (slots.isEmpty) {
+      _showSnack('Mẫu "${preset.name}" không có pool nào để áp.');
+      return;
+    }
+    await _startOps(
+      OpsTaskType.switchPool,
+      payload: {
+        'pools': [for (final s in slots) s.toJobJson()],
+      },
+    );
+  }
+
+  /// The inspect document for [rec]: the session cache when
+  /// the detail panel already fetched it, else one fetch
+  /// through the same path the panel uses.
+  Future<InspectResult?> _inspectOf(MinerRecord rec) async {
+    final cached = _inspectCache[rec.ip];
+    if (cached != null) return cached;
+    await _ensureInspect(rec);
+    return _inspectCache[rec.ip];
+  }
+
+  /// "Chép cấu hình pool" (v0.28): clone the SOURCE miner's
+  /// pool configuration onto the other selected miners. The
+  /// source is the detailed miner when it is part of the
+  /// selection, else the first selected (HashCore's
+  /// first-device rule); its pools are read through the
+  /// v0.27 inspect path, and the apply is a normal
+  /// switch_pool task over the selection MINUS the source.
+  /// dashd inspect pools carry no password — cloned slots
+  /// send none, so each target keeps its own per-slot
+  /// password (docs/presets-ipreport-mapping.md §2).
+  Future<void> _clonePoolConfig() async {
+    final selected = [
+      for (final rec in _records)
+        if (_selection.isSelected(rec.ip)) rec,
+    ];
+    if (selected.isEmpty) return;
+    final detailed = _selected;
+    final source = (detailed != null &&
+            selected.any((r) => r.ip == detailed.ip))
+        ? detailed
+        : selected.first;
+    final targets = [
+      for (final r in selected)
+        if (r.ip != source.ip) r.ip,
+    ];
+    if (targets.isEmpty) {
+      _showSnack(
+        'Chép cấu hình pool cần ít nhất một máy đích ngoài '
+        'máy nguồn ${source.ip}.',
+      );
+      return;
+    }
+    setState(
+      () => _status = 'Đang đọc cấu hình pool của ${source.ip}…',
+    );
+    final insp = await _inspectOf(source);
+    if (!mounted) return;
+    if (insp == null || insp.error != null || !insp.pools.supported) {
+      final reason =
+          insp?.error ?? insp?.pools.reason ?? 'chưa đọc được pool';
+      setState(
+        () => _status = 'Chép cấu hình pool: máy nguồn '
+            '${source.ip} không đọc được pool ($reason).',
+      );
+      _showSnack('Không chép được từ ${source.ip}: $reason');
+      return;
+    }
+    final slots = [
+      for (final p in insp.pools.pools)
+        if (p.url != null && p.user != null)
+          {'url': p.url!, 'user': p.user!},
+    ];
+    if (slots.isEmpty) {
+      _showSnack('Máy nguồn ${source.ip} không báo pool nào để chép.');
+      return;
+    }
+    await _startOps(
+      OpsTaskType.switchPool,
+      payload: {'clone_from': source.ip, 'pools': slots},
+      targetsOverride: targets,
     );
   }
 
@@ -1204,6 +1460,12 @@ class _HomePageState extends State<HomePage> {
             label: const Text('Lịch sử tác vụ'),
             style: _ghostBtnStyle,
           ),
+          OutlinedButton.icon(
+            onPressed: _busy ? null : _openPresetsCenter,
+            icon: const Icon(Icons.bookmarks_outlined, size: 16),
+            label: const Text('Trung tâm mẫu'),
+            style: _ghostBtnStyle,
+          ),
         ],
       ),
     );
@@ -1363,6 +1625,14 @@ class _HomePageState extends State<HomePage> {
                       }
                     }
                   : null,
+            ),
+            _miniButton(
+              'Áp mẫu pool',
+              _runningTask == null ? _applyPoolPreset : null,
+            ),
+            _miniButton(
+              'Chép cấu hình pool',
+              _runningTask == null ? _clonePoolConfig : null,
             ),
             _miniButton(
               'Xuất danh sách',
@@ -1861,6 +2131,13 @@ class _HomePageState extends State<HomePage> {
                   style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
                 ),
               ),
+              if (_groups.length >= 2)
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _mergeGroupFlow,
+                  icon: const Icon(Icons.merge_type, size: 17),
+                  label: const Text('Gộp nhóm'),
+                ),
+              if (_groups.length >= 2) const SizedBox(width: 8),
               FilledButton.icon(
                 onPressed: _busy ? null : () => _editGroup(),
                 icon: const Icon(Icons.add, size: 17),
@@ -2277,7 +2554,7 @@ class _HomePageState extends State<HomePage> {
       message: '${rec.ip} • ${rec.model}\n'
           '${rec.rateText} • ${rec.tempText} • ${rec.statusLabel}',
       child: Listener(
-        onPointerDown: (_) => _rowPointerDown(rec),
+        onPointerDown: (e) => _rowPointerDown(rec, e.timeStamp),
         child: InkWell(
           onTap: () => setState(() => _selected = rec),
           child: Container(
@@ -2516,7 +2793,7 @@ class _HomePageState extends State<HomePage> {
         ),
         Expanded(
           child: Listener(
-            onPointerDown: (_) => _rowPointerDown(rec),
+            onPointerDown: (e) => _rowPointerDown(rec, e.timeStamp),
             child: InkWell(
               onTap: () => setState(() => _selected = rec),
               child: Container(
@@ -2601,15 +2878,20 @@ class _HomePageState extends State<HomePage> {
   /// second down on the SAME row within the double-click window
   /// also opens that miner's web admin in the default browser.
   String? _lastRowIp;
-  DateTime? _lastRowTapAt;
+  Duration? _lastRowTapAt;
 
-  void _rowPointerDown(MinerRecord rec) {
-    final now = DateTime.now();
+  void _rowPointerDown(MinerRecord rec, Duration timeStamp) {
+    // The window is measured on the pointer events' own
+    // monotonic timestamps, NOT DateTime.now() (v0.28 flake
+    // fix): the wall clock made the double-click depend on
+    // real execution time between the two taps — under load
+    // the home_actions double-click test flaked (opened ==
+    // []) while passing in isolation. Same 400 ms contract.
     final isDouble = _lastRowIp == rec.ip &&
         _lastRowTapAt != null &&
-        now.difference(_lastRowTapAt!) < const Duration(milliseconds: 400);
+        timeStamp - _lastRowTapAt! < const Duration(milliseconds: 400);
     _lastRowIp = rec.ip;
-    _lastRowTapAt = now;
+    _lastRowTapAt = timeStamp;
     setState(() => _selected = rec);
     if (isDouble) _openMinerWeb(rec);
   }
@@ -3102,12 +3384,17 @@ class _HomePageState extends State<HomePage> {
 
   Widget _poolsTab(MinerRecord rec) {
     if (rec.pools.isNotEmpty) {
+      // The record's own pools (v0.28 core enrichment) — shown
+      // WITHOUT an inspect fetch; the status passes through
+      // verbatim from the firmware.
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           for (var i = 0; i < rec.pools.length; i++) ...[
             _kv('Pool ${i + 1} URL', rec.pools[i].url),
             _kv('Pool ${i + 1} worker', rec.pools[i].worker),
+            if (rec.pools[i].status != null)
+              _kv('Trạng thái', rec.pools[i].status!),
             const SizedBox(height: 6),
           ],
         ],
@@ -3273,6 +3560,16 @@ class _HomePageState extends State<HomePage> {
         _notes.remove(key);
       } else {
         _notes[key] = text;
+      }
+      // The grid's GHI CHÚ column reads the decorated record —
+      // refresh the decoration so the save shows immediately.
+      _records = _decorateNotes(_records);
+      final sel = _selected;
+      if (sel != null && sel.ip == rec.ip) {
+        _selected = _records.firstWhere(
+          (r) => r.ip == rec.ip,
+          orElse: () => sel,
+        );
       }
       _status = 'Đã lưu ghi chú cho ${rec.ip}.';
     });

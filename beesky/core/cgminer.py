@@ -130,3 +130,31 @@ class CgminerClient:
     def pools(self) -> dict:
         """Return the full pools reply dict (POOLS list inside)."""
         return self.command("pools")
+
+    def pools_normalised(self) -> list[dict] | None:
+        """The scan-record pool list from the `pools` command (v0.28).
+
+        [{url, worker, status}] with values verbatim (cgminer
+        "Alive" keeps its capital — no mapping), or None when the
+        command fails / is refused / carries no POOLS list. NEVER
+        raises: this is an enrichment call riding a scan fetch —
+        its failure must cost the field, never the record
+        (docs/presets-ipreport-mapping.md §4).
+        """
+        try:
+            resp = self.pools()
+        except Exception:  # noqa: BLE001 — enrichment must not sink a scan
+            return None
+        status = resp.get("STATUS")
+        if isinstance(status, list) and status and \
+                isinstance(status[0], dict) and \
+                status[0].get("STATUS") == "E":
+            return None
+        raw = resp.get("POOLS")
+        if not isinstance(raw, list):
+            return None
+        return [{
+            "url": entry.get("URL"),
+            "worker": entry.get("User"),
+            "status": entry.get("Status"),
+        } for entry in raw if isinstance(entry, dict)]

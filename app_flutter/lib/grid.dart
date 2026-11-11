@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'models.dart';
+import 'presets.dart';
 
 /// The data-grid miners list (v0.25) — the HashCore Toolkit's list
 /// machinery ported per docs/grid-mapping.md: configurable columns,
@@ -101,6 +102,7 @@ class GridColumnDef {
         'pool2Worker' => _dash(rec.poolWorkerAt(1)),
         'pool3Url' => _dash(rec.poolUrlAt(2)),
         'pool3Worker' => _dash(rec.poolWorkerAt(2)),
+        'note' => _dash(rec.note),
         _ => '—',
       };
 
@@ -199,12 +201,19 @@ const List<GridColumnDef> gridColumnUniverse = [
   GridColumnDef('boardTemp3', 'BOARD 3', 1, kind: GridColumnKind.numeric),
   GridColumnDef('boardTemp4', 'BOARD 4', 1, kind: GridColumnKind.numeric),
   GridColumnDef('credLabel', 'ĐĂNG NHẬP', 3),
-  GridColumnDef('pool1Url', 'POOL 1', 4, dataGap: true),
-  GridColumnDef('pool1Worker', 'POOL 1 WORKER', 3, dataGap: true),
-  GridColumnDef('pool2Url', 'POOL 2', 4, dataGap: true),
-  GridColumnDef('pool2Worker', 'POOL 2 WORKER', 3, dataGap: true),
-  GridColumnDef('pool3Url', 'POOL 3', 4, dataGap: true),
-  GridColumnDef('pool3Worker', 'POOL 3 WORKER', 3, dataGap: true),
+  // Pool columns: a DATA-GAP until v0.27; since v0.28 the core
+  // fills record pools for vnish + cgminer scans, so the gap
+  // flags are OFF (stock rows still render "—" — no scan-time
+  // source there, docs/presets-ipreport-mapping.md §4).
+  GridColumnDef('pool1Url', 'POOL 1', 4),
+  GridColumnDef('pool1Worker', 'POOL 1 WORKER', 3),
+  GridColumnDef('pool2Url', 'POOL 2', 4),
+  GridColumnDef('pool2Worker', 'POOL 2 WORKER', 3),
+  GridColumnDef('pool3Url', 'POOL 3', 4),
+  GridColumnDef('pool3Worker', 'POOL 3 WORKER', 3),
+  // The device note (v0.27) as a column (v0.28): fed by the
+  // app-side note decoration on the record, never the wire.
+  GridColumnDef('note', 'GHI CHÚ', 4),
 ];
 
 GridColumnDef? gridColumnById(String id) {
@@ -683,6 +692,11 @@ class GridConfig {
   GridGroupBy groupBy;
   List<FilterPreset> filterPresets;
 
+  /// Pool presets (v0.28) share this store with the filter
+  /// presets — HashCore's Presets center holds both kinds in
+  /// one place; BeeSky's one file mirrors that (mapping §3).
+  List<PoolPreset> poolPresets;
+
   GridConfig({
     List<String>? columnOrder,
     Set<String>? visibleColumns,
@@ -693,10 +707,12 @@ class GridConfig {
     GridSort? sort,
     this.groupBy = GridGroupBy.none,
     List<FilterPreset>? filterPresets,
+    List<PoolPreset>? poolPresets,
   })  : columnOrder = columnOrder ?? _factoryOrder(),
         visibleColumns = visibleColumns ?? {...gridDefaultVisible},
         sort = sort ?? GridSort(),
-        filterPresets = filterPresets ?? [];
+        filterPresets = filterPresets ?? [],
+        poolPresets = poolPresets ?? [];
 
   static List<String> _factoryOrder() =>
       gridColumnUniverse.map((c) => c.id).toList();
@@ -742,6 +758,7 @@ class GridConfig {
         'sort': sort.toJson(),
         'group_by': groupBy.name,
         'filter_presets': filterPresets.map((p) => p.toJson()).toList(),
+        'pool_presets': poolPresets.map((p) => p.toJson()).toList(),
       };
 
   factory GridConfig.fromJson(Map<String, dynamic> json) {
@@ -782,6 +799,11 @@ class GridConfig {
     cfg.filterPresets = ((json['filter_presets'] as List<dynamic>?) ?? const [])
         .whereType<Map<String, dynamic>>()
         .map(FilterPreset.fromJson)
+        .where((p) => p.name.isNotEmpty)
+        .toList();
+    cfg.poolPresets = ((json['pool_presets'] as List<dynamic>?) ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map(PoolPreset.fromJson)
         .where((p) => p.name.isNotEmpty)
         .toList();
     return cfg;

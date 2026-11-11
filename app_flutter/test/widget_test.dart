@@ -30,7 +30,7 @@ void main() {
       expect(find.text('Sự kiện'), findsOneWidget);
       expect(find.text('Cài đặt'), findsOneWidget);
       expect(find.text('SAU'), findsNWidgets(5));
-      expect(find.text('BeeSky v0.27.0'), findsOneWidget);
+      expect(find.text('BeeSky v0.28.0'), findsOneWidget);
       expect(find.text('Ruột quét: dữ liệu mẫu'), findsOneWidget);
 
       // v0.24: the app OPENS on network groups (the HashCore home

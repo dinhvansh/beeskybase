@@ -224,6 +224,13 @@ def _fetch_record(cand: Candidate, args: argparse.Namespace) -> dict:
             record = report.error_record(ip, str(exc), source="cgminer")
         else:
             record = report.build_record(ip, summary, stats, source="cgminer")
+            # Pool enrichment (v0.28): one extra RPC call of the
+            # same class/timeout as summary+stats; its failure
+            # omits the field, never the record (docs/presets-
+            # ipreport-mapping.md §4).
+            pools = client.pools_normalised()
+            if pools is not None:
+                record["pools"] = pools
     # The winning set's label rides the record (v0.23) so the apps can
     # show which login a machine line uses; error records and RPC /
     # default-cred records stay label-free.

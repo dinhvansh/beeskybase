@@ -326,7 +326,7 @@ class DashdClient:
         state = miner.get("miner_status") or {}
         elapsed = state.get("miner_state_time") or 0
 
-        return report.build_record_from_boards(
+        record = report.build_record_from_boards(
             ip,
             model=model,
             elapsed_s=int(elapsed),
@@ -337,6 +337,19 @@ class DashdClient:
             source="vnish",
             power_w=_as_float(miner.get("power_consumption")),
         )
+        # Pool enrichment (v0.28): the summary THIS fetch already
+        # downloaded carries the PoolStats list — the record gains
+        # it at zero extra I/O (docs/presets-ipreport-mapping.md
+        # §4). Values pass through verbatim; only the key is
+        # normalised (dashd "user" -> the record's "worker").
+        raw_pools = miner.get("pools")
+        if isinstance(raw_pools, list):
+            record["pools"] = [{
+                "url": p.get("url"),
+                "worker": p.get("user"),
+                "status": p.get("status"),
+            } for p in raw_pools if isinstance(p, dict)]
+        return record
 
 
 def _temp_max(temp_range) -> float | None:

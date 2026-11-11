@@ -160,6 +160,55 @@ String newGroupId() {
   ).join();
 }
 
+/// The union of two target specs (v0.28 group merge): items
+/// comma-joined, de-duplicated by item text, keep-order first.
+String unionTargetSpecs(String a, String b) {
+  final seen = <String>{};
+  final out = <String>[];
+  for (final part in [...a.split(','), ...b.split(',')]) {
+    final item = part.trim();
+    if (item.isNotEmpty && seen.add(item)) out.add(item);
+  }
+  return out.join(', ');
+}
+
+/// Merge group [other] INTO [keep] (v0.28 — HashCore's "Merge
+/// network groups"; its internal semantics are UNKNOWN, so
+/// these are BeeSky's, stated in docs/presets-ipreport-
+/// mapping.md §6): keep's id/name/autoscan survive; targets
+/// are the union; creds are keep's sets then other's sets not
+/// already present (identity = label + user + type + apiKey);
+/// lastScan is the NEWER of the two (the freshest summary of
+/// the merged ranges), the existing one when only one side
+/// was ever scanned, null only when neither was.
+NetGroup mergeGroups(NetGroup keep, NetGroup other) {
+  String credKey(CredSet c) =>
+      '${c.label}|${c.user}|${c.type}|${c.apiKey}';
+  final have = keep.creds.map(credKey).toSet();
+  final creds = [
+    ...keep.creds.map((c) => c.copy()),
+    for (final c in other.creds)
+      if (have.add(credKey(c))) c.copy(),
+  ];
+  GroupLastScan? lastScan;
+  final a = keep.lastScan, b = other.lastScan;
+  if (a != null && b != null) {
+    final at = a.atTime, bt = b.atTime;
+    lastScan = (at != null && bt != null && bt.isAfter(at)) ? b : a;
+  } else {
+    lastScan = a ?? b;
+  }
+  return NetGroup(
+    id: keep.id,
+    name: keep.name,
+    targets: unionTargetSpecs(keep.targets, other.targets),
+    creds: creds,
+    autoscanEnabled: keep.autoscanEnabled,
+    autoscanIntervalMin: keep.autoscanIntervalMin,
+    lastScan: lastScan,
+  );
+}
+
 /// Is an app-side autoscan pass due for [group]? (Pure, so the
 /// timer wiring stays a one-liner and the rule is unit-testable.)
 /// [lastRun] is when this app last scanned the group (or its
@@ -286,14 +335,17 @@ List<NetGroup> demoGroups() => [
 /// The group editor dialog: name, targets, the autoscan toggle +
 /// interval, and the group's own credential sets (the shared
 /// [CredSetsEditor] — an empty list means "use the global sets").
-/// Returns the edited group on Save (id and last_scan preserved
-/// when editing), null on cancel. Empty name/targets are refused
-/// with an inline error — the core would reject them anyway.
-Future<NetGroup?> showGroupEditorDialog(
+/// Returns (edited group, scanAfter) on Save — scanAfter is the
+/// v0.28 "Lưu & quét" submit (save, then enter + scan the group
+/// immediately; a BeeSky UX addition, mapping §6) — or null on
+/// cancel. Id and last_scan are preserved when editing. Empty
+/// name/targets are refused with an inline error — the core
+/// would reject them anyway.
+Future<(NetGroup, bool)?> showGroupEditorDialog(
   BuildContext context, {
   NetGroup? existing,
 }) {
-  return showDialog<NetGroup>(
+  return showDialog<(NetGroup, bool)>(
     context: context,
     builder: (_) => _GroupEditorDialog(existing: existing),
   );
@@ -327,7 +379,7 @@ class _GroupEditorDialogState extends State<_GroupEditorDialog> {
     super.dispose();
   }
 
-  void _save() {
+  void _save({required bool scanAfter}) {
     final name = _name.text.trim();
     final targets = _targets.text.trim();
     if (name.isEmpty || targets.isEmpty) {
@@ -337,7 +389,7 @@ class _GroupEditorDialogState extends State<_GroupEditorDialog> {
       return;
     }
     final interval = int.tryParse(_interval.text.trim());
-    Navigator.of(context).pop(
+    Navigator.of(context).pop((
       NetGroup(
         id: widget.existing?.id ?? newGroupId(),
         name: name,
@@ -348,7 +400,8 @@ class _GroupEditorDialogState extends State<_GroupEditorDialog> {
             (interval == null || interval < 1) ? 30 : interval,
         lastScan: widget.existing?.lastScan,
       ),
-    );
+      scanAfter,
+    ));
   }
 
   @override
@@ -437,7 +490,14 @@ class _GroupEditorDialogState extends State<_GroupEditorDialog> {
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Hủy'),
         ),
-        FilledButton(onPressed: _save, child: const Text('Lưu')),
+        TextButton(
+          onPressed: () => _save(scanAfter: false),
+          child: const Text('Lưu'),
+        ),
+        FilledButton(
+          onPressed: () => _save(scanAfter: true),
+          child: const Text('Lưu & quét'),
+        ),
       ],
     );
   }

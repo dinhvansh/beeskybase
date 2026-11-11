@@ -14,7 +14,16 @@ sets are referenced by file path exactly like scan's --creds-file):
 
     {"type": "reboot" | "rescan" | "switch_pool",
      "targets": ["192.168.2.101", ...],
-     "payload": {...},            # switch_pool only
+     "payload": {...},            # switch_pool only: the legacy
+                                  # single-slot {pool_id, url, user,
+                                  # password} OR (v0.28) the preset/
+                                  # clone form {"pools": [{url, user,
+                                  # password?}, ...]} — 1..3 slots,
+                                  # executed in order as pool_id
+                                  # 0..2; worker strings may carry
+                                  # {pattern} tokens (core.patterns),
+                                  # expanded per device against the
+                                  # target list + the enriched record
      "group": "Trại chính",        # optional: creds layer 1 (v0.24)
      "creds_file": "sets.json",   # optional: creds layer 2 (v0.23)
      "groups_file": "groups.json",# optional store override
@@ -63,7 +72,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from . import actions, report
+from . import actions, patterns, report
 from .bitmain import BitmainClient, BitmainError
 from .cgminer import CgminerClient, CgminerError
 from .dashd import DashdClient, DashdError
@@ -166,6 +175,43 @@ def validate_job(raw) -> dict:
     if not isinstance(payload, dict):
         raise JobError("job \"payload\" must be an object")
     if task_type == "switch_pool":
+        if "pools" in payload:
+            # The v0.28 preset/clone form — validated fully here
+            # so a malformed preset touches nothing (the exit-2
+            # rule). Mutually exclusive with the single-slot form.
+            if any(k in payload for k in ("pool_id", "url", "user")):
+                raise JobError(
+                    "switch_pool payload: \"pools\" cannot be "
+                    "combined with the single-slot \"pool_id\" / "
+                    "\"url\" / \"user\" form")
+            slots = payload["pools"]
+            if not isinstance(slots, list) or not 1 <= len(slots) <= 3:
+                raise JobError(
+                    "switch_pool payload \"pools\" must be a list "
+                    "of 1 to 3 slots")
+            normalised: list[dict] = []
+            for i, slot in enumerate(slots):
+                if not isinstance(slot, dict):
+                    raise JobError(
+                        f"switch_pool pools slot {i} must be an "
+                        "object")
+                url, user = slot.get("url"), slot.get("user")
+                if not isinstance(url, str) or not url \
+                        or not isinstance(user, str) or not user:
+                    raise JobError(
+                        f"switch_pool pools slot {i} needs "
+                        "non-empty \"url\" and \"user\"")
+                entry = {"url": url, "user": user}
+                pw = slot.get("password")
+                if pw is not None:
+                    if not isinstance(pw, str):
+                        raise JobError(
+                            f"switch_pool pools slot {i} "
+                            "\"password\" must be a string")
+                    if pw:
+                        entry["password"] = pw
+                normalised.append(entry)
+            payload = {**payload, "pools": normalised}
         if "pool_id" in payload:
             try:
                 pool_id = int(payload["pool_id"])
@@ -325,13 +371,94 @@ def _fetch_record(cand, timeout: float) -> dict:
         else:
             record = report.build_record(ip, summary, stats,
                                          source="cgminer")
+            # Pool enrichment (v0.28) — the cli fetch's twin
+            # (docs/presets-ipreport-mapping.md §4).
+            pools = client.pools_normalised()
+            if pools is not None:
+                record["pools"] = pools
     if cand.cred_label and not any(
             p.get("code") == "FETCH_ERROR" for p in record["problems"]):
         record["cred_label"] = cand.cred_label
     return record
 
 
-def _run_one(ip: str, job: dict, merged: list[dict] | None):
+def _expand_user(template: str, ip: str, index: int, cand,
+                 job: dict) -> tuple[bool, str]:
+    """Expand one worker template for one device (v0.28).
+
+    Returns (True, expanded) or (False, failure-message). The
+    current-pool tokens ({account} / {pool-host} / …) read the
+    device's enriched record — fetched here through the same
+    candidate the probe produced; a device whose pools cannot
+    be read fails those tokens honestly (patterns.PatternError
+    names the missing data). {index} is the device's 0-based
+    position in the job's target list — the {n} counter keys
+    off the LIST, so parallel workers cannot scramble it.
+    """
+    if "{" not in template:
+        return True, template
+    current_user = current_url = None
+    if patterns.needs_current_pool(template):
+        try:
+            record = _fetch_record(cand, job["timeout"])
+        except Exception:  # noqa: BLE001 — expansion reports it below
+            record = {}
+        pools = record.get("pools") or []
+        if pools:
+            current_user = pools[0].get("worker")
+            current_url = pools[0].get("url")
+    ctx = patterns.PatternContext(ip=ip, index=index,
+                                  current_user=current_user,
+                                  current_url=current_url)
+    try:
+        return True, patterns.expand_worker(template, ctx)
+    except patterns.PatternError as exc:
+        return False, f"pool pattern: {exc}"
+
+
+def _switch_pool_one(ip: str, index: int, cand, job: dict,
+                     creds: dict) -> tuple[bool, str]:
+    """switch_pool for one device — both payload forms (v0.28).
+
+    Legacy single-slot payloads run exactly as v0.26 did (plus
+    pattern expansion of the user field). The pools form (pool
+    presets + clone) executes one single-slot write per slot,
+    IN ORDER, stopping at the first failure — a half-applied
+    preset that kept going would be worse than a stopped one;
+    the message reports each executed slot's outcome.
+    """
+    payload = job["payload"] or {}
+    slots = payload.get("pools")
+    if slots is None:
+        single = dict(payload)
+        if single.get("user"):
+            ok, expanded = _expand_user(single["user"], ip, index,
+                                        cand, job)
+            if not ok:
+                return False, expanded
+            single["user"] = expanded
+        return actions.execute(ip, cand.source, "switch_pool",
+                               single or None, creds)
+    messages: list[str] = []
+    for slot_idx, slot in enumerate(slots):
+        ok, expanded = _expand_user(slot["user"], ip, index, cand,
+                                    job)
+        if not ok:
+            return False, expanded
+        slot_payload = {"pool_id": slot_idx, "url": slot["url"],
+                        "user": expanded}
+        if slot.get("password"):
+            slot_payload["password"] = slot["password"]
+        ok, message = actions.execute(ip, cand.source, "switch_pool",
+                                      slot_payload, creds)
+        messages.append(f"pool {slot_idx + 1}: {message}")
+        if not ok:
+            return False, "; ".join(messages)
+    return True, "; ".join(messages)
+
+
+def _run_one(ip: str, index: int, job: dict,
+             merged: list[dict] | None):
     """One device: probe, then act. Returns (ok, message, record?).
 
     The probe is guarded: a device answering with malformed HTTP
@@ -357,6 +484,9 @@ def _run_one(ip: str, job: dict, merged: list[dict] | None):
             return False, f"rescan: {detail}", record
         return True, f"rescanned ({cand.source})", record
     creds = _action_creds(cand, merged, job)
+    if job["type"] == "switch_pool":
+        ok, message = _switch_pool_one(ip, index, cand, job, creds)
+        return ok, message, None
     ok, message = actions.execute(ip, cand.source, job["type"],
                                   job["payload"] or None, creds)
     return ok, message, None
@@ -396,7 +526,8 @@ def run_job(job: dict, emit, cancel: threading.Event | None = None) -> dict:
     # stagger_s apart — executions may overlap, onsets don't pile up.
     gate = {"next_at": 0.0}
 
-    def work(ip: str) -> None:
+    def work(item: tuple[int, str]) -> None:
+        index, ip = item
         nonlocal done_count
         if cancel is not None and cancel.is_set():
             return
@@ -410,7 +541,7 @@ def run_job(job: dict, emit, cancel: threading.Event | None = None) -> dict:
                 time.sleep(wait)
             if cancel is not None and cancel.is_set():
                 return
-        ok, message, record = _run_one(ip, job, merged)
+        ok, message, record = _run_one(ip, index, job, merged)
         with lock:
             done_count += 1
             entry = {"event": "result", "done": done_count, "total": total,
@@ -421,7 +552,7 @@ def run_job(job: dict, emit, cancel: threading.Event | None = None) -> dict:
         emit(entry)
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        list(pool.map(work, targets))
+        list(pool.map(work, enumerate(targets)))
 
     completed = len(results)
     ok_n = sum(1 for e in results.values() if e["ok"])
