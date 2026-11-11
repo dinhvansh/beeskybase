@@ -15,3 +15,6 @@ tests/mock_scan.json
 tests/mock_scan_v2.json
 tests/tickets/
 tests/tickets_v2/
+
+# Local workflow editor dependencies
+node_modules/
