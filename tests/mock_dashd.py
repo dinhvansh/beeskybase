@@ -22,6 +22,22 @@ for password ``mock-pw``); ``GET /settings`` accepts the API key
 only, like the doc says. Every action hit is recorded to the JSON
 state file named by the BEESKY_MOCK_DASHD_STATE env var (when set).
 
+The v0.29 ops tail adds the remaining documented write endpoints:
+bodyless ``POST /mining/pause|resume|restart`` (auth),
+``POST /locate-miner`` (NO auth — the doc declares none; it toggles
+an internal flag and replies ``{"is_enabled": ...}``),
+``POST /mining/throttle`` (auth; percent outside the doc's 20..100
+is a 400 ``{"err": ...}`` refusal; percent **55** is this mock's
+magic value whose SaveConfigResult carries
+``restart_required: true`` so the flags-surfacing path is testable),
+``POST /autotune/reset`` + ``/reset-all`` (auth; bodies recorded),
+``POST /apikeys`` + ``/apikeys/delete`` (auth; a key that is not
+exactly 32 chars is a 400 refusal; re-adding a known key reports
+``updated``), and the reads ``GET /perf-summary`` (no auth; the
+current preset is ``perf-110``) + ``GET /autotune/presets`` (auth).
+Every hit records WHICH auth won (``apikey`` / ``bearer``) so tests
+assert the request shape, not just success.
+
 Run directly to serve forever:  python3 tests/mock_dashd.py [host] [port]
 """
 
@@ -49,7 +65,21 @@ _POOLS = [
      "pass": "x", "use_tls": False},
 ]
 _ACTION_STATE = {"reboots": [], "switch_pools": [], "settings_posts": [],
-                 "unlocks": 0, "active_pool": 0, "firmware_updates": []}
+                 "unlocks": 0, "active_pool": 0, "firmware_updates": [],
+                 # v0.29 ops tail
+                 "mining_posts": [], "locate_hits": 0, "locate_on": False,
+                 "throttles": [], "autotune_resets": [],
+                 "apikey_adds": [], "apikey_deletes": [],
+                 "known_apikeys": []}
+
+CURRENT_PRESET = {"name": "perf-110", "pretty": "Perf 110 TH/s",
+                  "status": "tuned"}
+AUTOTUNE_PRESETS = [
+    {"name": "perf-110", "pretty": "Perf 110 TH/s", "status": "tuned",
+     "tune_settings": None},
+    {"name": "eco-95", "pretty": "Eco 95 TH/s", "status": "untuned",
+     "tune_settings": None},
+]
 
 
 def _parse_multipart(headers, body: bytes):
@@ -277,11 +307,18 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _authed(self, api_key_only: bool = False) -> bool:
+        return self._auth_kind(api_key_only) is not None
+
+    def _auth_kind(self, api_key_only: bool = False):
+        """Which credential won: "apikey" / "bearer" / None (v0.29 —
+        the tail tests assert WHICH header carried the write)."""
         if self.headers.get("x-api-key") == API_KEY:
-            return True
+            return "apikey"
         if api_key_only:
-            return False
-        return self.headers.get("Authorization") == f"Bearer {JWT}"
+            return None
+        if self.headers.get("Authorization") == f"Bearer {JWT}":
+            return "bearer"
+        return None
 
     def _read_body(self) -> dict:
         try:
@@ -302,6 +339,19 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(401, {"err": "unauthorized"})
             else:
                 self._send_json(200, settings_payload())
+            return
+        if self.path == "/api/v1/perf-summary":
+            # The api-doc declares NO security for /perf-summary.
+            self._send_json(200, {
+                "current_preset": CURRENT_PRESET,
+                "preset_switcher": {"enabled": False},
+            })
+            return
+        if self.path == "/api/v1/autotune/presets":
+            if not self._authed():
+                self._send_json(401, {"err": "unauthorized"})
+            else:
+                self._send_json(200, AUTOTUNE_PRESETS)
             return
         payload_fn = _ROUTES.get(self.path)
         if payload_fn is None:
@@ -340,6 +390,97 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(200, {"token": JWT})
             else:
                 self._send_json(403, {"err": "invalid password"})
+            return
+        if self.path == "/api/v1/locate-miner":
+            # The api-doc declares NO security for /locate-miner:
+            # no auth gate here on purpose. Bodyless toggle; the
+            # reply reports the resulting state (LocateMinerStatus).
+            _ACTION_STATE["locate_hits"] += 1
+            _ACTION_STATE["locate_on"] = not _ACTION_STATE["locate_on"]
+            _record_state()
+            self._send_json(200, {"is_enabled": _ACTION_STATE["locate_on"]})
+            return
+        if self.path in ("/api/v1/mining/pause", "/api/v1/mining/resume",
+                         "/api/v1/mining/restart"):
+            kind = self._auth_kind()
+            if kind is None:
+                self._send_json(401, {"err": "unauthorized"})
+                return
+            _ACTION_STATE["mining_posts"].append(
+                {"path": self.path, "auth": kind})
+            _record_state()
+            self._send_json(200, {})
+            return
+        if self.path == "/api/v1/mining/throttle":
+            kind = self._auth_kind()
+            if kind is None:
+                self._send_json(401, {"err": "unauthorized"})
+                return
+            percent = body.get("percent")
+            if not isinstance(percent, int) or isinstance(percent, bool) \
+                    or not 20 <= percent <= 100:
+                self._send_json(400, {
+                    "err": f"percent {percent!r} out of range 20..100"})
+                return
+            _ACTION_STATE["throttles"].append(
+                {"percent": percent, "auth": kind})
+            _record_state()
+            # Magic value 55: the mock's SaveConfigResult asks for a
+            # mining restart, so the flags path is testable.
+            self._send_json(200, {
+                "restart_required": percent == 55,
+                "reboot_required": False})
+            return
+        if self.path in ("/api/v1/autotune/reset",
+                         "/api/v1/autotune/reset-all"):
+            kind = self._auth_kind()
+            if kind is None:
+                self._send_json(401, {"err": "unauthorized"})
+                return
+            if self.path.endswith("reset-all"):
+                if not isinstance(body.get("restart"), bool):
+                    self._send_json(400, {
+                        "err": "restart (bool) is required"})
+                    return
+            elif not isinstance(body.get("presets"), list) \
+                    or not isinstance(body.get("restart"), bool):
+                self._send_json(400, {
+                    "err": "presets (list) and restart (bool) "
+                           "are required"})
+                return
+            _ACTION_STATE["autotune_resets"].append(
+                {"path": self.path, "body": body, "auth": kind})
+            _record_state()
+            self._send_json(200, {})
+            return
+        if self.path in ("/api/v1/apikeys", "/api/v1/apikeys/delete"):
+            kind = self._auth_kind()
+            if kind is None:
+                self._send_json(401, {"err": "unauthorized"})
+                return
+            key = body.get("key")
+            if not isinstance(key, str) or len(key) != 32:
+                self._send_json(400, {
+                    "err": "key must be exactly 32 characters"})
+                return
+            if self.path.endswith("/delete"):
+                _ACTION_STATE["apikey_deletes"].append(
+                    {"key": key, "auth": kind})
+                if key in _ACTION_STATE["known_apikeys"]:
+                    _ACTION_STATE["known_apikeys"].remove(key)
+                _record_state()
+                self._send_json(200, {})
+            else:
+                status = "updated" if key in _ACTION_STATE[
+                    "known_apikeys"] else "inserted"
+                if status == "inserted":
+                    _ACTION_STATE["known_apikeys"].append(key)
+                _ACTION_STATE["apikey_adds"].append(
+                    {"key": key,
+                     "description": body.get("description"),
+                     "auth": kind})
+                _record_state()
+                self._send_json(200, {"status": status})
             return
         if self.path in ("/api/v1/system/reboot",
                          "/api/v1/mining/switch-pool",

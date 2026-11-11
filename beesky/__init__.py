@@ -1,3 +1,3 @@
 """BeeSky — ASIC miner LAN scanner & repair diagnostics."""
 
-__version__ = "0.28.0"
+__version__ = "0.29.0"

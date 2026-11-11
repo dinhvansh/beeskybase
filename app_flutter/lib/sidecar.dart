@@ -456,7 +456,7 @@ class MockBridge implements BeeSkyBridge {
 
   @override
   Future<SysInfo> sysinfo() async =>
-      const SysInfo(version: '0.28.0', defaultTarget: '192.168.2.0/24');
+      const SysInfo(version: '0.29.0', defaultTarget: '192.168.2.0/24');
 
   @override
   Future<ScanResult> scan(String target, {String? credsFile}) async {
@@ -744,6 +744,57 @@ class _MockOpsRun implements OpsRun {
         'switch_pool is not supported for this source yet (mock)',
         null,
       );
+    }
+    // The v0.29 VNish tail is dashd-only in the core, so the mock
+    // fails it honestly on other families too (vnish-ops-mapping).
+    const dashdOnly = {
+      'pause_mining',
+      'resume_mining',
+      'restart_mining',
+      'find_miner',
+      'throttle',
+      'reset_autotune_all',
+      'reset_autotune_current',
+      'configure_api_key',
+      'set_preset',
+      'change_password',
+    };
+    if (dashdOnly.contains(type) && rec.source != 'vnish') {
+      return (
+        false,
+        '$type is not supported for this source yet (mock)',
+        null,
+      );
+    }
+    if (type == 'diagnostic_report') {
+      // The BeeSky-variant bundle: any answering family produces
+      // one in the real core (record + inspect), so the mock does
+      // too — the message names the file it would have written.
+      return (
+        true,
+        'diagnostic report saved: $ip-diagnostic.json (mock)',
+        null,
+      );
+    }
+    final payload = _job['payload'] as Map<String, dynamic>?;
+    final tailMessages = <String, String>{
+      'pause_mining': 'dashd accepted mining pause (mock)',
+      'resume_mining': 'dashd accepted mining resume (mock)',
+      'restart_mining': 'dashd accepted mining restart (mock)',
+      'find_miner': 'dashd locate-miner is ON (mock)',
+      'throttle':
+          'dashd throttle set to ${payload?['percent'] ?? 100}% (mock)',
+      'reset_autotune_all': 'dashd reset ALL autotune profiles (mock)',
+      'reset_autotune_current':
+          "dashd reset the current autotune profile 'perf-110' (mock)",
+      'configure_api_key': 'dashd saved the API key — '
+          "device reports 'inserted' (mock)",
+      'set_preset':
+          "dashd preset set to '${payload?['preset'] ?? ''}' (mock)",
+      'change_password': 'dashd accepted the password change (mock)',
+    };
+    if (tailMessages.containsKey(type)) {
+      return (true, tailMessages[type]!, null);
     }
     return (
       true,

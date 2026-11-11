@@ -92,3 +92,30 @@ add/removeApiKey) — internal building blocks, INFERRED.
 | 4.5 | Parallel iterations + optional stagger pause + per-command timeout are global Settings (§1.8). | ADAPTED: they ride the JOB — `workers` (default 4, hard cap 8), `stagger_s` (default 0), `timeout` (default 3.0 s). The app uses the defaults in v0.26; no Settings UI yet. The stagger keeps its HashCore purpose: devices don't all execute at the same instant. |
 | 4.6 | Cred resolution per task: global → group → one-shot task method (§1.
 ...[truncated 2085 chars]
+## 6. Status update — v0.29.0 (the VNish ops tail)
+
+The §3 gap list above is updated by v0.29.0, whose own
+mapping (docs/vnish-ops-mapping.md) dissects dashd's
+api-doc directly. In short: pause / resume **SHIPPED**
+(`pause_mining` / `resume_mining`); restart **UN-merged**
+and shipped for dashd (`restart_mining`);
+findMiner **SHIPPED** (`find_miner` via /locate-miner);
+throttle **SHIPPED**; resetAutotuneProfiles /
+resetCurrentAutotuneProfile **SHIPPED**
+(`reset_autotune_all` / `reset_autotune_current`);
+configureApiKey **SHIPPED**; diagnosticReport **SHIPPED
+as a labelled BeeSky variant** (record + inspect bundle;
+no dashd diagnostics endpoint exists); changePassword
+**SHIPPED** (PasswordChange contract verified in the
+doc; partial-write semantics INFERRED, hardware-
+unconfirmed). Still gaps: conditionalRestart (no
+documented condition source), resetFirmware /
+removeFirmware (this release's safety scope —
+firmware-family actions stay deliberate), configureNetwork
+(GAP-UNVERIFIED, unchanged), install/update firmware
+(DEFERRED to `beesky fw`, unchanged), unlock (GAP-GATED,
+unchanged), restoreCvFirmware (no adapter), cloneSettings
+(pool-scoped clone shipped in v0.28; full-profile clone
+still has no write primitive for the non-pool sections).
+The full per-action table with endpoints and auth lives
+in tests/RESULTS.md (v0.29.0 section).

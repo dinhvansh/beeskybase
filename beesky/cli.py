@@ -1141,10 +1141,11 @@ def main(argv: list[str] | None = None) -> int:
 
     ops = sub.add_parser(
         "ops", help="run ONE Operations task (rescan / reboot / "
-                    "switch_pool) over a set of miners, streaming "
-                    "NDJSON progress (v0.26; docs/operations-"
-                    "mapping.md). The job is a JSON FILE — secrets "
-                    "never ride the command line")
+                    "switch_pool / the v0.29 VNish tail) over a "
+                    "set of miners, streaming NDJSON progress "
+                    "(v0.26; docs/operations-mapping.md + "
+                    "docs/vnish-ops-mapping.md). The job is a JSON "
+                    "FILE — secrets never ride the command line")
     ops.add_argument("--job", required=True, metavar="FILE",
                      help="job JSON file (see beesky/core/ops.py "
                           "for the schema)")

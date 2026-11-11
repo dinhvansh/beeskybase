@@ -3720,3 +3720,235 @@ build-flutter.yml):
     runner and the BeeSkyFlutter-<tag>-win64.zip asset.
     The app remains compile-verified only until the
     owner runs it on real Windows (as since v0.21).
+
+
+# v0.29.0 — The VNish ops tail (dashd-documented operations)
+
+The v0.26 Operations port shipped only the actions with an
+existing BeeSky code path and left the rest as named
+GAP-UNIMPLEMENTED rows ("the api-doc documents the
+endpoint; BeeSky has no code path"). This release closes
+that tail where the contract allows. Following the
+dissect-before-porting rule, the spec source is **VNish's
+own documented API** — the OpenAPI document shipped in
+the dissected firmware (research/vnish rootfs,
+`usr/share/dashd/ui/docs/api-doc.json`, 41 endpoints) —
+cross-checked against HashCore's 27-type task list for
+presentation (task names, the Throttle dialog's range /
+default / explainer, the API-key Add/Remove dialog, the
+diagnostic export's directory + reason). The mapping
+was written to docs/vnish-ops-mapping.md BEFORE any
+code; an action is implemented only where its contract
+is unambiguous in the doc.
+
+PER-ACTION TABLE (api-doc endpoint · auth · verdict —
+this table is also the explicit status update of the
+v0.26 gap list in docs/operations-mapping.md §3):
+
+  pause (HashCore "Mining pause")
+    POST /api/v1/mining/pause, bodyless, bearer|apikey
+    SHIPPED as ops type pause_mining (dashd-only).
+  resume ("Resume mining")
+    POST /api/v1/mining/resume, bodyless, bearer|apikey
+    SHIPPED as resume_mining.
+  restart ("Restart mining")
+    POST /api/v1/mining/restart, bodyless, bearer|apikey
+    SHIPPED as restart_mining — the v0.26 merge of
+    mining-restart into reboot is UN-done for dashd;
+    device reboot stays `reboot`; cgminer keeps only
+    its restart-RPC reboot (no second action faked).
+  start / stop (HashCore-internal only, no enum entry)
+    POST /mining/start, /mining/stop documented
+    NOT SHIPPED — not user-facing in the original
+    (INFERRED internal building blocks); pause/resume
+    cover the user-facing row.
+  findMiner ("Locating miner")
+    POST /locate-miner, bodyless, NO auth in the doc,
+    reply LocateMinerStatus{is_enabled}; the twin
+    POST /find-miner is marked deprecated in the doc
+    SHIPPED as find_miner via /locate-miner ONLY.
+    No duration/on-off parameter exists in either
+    contract (HashCore shows none) — the result reports
+    the device-returned is_enabled state verbatim.
+  throttle ("Throttle mode")
+    POST /mining/throttle {percent: int, 20..100} ->
+    SaveConfigResult{restart_required, reboot_required},
+    bearer|apikey
+    SHIPPED as throttle; the app dialog ports HashCore's
+    (Power level, "AVAILABLE RANGE: 20-100%", "RESET TO
+    DEFAULT: 100%", the frequency explainer); the
+    reply's flags surface in the result message.
+  preset set (no HashCore task type)
+    OverclockSettingsRaw.preset inside MinerConfigRaw;
+    write path GET /settings (apikeyAuth ONLY) ->
+    POST /settings (InputConfig)
+    SHIPPED as set_preset on the exact read-modify-write
+    the shipped switch_pool url-form proves (incl. its
+    honest x-api-key failure). Labelled an
+    api-doc-grounded addition, NOT a HashCore port.
+  resetAutotuneProfiles ("Reset all autotune profiles")
+    POST /autotune/reset-all {restart: bool}, bearer|apikey
+    SHIPPED as reset_autotune_all (restart defaults true,
+    HashCore asks nothing).
+  resetCurrentAutotuneProfile ("Reset single profile")
+    GET /perf-summary (NO auth declared) ->
+    PerfSummary.current_preset.name, then
+    POST /autotune/reset {presets: [name], restart},
+    bearer|apikey
+    SHIPPED as reset_autotune_current; a device with no
+    current preset fails honestly. (The raw reset-list
+    endpoint is covered by these two; it is not a
+    separate type — no HashCore user-facing twin.)
+  configureApiKey ("Api key config")
+    POST /apikeys {key len 32, description} ->
+    {status: inserted|updated|nochanges};
+    POST /apikeys/delete {key}, bearer|apikey
+    SHIPPED as configure_api_key {operation: add|remove,
+    key, description?}; the device status surfaces in
+    the result message; HashCore's Add/Remove dialog
+    shape is the app's form.
+  changePassword ("Changing password")
+    InputConfig.password = PasswordChange {current, pw}
+    (both required; every InputConfig section is
+    nullable -> partial-write shape)
+    SHIPPED as change_password {new_password} via
+    POST /settings {"password": {...}}. "current" is
+    the winning set's password, recovered by the runner
+    (the fallback set, or the label-matched set behind
+    the probe's JWT); an API-key win or a set-less run
+    fails honestly ("the current password is unknown")
+    instead of guessing the factory default — the
+    runner passes an explicit empty sentinel for that
+    case. The partial-write semantics are INFERRED
+    from the doc's all-nullable shape: HARDWARE-
+    UNCONFIRMED, like the rest of this tail.
+  diagnosticReport ("Saving diagnostic report")
+    NO diagnostics endpoint exists in the doc;
+    GET /logs/{log_type} declares no response schema;
+    HashCore's bundle contents are unobservable (its
+    export dialog shows only a directory picker + an
+    optional reason)
+    SHIPPED as a labelled BeeSky VARIANT (ops type
+    diagnostic_report): per device the core writes
+    <report_dir>/<ip>-diagnostic.json = {kind,
+    variant, ip, source, at, reason, record, inspect}
+    — the health record + the inspect document from
+    the existing clients. A FETCH_ERROR device fails
+    honestly and produces no file.
+  conditionalRestart ("Restart (if required)")
+    STAYS A GAP: no restart-required state exists
+    anywhere in the doc (MinerState is a plain state
+    enum; SaveConfigResult's flags answer config saves
+    only) and HashCore's trigger condition is
+    unobservable — a condition is not invented.
+  resetFirmware (POST /settings/factory-reset)
+    STAYS A GAP by this release's safety scope: it is
+    a HashCore FIRMWARE-category task; firmware-family
+    actions stay deliberate one-device flows.
+  removeFirmware (POST /firmware/remove)
+    STAYS A GAP (same safety scope; `beesky fw` owns
+    firmware).
+  configureNetwork (InputConfig.network)
+    STAYS GAP-UNVERIFIED (unchanged from v0.26): a
+    partial network write can strand a device off the
+    LAN; its semantics need a hardware session.
+
+PYTHON CORE:
+
+  * beesky/core/actions.py: ten new dashd-only handlers
+    behind the existing execute() dispatch (auth via
+    DashdClient.post_json — API key / held JWT / lazily
+    minted JWT, the shipped pattern); non-dashd sources
+    get the honest "not supported for this source yet".
+    COMMAND_TYPES grows accordingly; the cloud agent
+    CAN now execute these types too (same registry).
+  * beesky/core/ops.py: TASK_TYPES grows to 14; every
+    new payload contract is validated in validate_job
+    BEFORE any I/O (throttle's doc range, the 32-char
+    key, non-empty preset / new password, report_dir),
+    so a malformed tail job exits 2 and touches
+    nothing. diagnostic_report is runner-level (like
+    rescan, it is not an actions.execute command) and
+    reuses _fetch_record + inspect_device.
+    _action_creds gains the change_password password
+    resolution described above.
+  * tests/mock_dashd.py extended per the api-doc: the
+    tail endpoints with the doc's auth per endpoint
+    (locate-miner deliberately UNGATED, perf-summary
+    open, GET /settings still apikey-only), an
+    out-of-range throttle refusal, a key-length refusal,
+    and per-hit recording of WHICH auth won
+    (apikey|bearer) — the tests assert request shape
+    (path / body / auth header), not just success.
+    Magic value: throttle percent 55 answers
+    restart_required=true so the flags path is testable.
+
+(a) VERIFIED LOCALLY (this machine):
+
+  * Python suites at the v0.29.0 pins (the release
+    sweep, tests/run_mock_test_v29.sh):
+      mock_ops2_test:     34 PASS / 0 FAIL (NEW)
+      mock_agent_bg_test: 52 PASS / 0 FAIL (pin suite)
+      mock_bridge_test:   24 PASS / 0 FAIL
+      mock_creds_test:    32 PASS / 0 FAIL
+      mock_groups_test:   39 PASS / 0 FAIL
+      mock_units_test:    50 PASS / 0 FAIL
+      mock_ops_test:      32 PASS / 0 FAIL
+      mock_inspect_test:  33 PASS / 0 FAIL
+      mock_pools_test:    43 PASS / 0 FAIL
+    mock_ops2 in detail: 11 payload-contract refusals
+    (JobError in-process + a CLI exit-2 with empty
+    stdout); pause/resume/restart successes with the
+    recorded auth kind (x-api-key for the key set,
+    bearer for the password set); a wrong-password 401
+    with nothing executed; the actions layer surfacing
+    the device's own err text verbatim; find-miner
+    unauthenticated, its ON then OFF states passing
+    through; throttle 80 (body + auth recorded) and 55
+    (restart flag in the message); both autotune
+    resets (reset-all's body; current = the mock's
+    perf-110 from /perf-summary); API-key add (status
+    'inserted' in the message + body recorded) and
+    remove; set_preset's settings POST carrying
+    miner.overclock.preset + the password-only
+    x-api-key failure; change_password's POST body
+    equalling PasswordChange {current: mock-pw, pw}
+    + the api-key-win honest failure posting nothing;
+    diagnostic bundles for dashd AND stock (kind,
+    record, inspect source, reason), the unreachable
+    device failing with no file; pause + throttle on
+    stock failing not-supported.
+  * Flutter (SDK 3.47.9 at ~/workspace/flutter-sdk):
+    flutter analyze: clean; flutter test: 117 PASS /
+    0 FAIL (110 pre-existing + 7 new ops tests) — the
+    tail types round-trip by wire name and all confirm
+    first; mock lifecycle: pause over the fleet (vnish
+    ok, cgminer honest not-supported, the dead unit
+    fails), diagnostic succeeding on answering units
+    of both families, find-miner's ON message; widget
+    level: the "Thêm lệnh" (All commands) menu in the
+    Operations bar driving pause end-to-end into a
+    pause_mining history entry, the throttle dialog's
+    range/default texts then a running throttle task,
+    and the API-key form refusing a short key before
+    anything starts. Pre-existing tests touched: only
+    the version pin in widget_test.dart (v0.29.0).
+
+(b) VERIFIED ONLY BY CI (.github/workflows/
+build-flutter.yml):
+
+  * flutter build windows --release on a real Windows
+    runner and the BeeSkyFlutter-<tag>-win64.zip asset.
+    The app remains compile-verified only until the
+    owner runs it on real Windows (as since v0.21).
+
+(c) HARDWARE-UNCONFIRMED (the whole tail): every new
+endpoint is implemented and mock-verified against the
+api-doc's contract, but NO real VNish device has
+answered one yet — response dialects (e.g. whether a
+bodyless POST answers 200 with an empty body, the
+perf-summary reply on a locked unit, the partial
+/settings write for PasswordChange) can differ from
+the document. The handlers surface device replies and
+refusals verbatim, so a dialect difference shows up
+as an honest per-device failure, never a fake success.

@@ -19,14 +19,39 @@ import 'models.dart';
 ///
 /// Only actions with a real core primitive exist: rescan (the scan
 /// pipeline), reboot and switchPool (core/actions.py — the cloud
-/// agent's executors). `export` is a BeeSky app-side addition (the
-/// selected records serialised locally), NOT a HashCore port. The
-/// other 20+ HashCore task types are named PRIMITIVE-GAPs in the
-/// mapping doc — they are absent here on purpose, not faked.
+/// agent's executors), and — since v0.29 — the VNish tail ported
+/// from dashd's own api-doc (docs/vnish-ops-mapping.md): the
+/// mining pause/resume/restart trio, find-miner (locate), throttle,
+/// the autotune resets, API-key configuration, preset set and
+/// password change, all dashd-only in the core with honest
+/// per-device failures on other families. `export` is a BeeSky
+/// app-side addition (the selected records serialised locally),
+/// NOT a HashCore port; `diagnosticReport` is a labelled BeeSky
+/// VARIANT (record + inspect bundle — HashCore's report contents
+/// are unobservable and dashd has no diagnostics endpoint). The
+/// remaining HashCore task types are named gaps in the mapping
+/// docs — they are absent here on purpose, not faked.
 enum OpsTaskType {
   rescan('rescan', 'Quét lại', Icons.radar_outlined),
   reboot('reboot', 'Khởi động lại', Icons.restart_alt),
   switchPool('switch_pool', 'Đổi pool', Icons.swap_horiz_outlined),
+  pauseMining('pause_mining', 'Tạm dừng đào', Icons.pause_circle_outline),
+  resumeMining('resume_mining', 'Tiếp tục đào', Icons.play_circle_outline),
+  restartMining(
+      'restart_mining', 'Khởi động lại tiến trình', Icons.replay),
+  findMiner('find_miner', 'Tìm máy (LED)', Icons.lightbulb_outline),
+  throttle('throttle', 'Giảm công suất', Icons.speed_outlined),
+  setPreset('set_preset', 'Đặt preset', Icons.tune),
+  resetAutotuneAll('reset_autotune_all', 'Reset autotune (tất cả)',
+      Icons.auto_fix_high),
+  resetAutotuneCurrent('reset_autotune_current', 'Reset profile hiện tại',
+      Icons.auto_fix_normal),
+  configureApiKey(
+      'configure_api_key', 'Cấu hình API key', Icons.vpn_key_outlined),
+  changePassword(
+      'change_password', 'Đổi mật khẩu máy', Icons.lock_outline),
+  diagnosticReport('diagnostic_report', 'Báo cáo chẩn đoán',
+      Icons.assignment_outlined),
   export('export', 'Xuất danh sách', Icons.ios_share_outlined);
 
   final String wire;
@@ -41,8 +66,10 @@ enum OpsTaskType {
 
   /// Device-mutating types ask first (HashCore's "Confirm
   /// operation" dialog); the read-only rescan and the local
-  /// export run immediately.
-  bool get needsConfirm => this == reboot || this == switchPool;
+  /// export run immediately. Parameterised types collect their
+  /// payload in their own dialog BEFORE this confirm (the
+  /// switchPool pattern).
+  bool get needsConfirm => this != rescan && this != export;
 }
 
 /// Task-level status — the names HashCore's enum.task_status uses

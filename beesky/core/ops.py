@@ -12,7 +12,7 @@ codebase exist here; the rest are named gaps in that doc, on purpose.
 Job (a JSON file — secrets never ride the command line; credential
 sets are referenced by file path exactly like scan's --creds-file):
 
-    {"type": "reboot" | "rescan" | "switch_pool",
+    {"type": "reboot" | "rescan" | "switch_pool" | <v0.29 tail>,
      "targets": ["192.168.2.101", ...],
      "payload": {...},            # switch_pool only: the legacy
                                   # single-slot {pool_id, url, user,
@@ -65,6 +65,7 @@ mapping doc names this mechanism divergence).
 
 from __future__ import annotations
 
+import datetime
 import ipaddress
 import json
 import threading
@@ -72,14 +73,23 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from . import actions, patterns, report
+from . import actions, inspect as inspect_mod, patterns, report
 from .bitmain import BitmainClient, BitmainError
 from .cgminer import CgminerClient, CgminerError
 from .dashd import DashdClient, DashdError
 from .discover import ordered_creds, probe_host
 from .groups import GroupStore, effective_creds
 
-TASK_TYPES = ("rescan", "reboot", "switch_pool")
+TASK_TYPES = ("rescan", "reboot", "switch_pool",
+              # v0.29 VNish tail (docs/vnish-ops-mapping.md): the
+              # dashd handlers live in core.actions; diagnostic_report
+              # is runner-level (it writes files, like rescan it is
+              # not an actions.execute command).
+              "pause_mining", "resume_mining", "restart_mining",
+              "find_miner", "throttle",
+              "reset_autotune_all", "reset_autotune_current",
+              "configure_api_key", "set_preset", "change_password",
+              "diagnostic_report")
 
 MAX_TARGETS = 1024
 MAX_WORKERS = 8
@@ -230,6 +240,67 @@ def validate_job(raw) -> dict:
                 "switch_pool payload needs both \"url\" and \"user\" "
                 "(or neither, to activate an existing slot)")
 
+    # v0.29 payload contracts — validated here, before any I/O, so
+    # a malformed tail job touches nothing (the exit-2 rule). The
+    # ranges are the api-doc's own (docs/vnish-ops-mapping.md §2).
+    if task_type == "throttle":
+        percent = payload.get("percent")
+        if isinstance(percent, bool) or not isinstance(percent, int):
+            raise JobError(
+                "throttle payload \"percent\" must be an integer, "
+                f"got {percent!r}")
+        if not 20 <= percent <= 100:
+            raise JobError(
+                "throttle payload \"percent\" must be within the "
+                f"documented 20..100 range, got {percent}")
+    if task_type in ("reset_autotune_all", "reset_autotune_current"):
+        restart = payload.get("restart", True)
+        if not isinstance(restart, bool):
+            raise JobError(
+                f"{task_type} payload \"restart\" must be a boolean")
+        payload = {**payload, "restart": restart}
+    if task_type == "configure_api_key":
+        operation = payload.get("operation", "add")
+        if operation not in ("add", "remove"):
+            raise JobError(
+                "configure_api_key payload \"operation\" must be "
+                f"\"add\" or \"remove\", got {operation!r}")
+        key = payload.get("key")
+        if not isinstance(key, str) or len(key) != 32:
+            raise JobError(
+                "configure_api_key payload \"key\" must be a "
+                "string of exactly 32 characters (the api-doc "
+                "schema)")
+        description = payload.get("description")
+        if description is not None and not isinstance(description, str):
+            raise JobError(
+                "configure_api_key payload \"description\" must "
+                "be a string")
+        payload = {**payload, "operation": operation}
+    if task_type == "set_preset":
+        preset = payload.get("preset")
+        if not isinstance(preset, str) or not preset.strip():
+            raise JobError(
+                "set_preset payload \"preset\" must be a non-empty "
+                "string")
+    if task_type == "change_password":
+        new_password = payload.get("new_password")
+        if not isinstance(new_password, str) or not new_password:
+            raise JobError(
+                "change_password payload \"new_password\" must be "
+                "a non-empty string")
+    if task_type == "diagnostic_report":
+        report_dir = payload.get("report_dir")
+        if not isinstance(report_dir, str) or not report_dir.strip():
+            raise JobError(
+                "diagnostic_report payload \"report_dir\" must be "
+                "a non-empty directory path")
+        reason = payload.get("reason")
+        if reason is not None and not isinstance(reason, str):
+            raise JobError(
+                "diagnostic_report payload \"reason\" must be a "
+                "string")
+
     group = raw.get("group")
     if group is not None and not isinstance(group, str):
         raise JobError("job \"group\" must be a string")
@@ -323,18 +394,44 @@ def _action_creds(cand, merged: list[dict] | None,
     if cand.source == "stock":
         return {**base, "user": cand.username, "password": cand.password}
     if cand.source == "vnish":
+        out = None
+        fallback_pw = None
         if cand.dashd_api_key:
-            return {**base, "api_key": cand.dashd_api_key}
-        if cand.dashd_token:
-            return {**base, "token": cand.dashd_token}
-        if merged:
+            out = {**base, "api_key": cand.dashd_api_key}
+        elif cand.dashd_token:
+            out = {**base, "token": cand.dashd_token}
+        elif merged:
             for entry in ordered_creds(merged, "vnish"):
                 if entry.get("api_key"):
-                    return {**base, "api_key": entry["api_key"]}
+                    out = {**base, "api_key": entry["api_key"]}
+                    break
                 if entry.get("password"):
-                    return {**base, "user": entry["user"],
-                            "password": entry["password"]}
-        return base
+                    out = {**base, "user": entry["user"],
+                           "password": entry["password"]}
+                    fallback_pw = entry["password"]
+                    break
+        if out is None:
+            out = base
+        if job["type"] == "change_password":
+            # The handler needs the CURRENT password (the doc's
+            # PasswordChange.current). It is known exactly when a
+            # password is what the write will authenticate with:
+            # the anonymous-win fallback set above, or — for a
+            # locked dashd the probe unlocked — the winning set,
+            # found in the merged list by the candidate's label.
+            # "" is the explicit UNKNOWN (an api-key win, or no
+            # sets at all): the handler turns it into the honest
+            # failure instead of guessing the factory default,
+            # which actions._creds would otherwise silently fill.
+            known = fallback_pw or ""
+            if not known and cand.dashd_token and merged:
+                for entry in merged:
+                    if entry.get("label") == cand.cred_label \
+                            and entry.get("password"):
+                        known = entry["password"]
+                        break
+            out = {**out, "password": known}
+        return out
     return base
 
 
@@ -457,6 +554,51 @@ def _switch_pool_one(ip: str, index: int, cand, job: dict,
     return True, "; ".join(messages)
 
 
+def _diagnostic_one(ip: str, cand, job: dict,
+                    merged: list[dict] | None):
+    """diagnostic_report for one device (v0.29) — a BeeSky VARIANT
+    (docs/vnish-ops-mapping.md §2.12): there is no dashd
+    diagnostics endpoint and HashCore's bundle contents are
+    unobservable, so the bundle is BeeSky's own composition — the
+    health record + the inspect document, both from the existing
+    clients — written as one JSON file per device into the job's
+    report_dir. A device whose record is a FETCH_ERROR fails
+    honestly and produces no file (a bundle about nothing is not
+    a report).
+    """
+    payload = job["payload"] or {}
+    record = _fetch_record(cand, job["timeout"])
+    if any(p.get("code") == "FETCH_ERROR" for p in record["problems"]):
+        detail = record["problems"][0].get("detail") or "fetch failed"
+        return False, f"diagnostic report: {detail}", None
+    doc = inspect_mod.inspect_device(
+        ip, timeout=job["timeout"], http_port=job["http_port"],
+        cgminer_port=job["cgminer_port"], creds=merged)
+    bundle = {
+        "kind": "beesky-diagnostic-report",
+        "variant": "beesky (not a HashCore port — see "
+                   "docs/vnish-ops-mapping.md §2.12)",
+        "ip": ip,
+        "source": cand.source,
+        "at": datetime.datetime.now(datetime.timezone.utc)
+              .isoformat(timespec="seconds"),
+        "reason": payload.get("reason") or None,
+        "record": record,
+        "inspect": doc,
+    }
+    out_dir = Path(payload["report_dir"])
+    out_path = out_dir / f"{ip}-diagnostic.json"
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(
+            json.dumps(bundle, indent=2, ensure_ascii=False),
+            encoding="utf-8")
+    except OSError as exc:
+        return False, f"diagnostic report: cannot write " \
+                      f"{out_path}: {exc}", None
+    return True, f"diagnostic report saved: {out_path.name}", None
+
+
 def _run_one(ip: str, index: int, job: dict,
              merged: list[dict] | None):
     """One device: probe, then act. Returns (ok, message, record?).
@@ -483,6 +625,8 @@ def _run_one(ip: str, index: int, job: dict,
             detail = record["problems"][0].get("detail") or "fetch failed"
             return False, f"rescan: {detail}", record
         return True, f"rescanned ({cand.source})", record
+    if job["type"] == "diagnostic_report":
+        return _diagnostic_one(ip, cand, job, merged)
     creds = _action_creds(cand, merged, job)
     if job["type"] == "switch_pool":
         ok, message = _switch_pool_one(ip, index, cand, job, creds)

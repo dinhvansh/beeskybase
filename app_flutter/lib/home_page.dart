@@ -1638,8 +1638,122 @@ class _HomePageState extends State<HomePage> {
               'Xuất danh sách',
               _runningTask == null ? _exportSelection : null,
             ),
+            // "All commands" (v0.29) — HashCore's action bar pairs
+            // quick actions with a full-commands menu (§1.1 of the
+            // operations mapping); the VNish tail lives here so
+            // the quick row stays the v0.26/28 set. Every item is
+            // a real core primitive (docs/vnish-ops-mapping.md);
+            // parameterised ones open their payload dialog first,
+            // then the shared confirm, exactly like switch_pool.
+            _opsMoreMenu(),
           ],
         ],
+      ),
+    );
+  }
+
+  /// The "Thêm lệnh" (All commands) menu of the Operations bar:
+  /// the v0.29 VNish tail. Plain actions run through _startOps
+  /// directly (its confirm dialog still applies); parameterised
+  /// ones collect their payload dialog first, mirroring the
+  /// switch-pool flow. Disabled while a task runs, like every
+  /// other ops control.
+  Widget _opsMoreMenu() {
+    final enabled = _runningTask == null;
+    return PopupMenuButton<String>(
+      enabled: enabled,
+      color: BeeSkyColors.panel2,
+      tooltip: 'Tất cả lệnh',
+      onSelected: (value) async {
+        if (!mounted) return;
+        switch (value) {
+          case 'pause_mining':
+            _startOps(OpsTaskType.pauseMining);
+          case 'resume_mining':
+            _startOps(OpsTaskType.resumeMining);
+          case 'restart_mining':
+            _startOps(OpsTaskType.restartMining);
+          case 'find_miner':
+            _startOps(OpsTaskType.findMiner);
+          case 'reset_autotune_all':
+            _startOps(OpsTaskType.resetAutotuneAll);
+          case 'reset_autotune_current':
+            _startOps(OpsTaskType.resetAutotuneCurrent);
+          case 'throttle':
+            final payload = await showThrottleDialog(context);
+            if (payload != null && mounted) {
+              _startOps(OpsTaskType.throttle, payload: payload);
+            }
+          case 'set_preset':
+            final payload = await showSetPresetDialog(context);
+            if (payload != null && mounted) {
+              _startOps(OpsTaskType.setPreset, payload: payload);
+            }
+          case 'configure_api_key':
+            final payload = await showApiKeyConfigDialog(context);
+            if (payload != null && mounted) {
+              _startOps(OpsTaskType.configureApiKey, payload: payload);
+            }
+          case 'change_password':
+            final payload = await showChangePasswordDialog(context);
+            if (payload != null && mounted) {
+              _startOps(OpsTaskType.changePassword, payload: payload);
+            }
+          case 'diagnostic_report':
+            final payload = await showDiagnosticReportDialog(
+              context,
+              defaultDir: _opsFiles.exportDir().path,
+            );
+            if (payload != null && mounted) {
+              _startOps(OpsTaskType.diagnosticReport, payload: payload);
+            }
+        }
+      },
+      itemBuilder: (context) => [
+        for (final (wire, label) in const [
+          ('pause_mining', 'Tạm dừng đào'),
+          ('resume_mining', 'Tiếp tục đào'),
+          ('restart_mining', 'Khởi động lại tiến trình'),
+          ('find_miner', 'Tìm máy (LED)'),
+          ('throttle', 'Giảm công suất'),
+          ('set_preset', 'Đặt preset'),
+          ('reset_autotune_all', 'Reset autotune (tất cả)'),
+          ('reset_autotune_current', 'Reset profile hiện tại'),
+          ('configure_api_key', 'Cấu hình API key'),
+          ('change_password', 'Đổi mật khẩu máy'),
+          ('diagnostic_report', 'Báo cáo chẩn đoán'),
+        ])
+          PopupMenuItem<String>(
+            value: wire,
+            height: 38,
+            child: Text(label, style: const TextStyle(fontSize: 13)),
+          ),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: BeeSkyColors.ghostFill,
+          border: Border.all(color: BeeSkyColors.glassBorder),
+          borderRadius: BorderRadius.circular(radiusWidget),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Thêm lệnh',
+              style: TextStyle(
+                fontSize: 12,
+                color: enabled ? BeeSkyColors.text : BeeSkyColors.muted,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(
+              Icons.arrow_drop_down,
+              size: 16,
+              color: enabled ? BeeSkyColors.text : BeeSkyColors.muted,
+            ),
+          ],
+        ),
       ),
     );
   }

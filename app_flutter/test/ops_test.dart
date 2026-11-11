@@ -20,6 +20,15 @@ import 'package:flutter_test/flutter_test.dart';
 /// its progress bar, lands in the history dialog with per-device
 /// results, and survives a restart (store reload). The export
 /// action writes a real file + a history entry.
+///
+/// v0.29 — the VNish tail (docs/vnish-ops-mapping.md): the new
+/// task types round-trip by wire name and all confirm first; the
+/// mock fails the dashd-only types honestly on cgminer units
+/// while the diagnostic variant succeeds on any answering
+/// family; the "Thêm lệnh" menu drives a plain tail action
+/// (pause) and a parameterised one (throttle — HashCore's range
+/// + default texts) end to end, and the API-key form enforces
+/// the api-doc's 32-character key before anything runs.
 void main() {
   Directory tempDir() =>
       Directory.systemTemp.createTempSync('beesky_ops');
@@ -135,6 +144,47 @@ void main() {
       expect(summary.failed, 1);
     });
 
+    test('v0.29 tail types round-trip by wire name and confirm '
+        'before running', () {
+      for (final type in [
+        OpsTaskType.pauseMining,
+        OpsTaskType.resumeMining,
+        OpsTaskType.restartMining,
+        OpsTaskType.findMiner,
+        OpsTaskType.throttle,
+        OpsTaskType.setPreset,
+        OpsTaskType.resetAutotuneAll,
+        OpsTaskType.resetAutotuneCurrent,
+        OpsTaskType.configureApiKey,
+        OpsTaskType.changePassword,
+        OpsTaskType.diagnosticReport,
+      ]) {
+        expect(OpsTaskType.fromWire(type.wire), type);
+        expect(type.needsConfirm, isTrue,
+            reason: '${type.wire} mutates devices — it must confirm');
+      }
+      final task = OpsTask(
+        id: 'ops-29',
+        type: OpsTaskType.throttle,
+        createdAt: DateTime(2026, 11, 11),
+        finishedAt: DateTime(2026, 11, 11, 0, 0, 3),
+        status: OpsStatus.success,
+        targets: const ['192.168.2.101'],
+        results: const [
+          OpsDeviceResult(
+            ip: '192.168.2.101',
+            ok: true,
+            message: 'dashd throttle set to 80%',
+          ),
+        ],
+      );
+      final back = OpsTask.fromJson(
+        jsonDecode(jsonEncode(task.toJson())) as Map<String, dynamic>,
+      );
+      expect(back.type, OpsTaskType.throttle);
+      expect(back.type.label, 'Giảm công suất');
+    });
+
     test('MinerRecord.toJson round-trips through fromJson', () {
       final rec = MinerRecord.fromJson({
         'ip': '192.168.2.102',
@@ -248,6 +298,68 @@ void main() {
       expect(byIp['192.168.2.101']?.ok, isTrue); // vnish
       expect(byIp['192.168.2.102']?.ok, isFalse); // cgminer
       expect(byIp['192.168.2.102']?.message, contains('not supported'));
+    });
+
+    test('pause_mining: the vnish unit succeeds, cgminer units '
+        'fail honestly (dashd-only tail)', () async {
+      final bridge = MockBridge();
+      final run = await bridge.startOps({
+        'type': 'pause_mining',
+        'targets': [
+          '192.168.2.101',
+          '192.168.2.102',
+          '192.168.2.103',
+          '192.168.2.104',
+        ],
+      });
+      final events = await run.events.toList();
+      final summary = await run.summary;
+      final byIp = {
+        for (final e in events.where((e) => e.kind == 'result'))
+          e.ip: e,
+      };
+      expect(byIp['192.168.2.101']?.ok, isTrue); // vnish
+      expect(byIp['192.168.2.101']?.message,
+          contains('mining pause'));
+      expect(byIp['192.168.2.102']?.ok, isFalse); // cgminer
+      expect(byIp['192.168.2.102']?.message,
+          contains('not supported'));
+      expect(byIp['192.168.2.104']?.ok, isFalse); // unreachable
+      expect(summary.ok, 1);
+      expect(summary.status, OpsStatus.hasErrors);
+    });
+
+    test('diagnostic_report: answering units of every family '
+        'produce a bundle, the dead one fails', () async {
+      final bridge = MockBridge();
+      final run = await bridge.startOps({
+        'type': 'diagnostic_report',
+        'targets': ['192.168.2.101', '192.168.2.102', '192.168.2.104'],
+        'payload': {'report_dir': '/mock/reports'},
+      });
+      final events = await run.events.toList();
+      final summary = await run.summary;
+      final byIp = {
+        for (final e in events.where((e) => e.kind == 'result'))
+          e.ip: e,
+      };
+      expect(byIp['192.168.2.101']?.message,
+          contains('192.168.2.101-diagnostic.json'));
+      expect(byIp['192.168.2.102']?.ok, isTrue); // cgminer answers
+      expect(byIp['192.168.2.104']?.ok, isFalse);
+      expect(summary.ok, 2);
+    });
+
+    test('find_miner mock reports the locate state', () async {
+      final bridge = MockBridge();
+      final run = await bridge.startOps({
+        'type': 'find_miner',
+        'targets': ['192.168.2.101'],
+      });
+      final events = await run.events.toList();
+      final result = events.singleWhere((e) => e.kind == 'result');
+      expect(result.ok, isTrue);
+      expect(result.message, contains('locate-miner is ON'));
     });
 
     test('rescan events carry the fresh fleet records', () async {
@@ -421,6 +533,81 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('Xuất danh sách — Thành công'),
           findsOneWidget);
+    });
+
+    testWidgets('Thêm lệnh menu: pause runs through the confirm '
+        'and lands in history as a tail task', (tester) async {
+      final tmp = tempDir();
+      addTearDown(() => deleteDir(tmp));
+      await pumpHome(tester, tmp: tmp);
+      await selectAll(tester);
+      expect(find.text('Thêm lệnh'), findsOneWidget);
+      await tester.tap(find.text('Thêm lệnh'));
+      await tester.pumpAndSettle();
+      expect(find.text('Tạm dừng đào'), findsOneWidget);
+      expect(find.text('Báo cáo chẩn đoán'), findsOneWidget);
+      await tester.tap(find.text('Tạm dừng đào'));
+      await tester.pumpAndSettle();
+      expect(find.text('Xác nhận thao tác — Tạm dừng đào'),
+          findsOneWidget);
+      await tester.tap(find.text('Chạy Tạm dừng đào'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 700));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Tạm dừng đào: xong'), findsWidgets);
+      final histFile = File(
+          '${tmp.path}${Platform.pathSeparator}beesky-ops-history.json');
+      final entries =
+          jsonDecode(histFile.readAsStringSync()) as List<dynamic>;
+      expect((entries.single as Map)['type'], 'pause_mining');
+    });
+
+    testWidgets('throttle dialog shows the documented range and '
+        'defaults to 100%, then the task runs', (tester) async {
+      final tmp = tempDir();
+      addTearDown(() => deleteDir(tmp));
+      await pumpHome(tester, tmp: tmp);
+      await selectAll(tester);
+      await tester.tap(find.text('Thêm lệnh'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Giảm công suất'));
+      await tester.pumpAndSettle();
+      // HashCore's dialog texts: range + reset-to-default + 100%.
+      expect(find.text('Phạm vi cho phép: 20–100%'), findsOneWidget);
+      expect(find.text('Đặt lại mặc định: 100%'), findsOneWidget);
+      expect(find.text('100%'), findsOneWidget);
+      await tester.tap(find.text('Tiếp tục'));
+      await tester.pumpAndSettle();
+      expect(find.text('Xác nhận thao tác — Giảm công suất'),
+          findsOneWidget);
+      await tester.tap(find.text('Chạy Giảm công suất'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 700));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Giảm công suất: xong'), findsWidgets);
+    });
+
+    testWidgets('api-key dialog refuses a key that is not '
+        '32 characters', (tester) async {
+      final tmp = tempDir();
+      addTearDown(() => deleteDir(tmp));
+      await pumpHome(tester, tmp: tmp);
+      await selectAll(tester);
+      await tester.tap(find.text('Thêm lệnh'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cấu hình API key'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+          find.byType(TextField).first, 'short-key');
+      await tester.tap(find.text('Tiếp tục'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('phải đúng 32 ký tự'),
+          findsOneWidget);
+      // The dialog is still open — no task was started.
+      expect(find.text('Cấu hình API key (VNish/dashd)'),
+          findsOneWidget);
+      expect(find.text('Xác nhận thao tác — Cấu hình API key'),
+          findsNothing);
     });
 
     testWidgets('rescan runs without a confirm dialog and refreshes '
