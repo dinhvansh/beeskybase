@@ -2,8 +2,11 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'creds.dart';
+import 'grid.dart';
+import 'grid_dialogs.dart';
 import 'groups.dart';
 import 'models.dart';
 import 'sidecar.dart';
@@ -13,6 +16,24 @@ import 'theme.dart';
 /// HashCore Toolkit's home screen, v0.24); the miners table is the
 /// per-group / ad-hoc scan view behind it.
 enum _View { groups, miners }
+
+/// Grid hotkey intents (v0.25) — the Flutter mirror of HashCore's
+/// `package:toolkit/hot_keys/intents_and_actions/` layer.
+class _SelectAllIntent extends Intent {
+  const _SelectAllIntent();
+}
+
+class _SearchIntent extends Intent {
+  const _SearchIntent();
+}
+
+class _RescanIntent extends Intent {
+  const _RescanIntent();
+}
+
+class _ClearGridIntent extends Intent {
+  const _ClearGridIntent();
+}
 
 /// The main window — v0.22 layout, restructured after the owner rejected
 /// the v0.21 hero-card layout ("card to để làm gì, người ta muốn thấy
@@ -36,6 +57,11 @@ class HomePage extends StatefulWidget {
   /// the executable, the same folder as the creds file.
   final GroupStore? groupStore;
 
+  /// Grid-store override (tests point it at a temp dir); the real
+  /// app uses [GridStore.appDefault] — beesky-grid.json beside the
+  /// executable, the same folder as the other stores.
+  final GridStore? gridStore;
+
   /// Row double-click opener override (tests record the URL instead
   /// of launching a browser); defaults to [openUrlInBrowser].
   final Future<void> Function(String url)? urlOpener;
@@ -45,6 +71,7 @@ class HomePage extends StatefulWidget {
     required this.bridge,
     this.credStore,
     this.groupStore,
+    this.gridStore,
     this.urlOpener,
   });
 
@@ -109,6 +136,17 @@ class _HomePageState extends State<HomePage> {
   Timer? _autoscanTimer;
   final Map<String, DateTime> _lastAutoscanRun = {};
 
+  // Data grid (v0.25): the persisted view configuration, the
+  // session filter/search state, and the SELECTION MODEL the
+  // v0.26 Operations bar will consume (grid.dart MinerSelection).
+  late final GridStore _gridStore = widget.gridStore ?? GridStore.appDefault();
+  GridConfig _grid = GridConfig();
+  final MinerSelection _selection = MinerSelection();
+  List<GridFilter> _filters = const [];
+  final _searchCtrl = TextEditingController();
+  final _searchFocus = FocusNode();
+  final _gridHScroll = ScrollController();
+
   @override
   void initState() {
     super.initState();
@@ -122,6 +160,7 @@ class _HomePageState extends State<HomePage> {
     _loadSysinfo();
     _loadCreds();
     _loadGroups();
+    _loadGrid();
     _autoscanTimer = Timer.periodic(
       const Duration(seconds: 30),
       (_) => _tickAutoscan(),
@@ -132,8 +171,38 @@ class _HomePageState extends State<HomePage> {
   void dispose() {
     _autoscanTimer?.cancel();
     _targetCtrl.dispose();
+    _searchCtrl.dispose();
+    _searchFocus.dispose();
+    _gridHScroll.dispose();
     super.dispose();
   }
+
+  Future<void> _loadGrid() async {
+    final (config, _) = await _gridStore.load();
+    if (!mounted) return;
+    setState(() => _grid = config);
+  }
+
+  /// Persist the grid config after a change (fire-and-forget like
+  /// group saves: a refused write never breaks the view).
+  Future<void> _saveGrid() async {
+    try {
+      await _gridStore.save(_grid);
+    } on FileSystemException {
+      // Settings stay in memory for this session.
+    }
+  }
+
+  /// The current pipeline result — rendered by the table, the
+  /// heat-grid and the result-count line alike.
+  GridViewResult get _gridView => applyGridView(
+        _records,
+        search: _searchCtrl.text,
+        filters: _filters,
+        selection: _selection,
+        sort: _grid.sort,
+        groupBy: _grid.groupBy,
+      );
 
   Future<void> _loadCreds() async {
     final (creds, file) = await _store.load();
@@ -383,6 +452,9 @@ class _HomePageState extends State<HomePage> {
       _lastScan = result;
       _scanned = true;
       _selected = result.records.isEmpty ? null : result.records.first;
+      // Checkbox selections for machines that left the fleet are
+      // dropped (the selection model stays honest across rescans).
+      _selection.retainOnly(result.records);
     });
   }
 
@@ -460,6 +532,106 @@ class _HomePageState extends State<HomePage> {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
+  // ------------------------------------------------------------------
+  // Data-grid actions (v0.25): columns dialog, filter dialog, sort,
+  // isolate, and the hotkey layer (HashCore's own architecture is
+  // intents+actions too; BeeSky's key bindings are its own —
+  // docs/grid-mapping.md §10).
+  // ------------------------------------------------------------------
+
+  Future<void> _editColumns() async {
+    final result = await showGridColumnsDialog(context, _grid);
+    if (result == null || !mounted) return;
+    setState(() {
+      _grid = result;
+      // Editing columns IS the Custom mode's content; if the user
+      // was looking at a fixed set, switch so the edit is visible.
+      if (_grid.viewMode != GridViewMode.custom) {
+        _grid.viewMode = GridViewMode.custom;
+      }
+      _status = 'Đã lưu cấu hình cột (chế độ Tùy chỉnh).';
+    });
+    await _saveGrid();
+  }
+
+  Future<void> _editFilters() async {
+    final result = await showGridFilterDialog(
+      context,
+      filters: _filters,
+      presets: _grid.filterPresets,
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      _filters = result.filters;
+      _grid.filterPresets = result.presets;
+      _status = result.filters.isEmpty
+          ? 'Đã xóa bộ lọc.'
+          : 'Đang lọc theo ${result.filters.length} điều kiện.';
+    });
+    await _saveGrid();
+  }
+
+  /// Esc / "Xóa bộ lọc": search text, filter rows, isolate and the
+  /// checkbox selection all clear; the detail selection stays.
+  void _clearGridModifiers() {
+    setState(() {
+      _searchCtrl.clear();
+      _filters = const [];
+      _selection.clear();
+      _status = 'Đã xóa tìm kiếm, bộ lọc và vùng chọn.';
+    });
+  }
+
+  void _toggleSort(String columnId) {
+    setState(() {
+      if (_grid.sort.field == columnId) {
+        _grid.sort.ascending = !_grid.sort.ascending;
+      } else {
+        _grid.sort = GridSort(field: columnId, ascending: true);
+      }
+    });
+    _saveGrid();
+  }
+
+  void _toggleIsolate(IsolateMode mode) {
+    setState(() {
+      _selection.isolate = _selection.isolate == mode ? IsolateMode.none : mode;
+    });
+  }
+
+  /// True while a text field owns the keyboard — grid hotkeys step
+  /// aside there (Ctrl+A in the target field selects TEXT there).
+  bool get _editingText {
+    final focus = FocusManager.instance.primaryFocus;
+    if (focus == null) return false;
+    var editing = false;
+    focus.context?.visitAncestorElements((el) {
+      if (el.widget is EditableText) editing = true;
+      return !editing;
+    });
+    return editing;
+  }
+
+  void _hotSelectAll() {
+    if (_editingText) return;
+    setState(() => _selection.selectAll(_gridView.visible));
+  }
+
+  void _hotSearch() {
+    if (_editingText) return;
+    _searchFocus.requestFocus();
+  }
+
+  void _hotRescan() {
+    if (_editingText) return;
+    _runScan();
+  }
+
+  void _hotClear() {
+    if (_editingText) return;
+    _clearGridModifiers();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -468,9 +640,7 @@ class _HomePageState extends State<HomePage> {
         children: [
           _sidebar(),
           Expanded(
-            child: _view == _View.groups
-                ? _groupsColumn()
-                : _minersColumn(),
+            child: _view == _View.groups ? _groupsColumn() : _minersColumn(),
           ),
         ],
       ),
@@ -478,15 +648,311 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _minersColumn() {
-    return Column(
+    final column = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _header(),
         _scanBar(),
+        if (_scanned) _gridToolbar(),
+        if (_scanned && _records.isNotEmpty) _selectionBar(),
         if (_busy) const LinearProgressIndicator(minHeight: 3),
         Expanded(child: _content()),
         _statusLine(),
       ],
+    );
+    // The grid hotkey layer (v0.25): Ctrl+A select all visible,
+    // Ctrl+F focus search, Ctrl+R / F5 rescan, Esc clear modifiers.
+    // Handlers step aside while a text field owns the keyboard.
+    return Shortcuts(
+      shortcuts: const {
+        SingleActivator(LogicalKeyboardKey.keyA, control: true):
+            _SelectAllIntent(),
+        SingleActivator(LogicalKeyboardKey.keyF, control: true):
+            _SearchIntent(),
+        SingleActivator(LogicalKeyboardKey.keyR, control: true):
+            _RescanIntent(),
+        SingleActivator(LogicalKeyboardKey.f5): _RescanIntent(),
+        SingleActivator(LogicalKeyboardKey.escape): _ClearGridIntent(),
+      },
+      child: Actions(
+        actions: {
+          _SelectAllIntent: CallbackAction<_SelectAllIntent>(
+            onInvoke: (_) => _hotSelectAll(),
+          ),
+          _SearchIntent: CallbackAction<_SearchIntent>(
+            onInvoke: (_) => _hotSearch(),
+          ),
+          _RescanIntent: CallbackAction<_RescanIntent>(
+            onInvoke: (_) => _hotRescan(),
+          ),
+          _ClearGridIntent: CallbackAction<_ClearGridIntent>(
+            onInvoke: (_) => _hotClear(),
+          ),
+        },
+        child: Focus(autofocus: true, child: column),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Grid toolbar + selection bar (v0.25): search, filter, grouping,
+  // data mode, density, columns — HashCore keeps the same controls
+  // in the miners-list header (view_control / action_control).
+  // ------------------------------------------------------------------
+
+  Widget _gridToolbar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 12, 18, 0),
+      child: Wrap(
+        spacing: 10,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          SizedBox(
+            width: 230,
+            child: TextField(
+              controller: _searchCtrl,
+              focusNode: _searchFocus,
+              decoration: const InputDecoration(
+                hintText: 'Tìm theo IP / MAC, Pool hoặc Worker',
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+          ),
+          OutlinedButton.icon(
+            onPressed: _busy ? null : _editFilters,
+            icon: const Icon(Icons.filter_alt_outlined, size: 16),
+            label: Text(
+              _filters.isEmpty ? 'Bộ lọc' : 'Bộ lọc (${_filters.length})',
+            ),
+            style: _ghostBtnStyle,
+          ),
+          _groupByMenu(),
+          _segmented<GridViewMode>(
+            value: _grid.viewMode,
+            options: const [
+              (GridViewMode.metric, 'Số liệu'),
+              (GridViewMode.pools, 'Pools'),
+              (GridViewMode.custom, 'Tùy chỉnh'),
+            ],
+            onChanged: (v) {
+              setState(() => _grid.viewMode = v);
+              _saveGrid();
+            },
+          ),
+          _segmented<GridViewType>(
+            value: _grid.viewType,
+            options: const [
+              (GridViewType.normal, 'Thoải mái'),
+              (GridViewType.compact, 'Gọn'),
+              (GridViewType.overview, 'Tổng quan'),
+            ],
+            onChanged: (v) {
+              setState(() => _grid.viewType = v);
+              _saveGrid();
+            },
+          ),
+          if (_grid.viewType == GridViewType.overview) ...[
+            _segmented<OverviewColorMode>(
+              value: _grid.overviewColor,
+              options: const [
+                (OverviewColorMode.temperature, 'Màu: Nhiệt độ'),
+                (OverviewColorMode.hashrate, 'Màu: Hashrate'),
+              ],
+              onChanged: (v) {
+                setState(() => _grid.overviewColor = v);
+                _saveGrid();
+              },
+            ),
+            _segmented<OverviewCellSize>(
+              value: _grid.overviewSize,
+              options: const [
+                (OverviewCellSize.small, 'Ô S'),
+                (OverviewCellSize.medium, 'Ô M'),
+                (OverviewCellSize.large, 'Ô L'),
+              ],
+              onChanged: (v) {
+                setState(() => _grid.overviewSize = v);
+                _saveGrid();
+              },
+            ),
+          ],
+          OutlinedButton.icon(
+            onPressed: _busy ? null : _editColumns,
+            icon: const Icon(Icons.view_column_outlined, size: 16),
+            label: const Text('Cột'),
+            style: _ghostBtnStyle,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _groupByMenu() {
+    return PopupMenuButton<GridGroupBy>(
+      tooltip: 'Nhóm theo',
+      color: BeeSkyColors.panel2,
+      initialValue: _grid.groupBy,
+      onSelected: (v) {
+        setState(() => _grid.groupBy = v);
+        _saveGrid();
+      },
+      itemBuilder: (context) => [
+        for (final g in GridGroupBy.values)
+          PopupMenuItem(value: g, child: Text('Nhóm: ${g.label}')),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        decoration: BoxDecoration(
+          color: BeeSkyColors.ghostFill,
+          border: Border.all(color: BeeSkyColors.glassBorder),
+          borderRadius: BorderRadius.circular(radiusWidget),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.folder_open_outlined, size: 16),
+            const SizedBox(width: 6),
+            Text(
+              'Nhóm: ${_grid.groupBy.label}',
+              style: const TextStyle(fontSize: 13),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _segmented<T>({
+    required T value,
+    required List<(T, String)> options,
+    required ValueChanged<T> onChanged,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: BeeSkyColors.ghostFill,
+        border: Border.all(color: BeeSkyColors.glassBorder),
+        borderRadius: BorderRadius.circular(radiusWidget),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final (v, label) in options)
+            InkWell(
+              onTap: () => onChanged(v),
+              borderRadius: BorderRadius.circular(radiusWidget),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: v == value
+                      ? BeeSkyColors.accent.withValues(alpha: 0.16)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(radiusWidget),
+                ),
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: v == value ? FontWeight.w700 : FontWeight.w400,
+                    color:
+                        v == value ? BeeSkyColors.accent : BeeSkyColors.muted,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// The selection bar: result count + HashCore's action_control
+  /// verbs (Select all / Invert / Isolate). The OPERATIONS that act
+  /// on the selection are v0.26 — this bar owns selection only,
+  /// and exposes it via the MinerSelection model.
+  Widget _selectionBar() {
+    final view = _gridView;
+    final selCount = _selection.selectedIps.length;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text(
+            'Đang hiển thị ${view.visible.length} / ${view.total} máy',
+            style: const TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+          ),
+          if (selCount > 0)
+            _chip('Đã chọn $selCount', dot: BeeSkyColors.accent),
+          _miniButton(
+            'Chọn tất cả',
+            () => setState(() => _selection.selectAll(_gridView.visible)),
+          ),
+          _miniButton(
+            'Đảo chọn',
+            () => setState(() => _selection.invert(_records)),
+          ),
+          _miniToggle(
+            'Cô lập: đã chọn',
+            _selection.isolate == IsolateMode.selected,
+            () => _toggleIsolate(IsolateMode.selected),
+          ),
+          _miniToggle(
+            'Cô lập: lỗi',
+            _selection.isolate == IsolateMode.errors,
+            () => _toggleIsolate(IsolateMode.errors),
+          ),
+          if (selCount > 0 ||
+              _selection.isolate != IsolateMode.none ||
+              _filters.isNotEmpty ||
+              _searchCtrl.text.isNotEmpty)
+            _miniButton('Xóa lọc / chọn', _clearGridModifiers),
+        ],
+      ),
+    );
+  }
+
+  Widget _miniButton(String label, VoidCallback onPressed) {
+    return OutlinedButton(
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        backgroundColor: BeeSkyColors.ghostFill,
+        foregroundColor: BeeSkyColors.text,
+        side: const BorderSide(color: BeeSkyColors.glassBorder),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(radiusWidget),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        textStyle: const TextStyle(fontSize: 12),
+      ),
+      child: Text(label),
+    );
+  }
+
+  Widget _miniToggle(String label, bool active, VoidCallback onPressed) {
+    return OutlinedButton(
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        backgroundColor: active
+            ? BeeSkyColors.accent.withValues(alpha: 0.16)
+            : BeeSkyColors.ghostFill,
+        foregroundColor: active ? BeeSkyColors.accent : BeeSkyColors.text,
+        side: BorderSide(
+          color: active ? BeeSkyColors.accent : BeeSkyColors.glassBorder,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(radiusWidget),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        textStyle: const TextStyle(fontSize: 12),
+      ),
+      child: Text(label),
     );
   }
 
@@ -1115,17 +1581,15 @@ class _HomePageState extends State<HomePage> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     OutlinedButton(
-                      onPressed: _busy
-                          ? null
-                          : () => _editGroup(existing: group),
+                      onPressed:
+                          _busy ? null : () => _editGroup(existing: group),
                       style: _ghostBtnStyle,
                       child: const Text('Sửa'),
                     ),
                     IconButton(
                       icon: const Icon(Icons.delete_outline, size: 19),
                       tooltip: 'Xóa nhóm',
-                      onPressed:
-                          _busy ? null : () => _deleteGroup(group),
+                      onPressed: _busy ? null : () => _deleteGroup(group),
                     ),
                   ],
                 ),
@@ -1149,19 +1613,279 @@ class _HomePageState extends State<HomePage> {
             ? _emptyState()
             : _records.isEmpty
                 ? _noResultsState()
-                : Column(
-                    children: [
-                      _tableHeader(),
-                      const Divider(height: 1),
-                      Expanded(
-                        child: ListView.builder(
-                          itemCount: _records.length,
-                          itemBuilder: (context, i) =>
-                              _tableRow(_records[i], i),
-                        ),
-                      ),
-                    ],
+                : _gridBody(),
+      ),
+    );
+  }
+
+  /// The grid body: the pipeline result rendered as the table
+  /// (two densities), the Overview heat-grid, or the filtered-
+  /// empty state (HashCore's `empty_filters_*`: "No results were
+  /// found using this filter" + a Clear filters action).
+  Widget _gridBody() {
+    final view = _gridView;
+    if (view.visible.isEmpty) return _filteredEmptyState();
+    if (_grid.viewType == GridViewType.overview) return _overviewGrid(view);
+    return _tableView(view);
+  }
+
+  Widget _filteredEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.filter_alt_off_outlined,
+              size: 56, color: BeeSkyColors.muted),
+          const SizedBox(height: 12),
+          const Text(
+            'Không có máy nào khớp',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Không có kết quả nào với tìm kiếm / bộ lọc / cô lập '
+            'hiện tại. Thử nới hoặc xóa chúng.',
+            style: TextStyle(color: BeeSkyColors.muted),
+          ),
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            onPressed: _clearGridModifiers,
+            icon: const Icon(Icons.clear_all, size: 17),
+            label: const Text('Xóa bộ lọc'),
+            style: _ghostBtnStyle,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Checkbox column width — the selection column is grid chrome,
+  /// not one of the configurable columns.
+  static const double _checkColW = 38;
+
+  Widget _tableView(GridViewResult view) {
+    final columns = _grid.activeColumns;
+    // Flatten the presentation: group header rows interleaved with
+    // record rows when grouping is on.
+    final items = <(MinerGroup?, MinerRecord?, int)>[];
+    if (view.isGrouped) {
+      var idx = 0;
+      for (final g in view.groups) {
+        items.add((g, null, -1));
+        for (final r in g.records) {
+          items.add((null, r, idx++));
+        }
+      }
+    } else {
+      for (var i = 0; i < view.visible.length; i++) {
+        items.add((null, view.visible[i], i));
+      }
+    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final totalFlex = columns.fold<int>(0, (s, c) => s + c.flex);
+        // Columns keep a readable minimum width; past that the
+        // table scrolls horizontally instead of squeezing (a real
+        // data grid's answer to 20+ columns).
+        var unit = constraints.maxWidth / totalFlex;
+        if (unit < 56) unit = 56;
+        // +31: the 14px side paddings header and rows share,
+        // plus the row's 3px accent border (drawn inside the row,
+        // it eats into the cells' width).
+        final tableW = _checkColW + unit * totalFlex + 31;
+        return SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: tableW,
+            child: Column(
+              children: [
+                _tableHeader(columns, unit, view),
+                const Divider(height: 1),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: items.length,
+                    itemBuilder: (context, i) {
+                      final (group, rec, idx) = items[i];
+                      if (group != null) return _groupHeaderRow(group);
+                      return _tableRow(rec!, idx, columns, unit);
+                    },
                   ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _groupHeaderRow(MinerGroup group) {
+    final dot = switch (group.key) {
+      'OK' => BeeSkyColors.ok,
+      'CHECK' => BeeSkyColors.warn,
+      'ERROR' => BeeSkyColors.bad,
+      _ => BeeSkyColors.muted,
+    };
+    return Container(
+      color: BeeSkyColors.panel2,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      child: Row(
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(color: dot, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            group.key,
+            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '${group.records.length} máy',
+            style: const TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Overview heat-grid (v0.25): one cell per miner, coloured by
+  // temperature (default) or hashrate, sized S/M/L. Grouping is a
+  // table-density presentation — the heat-grid always shows the
+  // flat visible list (docs/grid-mapping.md §2).
+  // ------------------------------------------------------------------
+
+  Widget _overviewGrid(GridViewResult view) {
+    final maxExtent = switch (_grid.overviewSize) {
+      OverviewCellSize.small => 104.0,
+      OverviewCellSize.medium => 138.0,
+      OverviewCellSize.large => 176.0,
+    };
+    return GridView.builder(
+      padding: const EdgeInsets.all(12),
+      gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: maxExtent,
+        mainAxisSpacing: 8,
+        crossAxisSpacing: 8,
+        childAspectRatio: 1.02,
+      ),
+      itemCount: view.visible.length,
+      itemBuilder: (context, i) => _overviewCell(view.visible[i], view),
+    );
+  }
+
+  /// The cell's tint. Temperature mode: absolute bands ending in
+  /// the ≥85 °C red rule. Hashrate mode: the miner's share of the
+  /// best rate IN ITS OWN UNIT among the visible fleet (units
+  /// never share a scale). Errors and value-less miners read grey /
+  /// red-tinted by their state, exactly like the table's chips.
+  (Color, String) _overviewCellStyle(MinerRecord rec, GridViewResult view) {
+    if (rec.hasFetchError) return (BeeSkyColors.bad, 'Lỗi kết nối');
+    if (_grid.overviewColor == OverviewColorMode.temperature) {
+      final t = rec.maxTempC;
+      if (t == null) return (BeeSkyColors.muted, '—');
+      final label = '${t.toStringAsFixed(0)} °C';
+      if (t >= tempLimitC) return (BeeSkyColors.hotTemp, label);
+      if (t >= 80) return (const Color(0xFFF59E0B), label);
+      if (t >= 70) return (BeeSkyColors.warn, label);
+      return (BeeSkyColors.ok, label);
+    }
+    final key = rec.rateSortKey;
+    if (key == null) return (BeeSkyColors.muted, '—');
+    var best = 0.0;
+    for (final other in view.visible) {
+      final k = other.rateSortKey;
+      if (k != null && k.$1 == key.$1 && k.$2 > best) best = k.$2;
+    }
+    final share = best == 0 ? 0.0 : key.$2 / best;
+    final color = share >= 0.75
+        ? BeeSkyColors.ok
+        : share >= 0.4
+            ? BeeSkyColors.warn
+            : const Color(0xFFF59E0B);
+    return (color, rec.rateText);
+  }
+
+  Widget _overviewCell(MinerRecord rec, GridViewResult view) {
+    final (tint, bigValue) = _overviewCellStyle(rec, view);
+    final selected = _selected?.ip == rec.ip;
+    final valueSize = switch (_grid.overviewSize) {
+      OverviewCellSize.small => 13.0,
+      OverviewCellSize.medium => 16.0,
+      OverviewCellSize.large => 20.0,
+    };
+    return Tooltip(
+      message: '${rec.ip} • ${rec.model}\n'
+          '${rec.rateText} • ${rec.tempText} • ${rec.statusLabel}',
+      child: Listener(
+        onPointerDown: (_) => _rowPointerDown(rec),
+        child: InkWell(
+          onTap: () => setState(() => _selected = rec),
+          child: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: tint.withValues(alpha: selected ? 0.38 : 0.22),
+              border: Border.all(
+                color: selected ? BeeSkyColors.accent : tint,
+                width: selected ? 2 : 1,
+              ),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        rec.ip,
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (_selection.isSelected(rec.ip))
+                      const Icon(
+                        Icons.check_circle,
+                        size: 14,
+                        color: BeeSkyColors.accent,
+                      ),
+                  ],
+                ),
+                Text(
+                  rec.model,
+                  style: const TextStyle(
+                    color: BeeSkyColors.muted,
+                    fontSize: 10.5,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const Spacer(),
+                Text(
+                  bigValue,
+                  style: TextStyle(
+                    fontSize: valueSize,
+                    fontWeight: FontWeight.w800,
+                    color: tint,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  rec.statusLabel,
+                  style: const TextStyle(
+                    color: BeeSkyColors.muted,
+                    fontSize: 10,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -1217,36 +1941,83 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  static const _columns = <(String, int)>[
-    ('IP', 3),
-    ('MODEL', 4),
-    ('NGUỒN', 3),
-    ('HASHRATE', 3),
-    ('CHIP', 2),
-    // NHIỆT carries EVERY board's temp since the owner's follow-up
-    // rule, so it gets a wider share; QUẠT gives one back (its long
-    // strings ellipsised anyway).
-    ('NHIỆT', 3),
-    ('QUẠT', 3),
-    ('TRẠNG THÁI', 2),
-  ];
-
-  Widget _tableHeader() {
+  /// The header row: a select-all-visible checkbox, then one
+  /// tappable header per ACTIVE column — a tap sorts by that
+  /// column, a second tap flips the direction (HashCore sorts
+  /// "by field + direction"; the arrow shows the current one).
+  Widget _tableHeader(
+    List<GridColumnDef> columns,
+    double unit,
+    GridViewResult view,
+  ) {
+    final visibleCount = view.visible.length;
+    final selectedVisible =
+        view.visible.where((r) => _selection.isSelected(r.ip)).length;
+    final bool? checkValue = visibleCount == 0
+        ? false
+        : selectedVisible == 0
+            ? false
+            : selectedVisible == visibleCount
+                ? true
+                : null;
     return Container(
       color: BeeSkyColors.tableHeading,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      // Left padding 17 = the rows' 14 + their 3px accent border,
+      // so header labels sit exactly over the row cells.
+      padding: const EdgeInsets.fromLTRB(17, 4, 14, 4),
       child: Row(
         children: [
-          for (final (label, flex) in _columns)
-            Expanded(
-              flex: flex,
-              child: Text(
-                label,
-                style: const TextStyle(
-                  color: BeeSkyColors.muted,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.1,
+          SizedBox(
+            width: _checkColW,
+            child: Checkbox(
+              value: checkValue,
+              tristate: true,
+              visualDensity: VisualDensity.compact,
+              onChanged: (_) => setState(() {
+                if (checkValue == true) {
+                  for (final r in view.visible) {
+                    _selection.selectedIps.remove(r.ip);
+                  }
+                } else {
+                  _selection.selectAll(view.visible);
+                }
+              }),
+            ),
+          ),
+          for (final col in columns)
+            SizedBox(
+              width: col.flex * unit,
+              child: InkWell(
+                onTap: () => _toggleSort(col.id),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          col.label,
+                          style: TextStyle(
+                            color: _grid.sort.field == col.id
+                                ? BeeSkyColors.accent
+                                : BeeSkyColors.muted,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.1,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (_grid.sort.field == col.id)
+                        Icon(
+                          _grid.sort.ascending
+                              ? Icons.arrow_upward
+                              : Icons.arrow_downward,
+                          size: 12,
+                          color: BeeSkyColors.accent,
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -1255,8 +2026,14 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _tableRow(MinerRecord rec, int i) {
+  Widget _tableRow(
+    MinerRecord rec,
+    int i,
+    List<GridColumnDef> columns,
+    double unit,
+  ) {
     final selected = _selected?.ip == rec.ip;
+    final compact = _grid.viewType == GridViewType.compact;
     final bg = selected
         ? BeeSkyColors.selectBg
         : (i.isOdd ? BeeSkyColors.tableZebra : Colors.transparent);
@@ -1266,37 +2043,100 @@ class _HomePageState extends State<HomePage> {
     // web admin. (A GestureDetector double-tap would hold the
     // single click back until the window expires — the lag BTC
     // Tools does not have.) The InkWell keeps the ripple and the
-    // keyboard/accessibility activation path.
-    return Listener(
-      onPointerDown: (_) => _rowPointerDown(rec),
-      child: InkWell(
-        onTap: () => setState(() => _selected = rec),
-        child: Container(
-        decoration: BoxDecoration(
+    // keyboard/accessibility activation path. The CHECKBOX is
+    // outside the Listener: a checkbox tap only toggles the
+    // checkbox selection, never the detail/double-click path.
+    return Row(
+      children: [
+        Container(
           color: bg,
-          // The prototype marks the selected row with a 3px accent bar.
-          border: selected
-              ? const Border(
-                  left: BorderSide(color: BeeSkyColors.accent, width: 3),
-                )
-              : const Border(
-                  left: BorderSide(color: Colors.transparent, width: 3),
+          width: _checkColW + 14,
+          padding: EdgeInsets.symmetric(vertical: compact ? 1 : 4),
+          child: Checkbox(
+            value: _selection.isSelected(rec.ip),
+            visualDensity: VisualDensity.compact,
+            onChanged: (_) => setState(() => _selection.toggle(rec.ip)),
+          ),
+        ),
+        Expanded(
+          child: Listener(
+            onPointerDown: (_) => _rowPointerDown(rec),
+            child: InkWell(
+              onTap: () => setState(() => _selected = rec),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: bg,
+                  // The prototype marks the selected row with a 3px
+                  // accent bar.
+                  border: selected
+                      ? const Border(
+                          left:
+                              BorderSide(color: BeeSkyColors.accent, width: 3),
+                        )
+                      : const Border(
+                          left: BorderSide(color: Colors.transparent, width: 3),
+                        ),
                 ),
+                padding: EdgeInsets.only(
+                  right: 14,
+                  top: compact ? 3 : 8,
+                  bottom: compact ? 3 : 8,
+                ),
+                child: Row(
+                  children: [
+                    for (final col in columns)
+                      _gridCell(col, rec, col.flex * unit, compact),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        child: Row(
-          children: [
-            _cell(rec.ip, 3),
-            _cell(rec.model, 4),
-            _cell(rec.sourceLabel, 3),
-            _cell(rec.rateText, 3),
-            _cell(rec.chipsText, 2),
-            _tempCell(rec),
-            _cell(rec.fansText, 3),
-            Expanded(flex: 2, child: _statusChip(rec)),
-          ],
-        ),
-        ),
+      ],
+    );
+  }
+
+  /// One cell of the data grid. Board-temp columns reuse the
+  /// NHIỆT hot-pill treatment for their single board; the status
+  /// column is the OK/CHECK/ERROR chip; the combined NHIỆT column
+  /// is the v0.22 per-board cell.
+  Widget _gridCell(
+    GridColumnDef col,
+    MinerRecord rec,
+    double width,
+    bool compact,
+  ) {
+    final fontSize = compact ? 12.0 : 13.0;
+    if (col.isTemps) {
+      return SizedBox(width: width, child: _tempCellContent(rec));
+    }
+    if (col.isStatus) {
+      return SizedBox(width: width, child: _statusChip(rec));
+    }
+    if (col.id.startsWith('boardTemp')) {
+      final idx = int.parse(col.id.substring('boardTemp'.length)) - 1;
+      final t = rec.boardTempAt(idx);
+      if (t == null) {
+        return _textCell('—', width, fontSize);
+      }
+      final chain = ChainInfo(
+        index: idx,
+        tempC: t,
+        chipsAlive: idx < rec.chains.length ? rec.chains[idx].chipsAlive : 0,
+        chipsTotal: idx < rec.chains.length ? rec.chains[idx].chipsTotal : 0,
+      );
+      return SizedBox(width: width, child: _boardTemp(chain));
+    }
+    return _textCell(col.textOf(rec), width, fontSize);
+  }
+
+  Widget _textCell(String text, double width, double fontSize) {
+    return SizedBox(
+      width: width,
+      child: Text(
+        text,
+        style: TextStyle(fontSize: fontSize),
+        overflow: TextOverflow.ellipsis,
       ),
     );
   }
@@ -1318,17 +2158,6 @@ class _HomePageState extends State<HomePage> {
     if (isDouble) _openMinerWeb(rec);
   }
 
-  Widget _cell(String text, int flex) {
-    return Expanded(
-      flex: flex,
-      child: Text(
-        text,
-        style: const TextStyle(fontSize: 13),
-        overflow: TextOverflow.ellipsis,
-      ),
-    );
-  }
-
   /// The NHIỆT cell shows EVERY hashboard's temperature, not only the
   /// max (owner rule added 2026-11-11 after the prototype review:
   /// "sao hok hiện hết 3 hoặc 4 hash board, cái nào nóng quá thì đỏ
@@ -1337,25 +2166,28 @@ class _HomePageState extends State<HomePage> {
   /// the OVER_TEMP problem) turns bold red on a soft red pill, the
   /// rest stay muted. A record with no per-chain temps falls back to
   /// the single max temp, and an unreachable row keeps "—".
-  Widget _tempCell(MinerRecord rec) {
+  Widget _tempCellContent(MinerRecord rec) {
     final shown = rec.chains.where((c) => c.tempC != null).toList();
-    if (shown.isEmpty) return _cell(rec.tempText, 3);
-    return Expanded(
-      flex: 3,
-      // Scale down rather than overflow when a narrow window (detail
-      // panel open) squeezes the column — the temps stay on one line.
-      child: FittedBox(
-        fit: BoxFit.scaleDown,
-        alignment: Alignment.centerLeft,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (var i = 0; i < shown.length; i++) ...[
-              if (i > 0) const SizedBox(width: 6),
-              _boardTemp(shown[i]),
-            ],
+    if (shown.isEmpty) {
+      return Text(
+        rec.tempText,
+        style: const TextStyle(fontSize: 13),
+        overflow: TextOverflow.ellipsis,
+      );
+    }
+    // Scale down rather than overflow when a narrow window (detail
+    // panel open) squeezes the column — the temps stay on one line.
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.centerLeft,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < shown.length; i++) ...[
+            if (i > 0) const SizedBox(width: 6),
+            _boardTemp(shown[i]),
           ],
-        ),
+        ],
       ),
     );
   }
@@ -1502,8 +2334,7 @@ class _HomePageState extends State<HomePage> {
                       color:
                           c.isHot ? BeeSkyColors.hotTemp : BeeSkyColors.muted,
                       fontSize: 12,
-                      fontWeight:
-                          c.isHot ? FontWeight.w700 : FontWeight.w400,
+                      fontWeight: c.isHot ? FontWeight.w700 : FontWeight.w400,
                     ),
                   ),
                 ),

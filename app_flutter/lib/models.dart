@@ -78,6 +78,21 @@ class ChainInfo {
   bool get isHot => tempC != null && tempC! >= tempLimitC;
 }
 
+/// One pool slot as a future core may emit it (wire key `pools`).
+/// Today's records carry NO pool data (see docs/grid-mapping.md
+/// §3.2) — the parse is defensive so the grid's pool columns light
+/// up unchanged when the core grows the field.
+class PoolInfo {
+  final String url;
+  final String worker;
+  const PoolInfo({required this.url, required this.worker});
+
+  factory PoolInfo.fromJson(Map<String, dynamic> json) => PoolInfo(
+        url: (json['url'] ?? '') as String,
+        worker: (json['worker'] ?? json['user'] ?? '') as String,
+      );
+}
+
 class MinerRecord {
   final String ip;
   final String model;
@@ -102,6 +117,27 @@ class MinerRecord {
   /// records — the detail panel only shows a login that was proven.
   final String? credLabel;
 
+  /// Seconds since boot (wire `elapsed_s`, on the wire since the
+  /// core's first record schema, parsed by the app only in v0.25).
+  final int elapsedS;
+
+  /// cgminer "GHS 5s" (wire `ghs_5s`) — GH/s-family terms ONLY;
+  /// see [rateRtText] for how the realtime column uses it honestly.
+  final double? ghs5s;
+
+  /// Wall power in watts (wire `power_w`) when the source reports
+  /// one (VNish dashd, some cgminer stats); null on classic
+  /// Bitmain bmminer, whose firmware reports no power at all.
+  final double? powerW;
+
+  /// MAC address — a DATA-GAP today (nothing in the core emits
+  /// one); parsed so the column/search light up if it ever lands.
+  final String? mac;
+
+  /// Pool slots (wire `pools`) — a DATA-GAP today: scan records
+  /// carry no pool data. Empty until the core grows the field.
+  final List<PoolInfo> pools;
+
   const MinerRecord({
     required this.ip,
     required this.model,
@@ -117,6 +153,11 @@ class MinerRecord {
     required this.rateUnit,
     required this.legacyThs,
     this.credLabel,
+    this.elapsedS = 0,
+    this.ghs5s,
+    this.powerW,
+    this.mac,
+    this.pools = const [],
   });
 
   factory MinerRecord.fromJson(Map<String, dynamic> json) {
@@ -141,6 +182,14 @@ class MinerRecord {
       rateUnit: json['rate_unit'] as String?,
       legacyThs: (json['ths'] as num?)?.toDouble(),
       credLabel: json['cred_label'] as String?,
+      elapsedS: ((json['elapsed_s'] as num?) ?? 0).toInt(),
+      ghs5s: (json['ghs_5s'] as num?)?.toDouble(),
+      powerW: (json['power_w'] as num?)?.toDouble(),
+      mac: json['mac'] as String?,
+      pools: ((json['pools'] as List<dynamic>?) ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(PoolInfo.fromJson)
+          .toList(),
     );
   }
 
@@ -190,6 +239,155 @@ class MinerRecord {
         'stock' => 'Bitmain gốc',
         _ => source,
       };
+
+  // ------------------------------------------------------------------
+  // Grid accessors (v0.25) — everything the data-grid columns, sort,
+  // search and filters read. Derived values are arithmetic on real
+  // record fields; gaps stay null and render "—" (docs/grid-mapping.md).
+  // ------------------------------------------------------------------
+
+  /// "3d 4h 12m" / "4h 12m" / "12m" — compact uptime from [elapsedS].
+  String get uptimeText {
+    if (elapsedS <= 0) return '—';
+    final d = elapsedS ~/ 86400;
+    final h = (elapsedS % 86400) ~/ 3600;
+    final m = (elapsedS % 3600) ~/ 60;
+    if (d > 0) return '${d}d ${h}h';
+    if (h > 0) return '${h}h ${m}m';
+    return '${m}m';
+  }
+
+  String get powerText =>
+      powerW == null ? '—' : '${powerW!.toStringAsFixed(0)} W';
+
+  /// Efficiency in J/TH — DERIVED (power_w / ths) for TH/s records
+  /// that report power; null everywhere else (a J/TH figure for a
+  /// Scrypt/Equihash unit would be a fabrication).
+  double? get efficiencyJTh {
+    final w = powerW;
+    final ths = legacyThs;
+    if (w == null || ths == null || ths <= 0) return null;
+    return w / ths;
+  }
+
+  String get efficiencyText {
+    final e = efficiencyJTh;
+    return e == null ? '—' : '${e.toStringAsFixed(1)} J/TH';
+  }
+
+  /// Realtime rate for the HASHRATE RT column — PARTIAL by data:
+  /// the wire's `ghs_5s` is GH/s-family only, so it is shown (as
+  /// TH/s) solely for TH/s-family records; other units have no
+  /// separate realtime value on the wire and honestly read null.
+  (double, String)? get rateRt {
+    final g = ghs5s;
+    if (g == null) return null;
+    final unit = rate?.$2 ?? 'TH/s';
+    if (unit != 'TH/s') return null;
+    return (g / 1000.0, 'TH/s');
+  }
+
+  String get rateRtText {
+    final r = rateRt;
+    return r == null ? '—' : formatRate(r.$1, r.$2);
+  }
+
+  /// Algorithm — DERIVED from the native rate unit using the same
+  /// family conventions as the core's `_native_rate` calibration.
+  String get algorithmLabel => switch (rateUnit) {
+        'ksol/s' || 'sol/s' => 'Equihash',
+        'MH/s' => 'Scrypt',
+        'TH/s' || 'GH/s' => 'SHA-256',
+        _ => '—',
+      };
+
+  /// Boards with at least one missing chip — DERIVED badChainsCount.
+  int get badBoards => chains.where((c) => c.chipsTotal > c.chipsAlive).length;
+
+  /// Problem codes joined for the MÃ LỖI column / filters / search.
+  String get errorCodesText => issues.map((p) => p.code).toSet().join(', ');
+
+  /// Chain [i]'s temperature, or null when the board is absent or
+  /// reported none (a Board-4 filter never matches a 3-board unit).
+  double? boardTempAt(int i) =>
+      (i >= 0 && i < chains.length) ? chains[i].tempC : null;
+
+  String boardTempTextAt(int i) {
+    final t = boardTempAt(i);
+    return t == null ? '—' : '${t.toStringAsFixed(0)}°';
+  }
+
+  /// Pool slot [i]'s URL / worker — empty strings while the record
+  /// carries no pool data (the v0.25 DATA-GAP).
+  String poolUrlAt(int i) => (i < pools.length) ? pools[i].url : '';
+  String poolWorkerAt(int i) => (i < pools.length) ? pools[i].worker : '';
+
+  /// Sort/comparison key for rates: (family rank, value in the
+  /// family's smallest unit). Rates are NEVER compared across units
+  /// (the v0.20 lesson) — families order by the canonical unit
+  /// order, values compare inside the family.
+  (int, double)? get rateSortKey {
+    final r = rate;
+    if (r == null) return null;
+    final rank = rateUnitOrder.indexOf(r.$2);
+    final base = switch (r.$2) {
+      'TH/s' => r.$1 * 1e12,
+      'GH/s' => r.$1 * 1e9,
+      'MH/s' => r.$1 * 1e6,
+      'ksol/s' => r.$1 * 1e3,
+      _ => r.$1, // sol/s and anything unknown: already the base
+    };
+    return (rank < 0 ? rateUnitOrder.length : rank, base);
+  }
+
+  /// Everything the grid search matches against (HashCore: "Search
+  /// by IP / MAC, Pool or Worker"; BeeSky adds model + worker from
+  /// every slot). MAC/pool parts are empty while they are gaps.
+  String get searchHaystack => [
+        ip,
+        mac ?? '',
+        model,
+        for (final p in pools) ...[p.url, p.worker],
+      ].join(' ').toLowerCase();
+}
+
+/// Numeric IP comparison (octet by octet) — lexicographic ordering
+/// would put 192.168.2.99 after 192.168.2.101. Non-IP strings fall
+/// back to plain string order, after parseable IPs.
+int compareIp(String a, String b) {
+  List<int>? parse(String s) {
+    final parts = s.split('.');
+    if (parts.length != 4) return null;
+    final out = <int>[];
+    for (final p in parts) {
+      final v = int.tryParse(p);
+      if (v == null) return null;
+      out.add(v);
+    }
+    return out;
+  }
+
+  final pa = parse(a);
+  final pb = parse(b);
+  if (pa == null && pb == null) return a.compareTo(b);
+  if (pa == null) return 1;
+  if (pb == null) return -1;
+  for (var i = 0; i < 4; i++) {
+    final c = pa[i].compareTo(pb[i]);
+    if (c != 0) return c;
+  }
+  return 0;
+}
+
+/// "1,234" style integer grouping for counts in grid chrome.
+String formatCount(int value) {
+  final s = '$value';
+  final buf = StringBuffer();
+  for (var i = 0; i < s.length; i++) {
+    if (i > 0 && (s.length - i) % 3 == 0) buf.write(',');
+    buf.write(s[i]);
+  }
+  return buf.toString();
 }
 
 /// Grouped fleet total — a direct port of report.fleet_rate_totals +

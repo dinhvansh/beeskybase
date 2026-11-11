@@ -2790,3 +2790,171 @@ build-flutter.yml):
     runner and the BeeSkyFlutter-<tag>-win64.zip asset.
     The app remains compile-verified only until the
     owner runs it on real Windows (as since v0.21).
+
+---
+
+# v0.25.0 — data-grid miners list (HashCore Toolkit list machinery, ported per the dissection)
+
+The parity push continues (owner's bar: 99% of HashCore
+Toolkit in one month). Following the dissect-before-
+porting rule, the Toolkit's miners-list mechanism was
+dissected FIRST from the shipped materials (the full
+~1,500-key translation table, the AOT string pools, the
+Dart file map) and the behaviour mapping written to
+docs/grid-mapping.md BEFORE any code — every behaviour
+graded VERIFIED / INFERRED / UNKNOWN, every column audited
+against the real BeeSky record schema, data gaps named
+instead of faked.
+
+PYTHON CORE: unchanged. The grid is a Flutter-side port;
+the record fields it needed (elapsed_s, ghs_5s, power_w)
+were already on the wire from _finalise_record — the Dart
+model simply never parsed them. They are parsed now.
+
+FLUTTER APP (app_flutter/):
+
+  * lib/grid.dart (NEW): the column universe (29 columns),
+    GridConfig + GridStore (beesky-grid.json beside the exe,
+    %APPDATA% fallback, corrupt = factory defaults), the
+    GridFilter model (numeric / range / string / bool —
+    HashCore's four MinerFilter variants), FilterPreset,
+    the MinerSelection model + IsolateMode, grouping, and
+    the pure view pipeline (search -> filters AND ->
+    isolate -> sort -> group). lib/grid_dialogs.dart (NEW):
+    the columns dialog (toggle + up/down reorder + CHƯA CÓ
+    DỮ LIỆU tags on gap columns + Đặt lại mặc định) and
+    the filter dialog (builder rows + named presets).
+  * Columns: every column BeeSky records can feed, each
+    toggleable + reorderable, persisted; reset restores
+    the exact v0.24 default set/order. Per-board chip-temp
+    columns BOARD 1–4 join the combined NHIỆT column.
+    Data modes: Số liệu (fixed metric set) / Pools (fixed
+    pool set) / Tùy chỉnh (the user's set; the columns
+    dialog edits it and switches to it).
+  * Densities: Thoải mái / Gọn row heights + TỔNG QUAN
+    heat-grid (cells coloured by Temperature — absolute
+    bands ending in the >=85 °C red rule — or by Hashrate
+    share within the same unit; sizes S/M/L; click a cell
+    selects it and opens the detail panel, double-click
+    opens its web admin, tooltip carries the facts).
+  * Sort by any column header (arrow shows direction);
+    IPs compare octet-numerically; rates compare only
+    inside their native-unit family (the v0.20 lesson);
+    nulls sort last in both directions. Search matches
+    IP / MAC / model / pool / worker. Grouping by Trạng
+    thái / Model / Firmware renders header rows with
+    counts. A filtered-to-empty list shows HashCore's
+    empty-filter state with a clear action.
+  * Selection: a checkbox column + header select-all-
+    visible (tri-state); the selection bar shows the
+    result count (Đang hiển thị X / Y máy), the selected
+    count, Chọn tất cả / Đảo chọn / Cô lập (đã chọn | lỗi)
+    / Xóa lọc-chọn. The selection lives in grid.dart's
+    MinerSelection model — v0.26's Operations bar consumes
+    it from there; the Operations BAR itself is NOT built
+    in v0.25, exactly as scoped.
+  * Hotkeys via Shortcuts/Actions with intent classes
+    (HashCore's own architecture is intents+actions too):
+    Ctrl+A select all visible, Ctrl+F focus search,
+    Ctrl+R / F5 rescan, Esc clear search+filters+isolate
+    +selection. Handlers step aside while a text field
+    owns the keyboard.
+  * All v0.24 behaviours intact: groups home + group scan
+    scoping, double-click row -> miner web, creds dialog,
+    per-board temps red at >=85 °C, header chips.
+
+MATCH / DIVERGENCE vs HASHCORE (from the mapping doc):
+
+  MATCH: the two view axes (type x mode, incl. the enum
+  value sets); Overview structure (cells, colour-metric
+  toggle, S/M/L sizes, per-cell tooltip); user-configurable
+  columns with reorder + reset-to-defaults; sort by field
+  + direction; the search placeholder's field set; the
+  filter model (numeric comparisons More/Less/Equals/Not
+  equals, range variant, string contains/is-any family,
+  bool variant) AND-combined; named filter presets in a
+  presets store shared with the future pool presets;
+  grouping by a field with group headers; select all /
+  invert / isolate (selected | errors); the empty-filter
+  state + clear action; an intents+actions hotkey layer.
+
+  DIVERGENCE (named, in the mapping): BeeSky labels are
+  Vietnamese and its defaults are the v0.24 set; Overview's
+  colour SCALE is BeeSky's (HashCore's is UNKNOWN — not
+  observable in the materials); the columns dialog uses
+  up/down buttons (HashCore's reorder gesture is UNKNOWN);
+  a same-name filter preset replaces silently (HashCore
+  prompts — its edit-preset dialog is Presets-center scope);
+  the full Presets CENTER dialog is not built — presets
+  live in the filter dialog + the shared store (the seed;
+  pool presets arrive v0.28); grouping renders in the two
+  table densities only (the heat-grid is flat) and has no
+  jump-to-group / collapse (UNKNOWN in the original);
+  active filter rows are session-only (their persistence
+  in HashCore is UNKNOWN); hotkey BINDINGS are BeeSky's
+  (the intent set matches; HashCore's keys are UNKNOWN);
+  zoom + command palette are named gaps; BeeSky keeps two
+  columns HashCore has no counterpart for (CHIP, ĐĂNG
+  NHẬP) because they carry core BeeSky data.
+
+  DATA-GAPS (columns offered, values honestly '—' — the
+  core emits no such data; nothing is faked): MAC, S/N,
+  Pool 1–3 URL + worker (scan records carry NO pool data
+  at all today — the columns parse an optional wire
+  'pools' list so they light up when the core grows one).
+  PARTIAL: HASHRATE RT (the wire's ghs_5s is GH/s-family
+  only — shown for TH/s records, '—' for MH/s + ksol/s).
+  DERIVED (arithmetic on real fields, marked in the
+  mapping): HIỆU SUẤT = power_w / ths (J/TH, TH/s + power
+  records only); THUẬT TOÁN from the native rate unit;
+  BOARD LỖI from per-chain chip counts. NOT OFFERED (no
+  data source at all): lock state, Has PICs, stock
+  hashrate, throttling, miner presets, board serials /
+  models / chip BIN, PSU model/serial/PFC/LLC temps,
+  platform, install type, firmware build date/name, PCB
+  temps (BeeSky carries ONE temp per chain), cooling,
+  Hotel Fee, DevFee availability, power limit, per-record
+  range, note (device-detail scope, v0.27).
+
+(a) VERIFIED LOCALLY (this sandbox):
+
+  * Python regression spot-checks at the v0.25.0 pins
+    (core untouched; the pin suite asserts the version):
+
+    mock_agent_bg_test: 52 PASS / 0 FAIL (standalone)
+    mock_bridge_test: 24 PASS / 0 FAIL (standalone)
+    mock_groups_test: 39 PASS / 0 FAIL (standalone)
+    mock_creds_test: 32 PASS / 0 FAIL (standalone)
+    mock_units_test: 50 PASS / 0 FAIL (standalone)
+
+  * Flutter (SDK 3.47.9 at ~/workspace/flutter-sdk):
+    flutter analyze: clean; flutter test: 63 PASS / 0 FAIL (local SDK 3.47.9; 35 pre-existing + 28 new grid tests) — model parsing of the newly-read wire
+    fields + derived getters (uptime, J/TH, TH/s-only RT,
+    algorithm, bad boards); column defaults = the v0.24
+    set/order; pools-mode set; toggle/reorder/reset; JSON
+    round-trip (unknown ids dropped, new columns join the
+    tail); GridStore round-trip + corrupt-file fallback;
+    sorts (IP octets, temps nulls-last both ways, status
+    order, rates family-locked); search (IP/model); the
+    filter operators incl. between + the null-field rule
+    + unparseable-number rule; presets JSON round-trip;
+    grouping counts on a generated 63-miner fleet (status
+    49/13/1); the selection model; isolate modes. Widget
+    level: density switching + heat-grid red rule + cell-
+    click detail; header sort asc/desc; search + count
+    line; checkbox selection + both isolate modes +
+    Ctrl+A / Esc / Ctrl+F hotkeys; the filter dialog end
+    to end (apply -> save preset -> clear -> re-apply ->
+    preset found in beesky-grid.json on disk); the columns
+    dialog (gap tags, enable UPTIME -> header + file,
+    reset -> gone); grouping headers on the 63-fleet. All
+    35 pre-existing tests still pass — the suite was not
+    adapted at all this release.
+
+(b) VERIFIED ONLY BY CI (.github/workflows/
+build-flutter.yml):
+
+  * flutter build windows --release on a real Windows
+    runner and the BeeSkyFlutter-<tag>-win64.zip asset.
+    The app remains compile-verified only until the
+    owner runs it on real Windows (as since v0.21).

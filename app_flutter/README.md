@@ -153,6 +153,29 @@ app-side too; the always-on equivalent is the farm agent): while
 the app is open, a timer re-scans the ACTIVE group once its own
 interval has elapsed since its last scan.
 
+## Data grid (v0.25)
+
+The miners list is now the HashCore-style data grid (the behaviour
+mapping, with every divergence, unknown and DATA-GAP marked, is
+`docs/grid-mapping.md`). Two view axes: density (Thoải mái / Gọn
+rows, or the Tổng quan heat-grid — cells coloured by temperature
+with the ≥85 °C red rule, or by hashrate share within the same
+unit, sizes S/M/L) and data mode (Số liệu / Pools / Tùy chỉnh).
+Columns are configurable (toggle + reorder in the "Cột" dialog,
+reset restores the v0.24 defaults), sortable by header click,
+plus a search box (IP / MAC / model / pool / worker), an AND
+filter builder with named saved presets, grouping by status /
+model / firmware with count headers, and a checkbox selection
+model with isolate (selected | errors) — the selection model
+(`MinerSelection` in `lib/grid.dart`) is what the v0.26
+Operations bar will consume. Hotkeys: Ctrl+A / Ctrl+F / Ctrl+R /
+F5 / Esc. The view configuration and the filter presets persist
+in `beesky-grid.json` NEXT TO the executable (fallback
+`%APPDATA%\BeeSky\beesky-grid.json`); active filter rows are
+session-only. Columns whose data the core does not emit yet
+(MAC, S/N, pools) are offered but honestly render "—" and are
+tagged "chưa có dữ liệu" in the dialog — nothing is faked.
+
 ## Stage-1 scope vs TODO
 
 Covered: splash, sidebar + header chips, scan bar, miners table with
@@ -161,7 +184,10 @@ empty state, auto-select first row, export tickets, saved
 credential sets (editor dialog + file persistence + `--creds-file`
 hand-off), double-click a row to open that miner's web admin,
 network groups (home screen, editor with per-group creds,
-core-resolved group scans, app-side autoscan).
+core-resolved group scans, app-side autoscan), the data grid
+(configurable columns, densities + heat-grid, data modes, sorting,
+search, filter builder + presets, grouping, selection + isolate,
+hotkeys).
 
 TODO (marked in code): a dedicated tickets verb so export doesn't need
 a second scan pass; `url_launcher` instead of the OS-shell browser open;
