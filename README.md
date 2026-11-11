@@ -224,3 +224,10 @@ Cảnh giới hạn 30 khung/giây, tối đa 27 sprite coin/hash, dừng vòng 
 ### Sửa model và nhãn kệ
 
 Model hydro loại bỏ phông nền studio đi kèm file gốc và quay mặt kết nối ra phía trước. Hai model giữ nhiều chi tiết hơn, sửa hướng mặt và triangulate khi chuyển đổi. Bỏ cánh quạt trang trí chồng lên quạt gốc. Nhãn kệ dùng lớp chữ trên màn hình, có tên, sức chứa và khu vực; giữ cỡ chữ khi zoom, theo vị trí kệ và giới hạn trong vùng xem.
+
+
+### Xem nhiều tầng và công cụ gọn
+
+Chọn **Tầng → Tất cả tầng · phối cảnh** để xem các tầng cùng lúc theo dạng tách tầng theo chiều cao, sàn trong suốt và đường viền riêng. Chọn một tầng để chỉnh vị trí; mở **Bố trí** tự trở về tầng đang chọn để thao tác an toàn. Nhãn bên trái là danh sách kệ luôn hiện trong cảnh, có thể cuộn; bấm tên để đưa camera tới kệ đó.
+
+Mặc định chỉ hiện thanh chọn tầng và các nút Bố trí, Lọc & nhóm, Tùy chọn, Toàn màn hình. Góc nhìn gom vào một danh sách; công cụ quản lý tầng, xoay kệ và di chuyển máy chỉ xuất hiện khi mở Bố trí. Bộ lọc/nhóm chỉ xuất hiện khi cần.

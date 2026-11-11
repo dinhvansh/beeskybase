@@ -29,8 +29,8 @@ export function mount(host,api){
   scene.add(new T.HemisphereLight(0xffffff,0x657080,2.4));
   const light=new T.DirectionalLight(0xffffff,3);light.position.set(5,16,8);light.castShadow=true;light.shadow.mapSize.set(2048,2048);Object.assign(light.shadow.camera,{left:-26,right:26,top:20,bottom:-20,far:65});light.shadow.bias=-.001;scene.add(light);
   const fill=new T.DirectionalLight(0xd9ecff,1.8);fill.position.set(-12,8,-8);scene.add(fill);
-  const rackLabels=[],labelPosition=new T.Vector3();
-  const labelLayer=document.createElement('div');labelLayer.className='warehouse-label-layer';labelLayer.setAttribute('aria-hidden','true');host.append(labelLayer);
+  const rackLabels=[];
+  const labelLayer=document.createElement('div');labelLayer.className='warehouse-label-layer';labelLayer.setAttribute('aria-label','Danh sách kệ trong cảnh');host.append(labelLayer);
   const slots=[],groups=[],rackMeshes=[],ray=new T.Raycaster(),pointer=new T.Vector2();
   const modelLoads=[];let loadedModels=0;
   const frameMat=new T.MeshStandardMaterial({color:c.frame,roughness:.65,metalness:.35});
@@ -46,10 +46,14 @@ export function mount(host,api){
     const s=new T.Sprite(new T.SpriteMaterial({map:texture,depthTest:true}));s.position.set(x,y,z);s.scale.set(width,width/5.33,1);parent.add(s);
   }
   const racks=api.racks(),columns=Math.min(3,racks.length||1);
+  const floorStep=Math.max(9,...racks.map(r=>r.rows*1.12+4));
+  const displayFloors=api.allFloors?api.floors:[api.floor];
+  const floorY=id=>api.allFloors?Math.max(0,displayFloors.findIndex(f=>f.id===id))*floorStep:0;
+  const totalHeight=(displayFloors.length-1)*floorStep+6;controls.maxDistance=Math.max(120,totalHeight*5);
   const span=Math.max(8,...racks.map(r=>r.cols*1.18+1)),height=Math.max(5,...racks.map(r=>r.rows*1.12+1));
   racks.forEach((r,n)=>{
     const w=r.cols*1.18+.35,h=r.rows*1.12+.45,g=new T.Group();
-    g.position.set(r.placement.x,0,r.placement.z);g.rotation.y=-r.placement.rotation*Math.PI/180;g.userData.r=r;groups.push(g);scene.add(g);
+    g.position.set(r.placement.x,floorY(r.placement.floorId),r.placement.z);g.rotation.y=-r.placement.rotation*Math.PI/180;g.userData.r=r;groups.push(g);scene.add(g);
     for(const x of [-w/2,w/2])for(const z of [-.6,.6])block(g,x,h/2,z,.13,h,.13,frameMat);
     for(let row=0;row<=r.rows;row++)block(g,0,row*1.12+.15,0,w+.1,.1,1.4,shelfMat);
     for(let row=0;row<r.rows;row++)for(let col=0;col<r.cols;col++){
@@ -75,11 +79,18 @@ export function mount(host,api){
       }
     }
     g.traverse(o=>{if(o.isMesh){o.userData.rackGroup=g;rackMeshes.push(o)}});
-    const tag=document.createElement('div');tag.className='warehouse-rack-label';
+    const tag=document.createElement('button');tag.type='button';tag.className='warehouse-rack-label';tag.title='Bấm để tìm '+r.name;tag.addEventListener('click',()=>{api.selectRack(r.id);focusRack(r.id)});
     const name=document.createElement('strong');name.textContent=r.name+' · '+r.slots.filter(Boolean).length+'/'+r.slots.length;
-    const zone=document.createElement('small');zone.textContent=r.zone;tag.append(name,zone);labelLayer.append(tag);rackLabels.push({tag,g,height:h});
+    const zone=document.createElement('small');zone.textContent=(api.floors.find(f=>f.id===r.placement.floorId)?.name||'')+' · '+r.zone;tag.append(name,zone);labelLayer.append(tag);rackLabels.push({tag,g,height:h});
   });
-  const floorWidth=api.floor.width,floorDepth=api.floor.depth;
+  const floorWidth=Math.max(...displayFloors.map(f=>f.width)),floorDepth=Math.max(...displayFloors.map(f=>f.depth));
+  if(api.allFloors)displayFloors.forEach((floor,index)=>{
+    const level=floorY(floor.id);
+    if(index){const slabMat=new T.MeshBasicMaterial({color:c.selected,transparent:true,opacity:.08,depthWrite:false,side:T.DoubleSide});const slab=block(scene,0,level-.12,0,floor.width,.12,floor.depth,slabMat);slab.castShadow=false;slab.receiveShadow=false}
+    const rim=new T.LineLoop(new T.BufferGeometry().setFromPoints([new T.Vector3(-floor.width/2,level, -floor.depth/2),new T.Vector3(floor.width/2,level,-floor.depth/2),new T.Vector3(floor.width/2,level,floor.depth/2),new T.Vector3(-floor.width/2,level,floor.depth/2)]),new T.LineBasicMaterial({color:c.selected}));scene.add(rim);
+    const count=racks.filter(r=>r.placement.floorId===floor.id).length;
+    const floorTag=document.createElement('span');floorTag.className='warehouse-floor-chip';floorTag.textContent=floor.name+' · '+count+' kệ';labelLayer.append(floorTag);
+  });
   block(scene,0,-.08,0,floorWidth,.12,floorDepth,new T.MeshStandardMaterial({color:c.floor,roughness:1}));
   // Open front and roof: architecture frames the layout without hiding machines.
   const wallMat=new T.MeshStandardMaterial({color:c.shelf,roughness:.85});
@@ -128,29 +139,23 @@ export function mount(host,api){
   }
   const grid=new T.GridHelper(floorWidth,Math.ceil(floorWidth),c.grid,c.grid);grid.scale.z=floorDepth/floorWidth;grid.position.y=.001;grid.material.transparent=true;grid.material.opacity=.22;scene.add(grid);
   const extent=new T.Box3();groups.forEach(g=>extent.expandByObject(g));
-  const center=extent.isEmpty()?new T.Vector3(0,1.5,0):extent.getCenter(new T.Vector3());center.y=height*.4;
+  const center=extent.isEmpty()?new T.Vector3(0,1.5,0):extent.getCenter(new T.Vector3());if(!api.allFloors)center.y=height*.4;
   const size=extent.isEmpty()?new T.Vector3(20,5,12):extent.getSize(new T.Vector3());
   const selection=new T.BoxHelper(new T.Object3D(),c.selected);selection.visible=false;scene.add(selection);
   function selectRack(id){const g=groups.find(g=>g.userData.r.id===id);selection.visible=!!g;if(g)selection.setFromObject(g);draw()}
   function updateRackLabels(){
-    const width=host.clientWidth,height=host.clientHeight,placed=[];
-    camera.updateMatrixWorld();
-    for(const {tag,g,height:rackHeight} of rackLabels){
-      labelPosition.set(0,rackHeight+.3,0);g.localToWorld(labelPosition);labelPosition.project(camera);
-      const selected=g.userData.r.id===api.selectedRack();
-      const outside=labelPosition.z>1||labelPosition.z< -1||(!selected&&(Math.abs(labelPosition.x)>1.4||Math.abs(labelPosition.y)>1.8));
-      tag.hidden=outside;if(outside)continue;
-      const half=Math.min(tag.offsetWidth/2,width/2-8),tagHeight=tag.offsetHeight;
-      const x=T.MathUtils.clamp((labelPosition.x+1)*width/2,half+8,width-half-8);
-      let y=T.MathUtils.clamp((1-labelPosition.y)*height/2,tagHeight+8,height-12);
-      for(const box of placed)if(Math.abs(x-box.x)<half+box.half+6&&Math.abs(y-box.y)<tagHeight+6)y=Math.min(height-12,box.y+tagHeight+8);
-      placed.push({x,y,half});tag.style.left=x+'px';tag.style.top=y+'px';tag.classList.toggle('selected',selected);
-    }
+    // Persistent, scrollable rack index: no clipping or depth occlusion on orbit/zoom.
+    for(const {tag,g} of rackLabels)tag.classList.toggle('selected',g.userData.r.id===api.selectedRack());
+  }
+  function focusRack(id){
+    const group=groups.find(g=>g.userData.r.id===id);if(!group)return;
+    const target=new T.Box3().setFromObject(group).getCenter(new T.Vector3());
+    controls.target.copy(target);camera.position.copy(target).add(new T.Vector3(4,4,12));controls.update();selectRack(id);draw();
   }
   function draw(){renderer.shadowMap.needsUpdate=true;renderer.render(scene,camera);updateRackLabels()}
   function view(mode='hall'){
-    if(mode==='hall'){controls.target.set(0,1.5,0);const dist=Math.max(floorWidth*1.05,floorDepth*1.5)*Math.max(1,1.25/camera.aspect);camera.position.set(dist*.58,dist*.65,dist*.85);controls.update();draw();return}
-    controls.target.copy(center);const dist=Math.max(12,size.x*.95,size.z*.95,height*2)*Math.max(1,1.6/camera.aspect);
+    if(mode==='hall'){controls.target.set(0,api.allFloors?totalHeight/2:1.5,0);const dist=Math.max(floorWidth*1.05,floorDepth*1.5,totalHeight*1.4)*Math.max(1,1.25/camera.aspect);camera.position.set(dist*.58,dist*.65+(api.allFloors?totalHeight/2:0),dist*.85);controls.update();draw();return}
+    controls.target.copy(center);const dist=Math.max(12,size.x*.95,size.z*.95,size.y*1.5,height*2)*Math.max(1,1.6/camera.aspect);
     if(mode==='front')camera.position.set(center.x,center.y,center.z+dist);
     else if(mode==='top')camera.position.set(center.x,dist*1.2,center.z+.01);
     else camera.position.set(center.x+dist*.35,height+dist*.26,center.z+dist*.8);

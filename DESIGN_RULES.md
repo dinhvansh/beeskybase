@@ -158,3 +158,10 @@ Các màu light đề xuất trong master prompt:
 - Lọc nhóm làm nổi máy khớp, giữ ngữ cảnh bố trí; có thể bỏ lọc. Có đường thao tác qua danh sách/2D và bàn phím.
 - Model hiển thị có thể chọn riêng, không đổi nhận diện/model máy báo về. Dùng model tối ưu, cache hình học/textures giữa các máy.
 - Hiển thị rõ giới hạn lưu trong phiên; đường nước/bộ tản là thông tin người dùng nhập, không giả lập điều khiển thực tế.
+
+
+### Đơn giản hóa điều khiển xưởng (bổ sung)
+
+- Màn hình khám phá ưu tiên cảnh; công cụ chỉnh sửa và lọc mở theo nhu cầu qua Bố trí và Lọc & nhóm.
+- Danh sách kệ không phụ thuộc phép chiếu camera, có thể cuộn, bấm để định vị; không tự biến mất khi xoay/zoom.
+- Có phối cảnh nhiều tầng dạng tách tầng; chỉnh bố trí trên một tầng cụ thể, không làm thay đổi dữ liệu khi đổi góc nhìn.
