@@ -23,7 +23,7 @@ Color opsStatusColor(OpsStatus status) => switch (status) {
       OpsStatus.hasErrors => BeeSkyColors.warn,
       OpsStatus.error => BeeSkyColors.bad,
       OpsStatus.cancelled => BeeSkyColors.muted,
-      OpsStatus.running => BeeSkyColors.accent,
+      OpsStatus.running => BeeSkyColors.accentInk,
     };
 
 /// "Confirm operation" — shown before a device-mutating task

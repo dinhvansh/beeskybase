@@ -17,9 +17,9 @@ const List<String> rateUnitOrder = ['TH/s', 'GH/s', 'MH/s', 'ksol/s', 'sol/s'];
 const double tempLimitC = 85;
 
 /// The Flutter shell's own version — moves WITH the product
-/// version (pubspec 0.38.0+19); the sidebar and Cài đặt show the
+/// version (pubspec 0.39.0+20); the sidebar and Cài đặt show the
 /// CORE's version from sysinfo, this one is the app's.
-const String beeskyAppVersion = '0.38.0';
+const String beeskyAppVersion = '0.39.0';
 
 /// "1101.0, ksol/s" -> "1,101.00 ksol/s" — mirrors Python's f"{v:,.2f}".
 String formatRateNum(double value) {

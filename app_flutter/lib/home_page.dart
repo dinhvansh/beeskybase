@@ -1275,7 +1275,7 @@ class _HomePageState extends State<HomePage> {
       padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
       child: Row(
         children: [
-          Icon(task.type.icon, size: 16, color: BeeSkyColors.accent),
+          Icon(task.type.icon, size: 16, color: BeeSkyColors.accentInk),
           const SizedBox(width: 8),
           Text(
             '${task.type.label}: $done/${task.total} địa chỉ',
@@ -2112,7 +2112,7 @@ class _HomePageState extends State<HomePage> {
                 ),
                 decoration: BoxDecoration(
                   color: v == value
-                      ? BeeSkyColors.accent.withValues(alpha: 0.16)
+                      ? BeeSkyColors.activeNav
                       : Colors.transparent,
                   borderRadius: BorderRadius.circular(radiusWidget),
                 ),
@@ -2122,7 +2122,7 @@ class _HomePageState extends State<HomePage> {
                     fontSize: 12.5,
                     fontWeight: v == value ? FontWeight.w700 : FontWeight.w400,
                     color:
-                        v == value ? BeeSkyColors.accent : BeeSkyColors.muted,
+                        v == value ? BeeSkyColors.text : BeeSkyColors.muted,
                   ),
                 ),
               ),
@@ -2361,11 +2361,11 @@ class _HomePageState extends State<HomePage> {
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
         backgroundColor: active
-            ? BeeSkyColors.accent.withValues(alpha: 0.16)
+            ? BeeSkyColors.activeNav
             : BeeSkyColors.ghostFill,
-        foregroundColor: active ? BeeSkyColors.accent : BeeSkyColors.text,
+        foregroundColor: BeeSkyColors.text,
         side: BorderSide(
-          color: active ? BeeSkyColors.accent : BeeSkyColors.glassBorder,
+          color: active ? BeeSkyColors.accentInk : BeeSkyColors.glassBorder,
         ),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(radiusWidget),
@@ -2485,12 +2485,12 @@ class _HomePageState extends State<HomePage> {
 
   Widget _sidebar() {
     return Container(
-      width: 228,
+      width: 188,
       decoration: const BoxDecoration(
-        color: BeeSkyColors.panel,
+        color: BeeSkyColors.sidebarBg,
         border: Border(right: BorderSide(color: BeeSkyColors.border)),
       ),
-      padding: const EdgeInsets.fromLTRB(18, 20, 14, 16),
+      padding: const EdgeInsets.fromLTRB(14, 20, 12, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2514,8 +2514,11 @@ class _HomePageState extends State<HomePage> {
                       'QUẢN LÝ MÁY ĐÀO',
                       style: TextStyle(
                         color: BeeSkyColors.muted,
-                        fontSize: 10,
-                        letterSpacing: 1.6,
+                        // 9px/0 spacing: DejaVu (Linux) renders the
+                        // caps wider than Segoe UI — 10px/1.6 clipped
+                        // at the 188px sidebar (v0.39).
+                        fontSize: 9,
+                        letterSpacing: 0,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -2524,7 +2527,8 @@ class _HomePageState extends State<HomePage> {
               ),
             ],
           ),
-          const SizedBox(height: 28),
+          const SizedBox(height: 24),
+          _navSection('QUẢN LÝ'),
           // The app opens on network groups — the HashCore home
           // screen (v0.24); the miners table is one click away.
           _navItem(
@@ -2539,9 +2543,11 @@ class _HomePageState extends State<HomePage> {
             active: _view == _View.miners,
             onTap: () => setState(() => _view = _View.miners),
           ),
-          // Roadmap views: listed so the structure matches where the
-          // product is going, greyed + "SAU" until they are real —
-          // no fake functionality behind them.
+          const SizedBox(height: 14),
+          _navSection('THEO DÕI'),
+          // All seven views are implemented (v0.32 closed the last
+          // "SAU" tags) — these are live screens, grouped below the
+          // two primary ones.
           _navItem(
             Icons.grid_on,
             'Bản đồ nhiệt',
@@ -2566,6 +2572,8 @@ class _HomePageState extends State<HomePage> {
             active: _view == _View.events,
             onTap: () => _goView(_View.events),
           ),
+          const SizedBox(height: 14),
+          _navSection('HỆ THỐNG'),
           _navItem(
             Icons.settings,
             'Cài đặt',
@@ -2575,6 +2583,23 @@ class _HomePageState extends State<HomePage> {
           const Spacer(),
           _sidebarFooter(),
         ],
+      ),
+    );
+  }
+
+  /// Small letter-spaced caption above a sidebar nav section
+  /// (Cloud Light shell, v0.39).
+  Widget _navSection(String label) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: BeeSkyColors.muted,
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1.4,
+        ),
       ),
     );
   }
@@ -2589,11 +2614,11 @@ class _HomePageState extends State<HomePage> {
       height: 38,
       padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: BoxDecoration(
-        // The approved prototype tints the active item with the
-        // accent itself instead of a neutral fill.
-        color: active
-            ? BeeSkyColors.accent.withValues(alpha: 0.13)
-            : Colors.transparent,
+        // Cloud Light (v0.39): the active item gets the soft
+        // yellow #FFF1B7 fill with dark text — pure brand yellow
+        // as text on white fails contrast, so the label stays
+        // Text Primary and only the fill is yellow.
+        color: active ? BeeSkyColors.activeNav : Colors.transparent,
         borderRadius: BorderRadius.circular(radiusWidget),
       ),
       child: Row(
@@ -2601,14 +2626,14 @@ class _HomePageState extends State<HomePage> {
           Icon(
             icon,
             size: 18,
-            color: active ? BeeSkyColors.accent : BeeSkyColors.muted,
+            color: active ? BeeSkyColors.text : BeeSkyColors.muted,
           ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               label,
               style: TextStyle(
-                color: active ? BeeSkyColors.accent : BeeSkyColors.muted,
+                color: active ? BeeSkyColors.text : BeeSkyColors.muted,
                 fontSize: 13,
                 fontWeight: active ? FontWeight.w600 : FontWeight.w400,
               ),
@@ -2698,18 +2723,20 @@ class _HomePageState extends State<HomePage> {
     final error = _scanned ? fleetStatusCount(_records, 'ERROR') : null;
     final maxTemp = fleetMaxTempC(_records);
     return Container(
-      padding: const EdgeInsets.fromLTRB(18, 16, 18, 12),
+      padding: const EdgeInsets.fromLTRB(18, 12, 18, 10),
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: BeeSkyColors.border)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _breadcrumb('Máy đào'),
+          const SizedBox(height: 4),
           Row(
             children: [
               const Text(
                 'Máy đào',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
               ),
               // Scoped to a group: the header names it (the scan
               // bar's "Quét ngay" then runs AS a group scan).
@@ -2717,6 +2744,8 @@ class _HomePageState extends State<HomePage> {
                 const SizedBox(width: 10),
                 _chip('Nhóm: ${_activeGroup!.name}'),
               ],
+              const Spacer(),
+              _connectionPill(),
             ],
           ),
           const SizedBox(height: 3),
@@ -2749,6 +2778,46 @@ class _HomePageState extends State<HomePage> {
               ),
             ],
           ),
+        ],
+      ),
+    );
+  }
+
+  /// Breadcrumb for the Cloud Light topbar (v0.39): "BeeSky / <page>".
+  Widget _breadcrumb(String page) {
+    return Text(
+      'BeeSky / $page',
+      style: const TextStyle(
+        color: BeeSkyColors.muted,
+        fontSize: 11,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.4,
+      ),
+    );
+  }
+
+  /// Compact connection indicator at the topbar's right — the same
+  /// (dot, label) the sidebar footer shows for the scan engine.
+  Widget _connectionPill() {
+    final (dot, label) = _sidecarStatus();
+    return Container(
+      height: 26,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: BeeSkyColors.ghostFill,
+        border: Border.all(color: BeeSkyColors.border),
+        borderRadius: BorderRadius.circular(radiusPill),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(color: dot, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 6),
+          Text(label, style: const TextStyle(fontSize: 12)),
         ],
       ),
     );
@@ -2881,13 +2950,35 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  /// Footer status bar (Cloud Light, v0.39): readiness dot + scan
+  /// status / errors. The engine version already shows in the
+  /// sidebar footer — it is not repeated here.
   Widget _statusLine() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
-      child: Text(
-        _status,
-        style: const TextStyle(color: BeeSkyColors.muted, fontSize: 12),
-        overflow: TextOverflow.ellipsis,
+    final (dot, _) = _sidecarStatus();
+    return Container(
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: BeeSkyColors.border)),
+      ),
+      padding: const EdgeInsets.fromLTRB(18, 7, 18, 8),
+      child: Row(
+        children: [
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(color: dot, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _status,
+              style: const TextStyle(
+                color: BeeSkyColors.muted,
+                fontSize: 12,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -2904,19 +2995,21 @@ class _HomePageState extends State<HomePage> {
     );
     final anyStats = _groups.any((g) => g.lastScan != null);
     return Container(
-      padding: const EdgeInsets.fromLTRB(18, 16, 18, 12),
+      padding: const EdgeInsets.fromLTRB(18, 12, 18, 10),
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: BeeSkyColors.border)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _breadcrumb('Nhóm mạng'),
+          const SizedBox(height: 4),
           Row(
             children: [
               const Expanded(
                 child: Text(
                   'Nhóm mạng',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
                 ),
               ),
               if (_groups.length >= 2)
@@ -3249,13 +3342,13 @@ class _HomePageState extends State<HomePage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: BeeSkyColors.accent.withValues(alpha: 0.15),
+        color: BeeSkyColors.activeNav,
         borderRadius: BorderRadius.circular(radiusPill),
       ),
       child: const Text(
         'MỚI',
         style: TextStyle(
-          color: BeeSkyColors.accent,
+          color: BeeSkyColors.accentInk,
           fontSize: 9,
           fontWeight: FontWeight.w700,
           letterSpacing: 0.6,
@@ -3613,7 +3706,7 @@ class _HomePageState extends State<HomePage> {
             decoration: BoxDecoration(
               color: tint.withValues(alpha: selected ? 0.38 : 0.22),
               border: Border.all(
-                color: selected ? BeeSkyColors.accent : tint,
+                color: selected ? BeeSkyColors.accentInk : tint,
                 width: selected ? 2 : 1,
               ),
               borderRadius: BorderRadius.circular(10),
@@ -3637,7 +3730,7 @@ class _HomePageState extends State<HomePage> {
                       const Icon(
                         Icons.check_circle,
                         size: 14,
-                        color: BeeSkyColors.accent,
+                        color: BeeSkyColors.accentInk,
                       ),
                   ],
                 ),
@@ -3783,7 +3876,7 @@ class _HomePageState extends State<HomePage> {
                           col.label,
                           style: TextStyle(
                             color: _grid.sort.field == col.id
-                                ? BeeSkyColors.accent
+                                ? BeeSkyColors.accentInk
                                 : BeeSkyColors.muted,
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
@@ -3798,7 +3891,7 @@ class _HomePageState extends State<HomePage> {
                               ? Icons.arrow_upward
                               : Icons.arrow_downward,
                           size: 12,
-                          color: BeeSkyColors.accent,
+                          color: BeeSkyColors.accentInk,
                         ),
                     ],
                   ),
@@ -3911,6 +4004,16 @@ class _HomePageState extends State<HomePage> {
       );
       return SizedBox(width: width, child: _boardTemp(chain));
     }
+    if (col.id == 'ip') {
+      return SizedBox(
+        width: width,
+        child: Text(
+          col.textOf(rec),
+          style: monoStyle(fontSize: fontSize, weight: FontWeight.w600),
+          overflow: TextOverflow.ellipsis,
+        ),
+      );
+    }
     return _textCell(col.textOf(rec), width, fontSize);
   }
 
@@ -4008,9 +4111,9 @@ class _HomePageState extends State<HomePage> {
 
   Widget _statusChip(MinerRecord rec) {
     final (bg, fg) = switch (rec.statusLabel) {
-      'OK' => (const Color(0x2634D399), BeeSkyColors.ok),
-      'ERROR' => (const Color(0x26F87171), BeeSkyColors.bad),
-      _ => (const Color(0x26FBBF24), BeeSkyColors.warn),
+      'OK' => (const Color(0x2616A34A), BeeSkyColors.ok),
+      'ERROR' => (const Color(0x26DC2626), BeeSkyColors.bad),
+      _ => (const Color(0x26F59E0B), BeeSkyColors.warn),
     };
     return Align(
       alignment: Alignment.centerLeft,
@@ -4103,6 +4206,17 @@ class _HomePageState extends State<HomePage> {
           Expanded(
             child: SingleChildScrollView(child: _detailTabBody(rec)),
           ),
+          // Sticky save action for the note tab (v0.39): the
+          // primary action stays at the panel bottom, reachable
+          // without scrolling.
+          if (_detailTab == 5) ...[
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: () => _saveNote(rec),
+              icon: const Icon(Icons.save, size: 16),
+              label: const Text('Lưu ghi chú'),
+            ),
+          ],
         ],
       ),
     );
@@ -4289,7 +4403,7 @@ class _HomePageState extends State<HomePage> {
             title: 'Hashrate',
             unit: rateUnitOf(samples) ?? '',
             points: rates,
-            color: BeeSkyColors.accent,
+            color: BeeSkyColors.accentInk,
           ),
           const SizedBox(height: 14),
         ],
@@ -4581,26 +4695,17 @@ class _HomePageState extends State<HomePage> {
   // ------------------------------------------------------------------
 
   Widget _noteTab(MinerRecord rec) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        TextField(
-          controller: _noteCtrl,
-          maxLines: 5,
-          decoration: const InputDecoration(
-            hintText: 'Ghi chú cho máy này',
-            contentPadding:
-                EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-          ),
-          style: const TextStyle(fontSize: 13),
-        ),
-        const SizedBox(height: 10),
-        FilledButton.icon(
-          onPressed: () => _saveNote(rec),
-          icon: const Icon(Icons.save, size: 16),
-          label: const Text('Lưu ghi chú'),
-        ),
-      ],
+    // The save action lives OUTSIDE the scroll view (see
+    // _detailPanel): a primary action must stay reachable without
+    // scrolling, whatever the window height.
+    return TextField(
+      controller: _noteCtrl,
+      maxLines: 5,
+      decoration: const InputDecoration(
+        hintText: 'Ghi chú cho máy này',
+        contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      ),
+      style: const TextStyle(fontSize: 13),
     );
   }
 

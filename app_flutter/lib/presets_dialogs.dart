@@ -545,7 +545,7 @@ class _PoolPresetEditorDialogState
                               style: const TextStyle(
                                 fontFamily: 'monospace',
                                 fontSize: 12,
-                                color: BeeSkyColors.accent,
+                                color: BeeSkyColors.accentInk,
                               ),
                             ),
                           ),

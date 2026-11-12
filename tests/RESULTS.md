@@ -5447,3 +5447,183 @@ protocol it speaks).
     Braiins / IceRiver / ePIC reads, IP-Report wire,
     L9 chip-count check, Z15 raw SUMMARY, unlock
     residuals U-1..U-5).
+
+# v0.39.0 — Full desktop UI/UX redesign: BeeSky Cloud Light
+
+Redesign, not rebuild (owner's master prompt, spec in
+docs/redesign-mapping.md): the Flutter Miner Scanner and
+the Flutter agent app move from dark graphite to the
+"BeeSky Cloud Light × Linear × Modern Windows 11 Fluent
+UI" light theme. ALL functionality, scanning logic, APIs,
+data models and persistence are preserved; the Python
+core is untouched (no core file changed in this version).
+
+## What changed
+
+* Design tokens (app_flutter/lib/theme.dart and
+  app_agent_flutter/lib/theme.dart): Brand Primary
+  #FFE000, Hover #F5D200, Text Primary #202A28, Text
+  Secondary #7B8877, App Background #F7F8F4, Sidebar
+  #FFFFFF, Surface #FFFFFF, Border #E0E5D9, Active Nav
+  #FFF1B7, Success #16A34A, Warning #F59E0B, Error
+  #DC2626, Info #2563EB. Same constant names as before
+  (bg/panel/border/accent/text/muted/ok/warn/bad/hotTemp/
+  selectBg + new brandHover, activeNav, info, surface,
+  accentInk #7A5A00), so the ~281 BeeSkyColors call sites
+  flip with the theme file alone. Contrast rule: pure
+  #FFE000 is fill/border only, never small text on white
+  — every accent-as-text site moved to accentInk.
+  Radii: card 16→12, widget 12→8, pill 999.
+  ThemeData.light, fontFamilyFallback [Inter, 'Segoe UI',
+  Roboto] (Inter is a fallback NAME, not a bundled font
+  — Segoe UI renders on Windows; no new dependencies).
+  GlassCard restyled: white surface, 1px #E0E5D9 border,
+  one soft shadow, no rim light. Helpers added: numStyle
+  (tabular figures) + monoStyle (Consolas/Courier New);
+  IP column is now monospace semibold.
+* Application shell (home_page.dart): sidebar 228→188px
+  white with section captions (QUẢN LÝ / THEO DÕI /
+  HỆ THỐNG), active nav = #FFF1B7 bg + dark text/icon
+  (was accent tint + yellow text); breadcrumb helper
+  ("BeeSky / <page>", 11px muted) + connection pill in
+  the miners/groups headers; page titles 20→22px;
+  footer status bar (readiness dot + scan status; the
+  engine version is shown once, in the sidebar footer,
+  not repeated in the status bar). Stale "SAU" comment
+  fixed — all 7 views are implemented since v0.32.
+  Logo subtitle 'QUẢN LÝ MÁY ĐÀO' re-set to 9px/0
+  letter-spacing: 10px/1.6 clipped at the 188px sidebar
+  on wide Linux fonts (verified in the screenshots).
+* Views (views.dart): heat-band scale goes pastel
+  (<60 #D1FAE5, <70 #FEF9C3, <80 #FDE68A, <90 #FED7AA,
+  ≥90 #FECACA, no-reading #E5E7EB) with dark text on all
+  tiles, same thresholds; tile sub-text white 85% →
+  dark 70%; viewHeader 22px + breadcrumb.
+* Selection/toggles: _segmented/_miniToggle selected →
+  #FFF1B7 bg + dark text + amber border; 'MỚI' pill →
+  amber ink on #FFF1B7; sort indicator, overview cell
+  border, ops progress icon, MiniChart line, overview
+  check icon → accentInk; _statusChip tints updated to
+  the new hues; ops/presets dialogs' accent text →
+  accentInk.
+* Detail panel (home_page.dart): the note tab's 'Lưu
+  ghi chú' button moved OUT of the scroll view into a
+  fixed action row at the panel bottom (sticky save —
+  a genuine UX fix: the primary action stays reachable
+  without scrolling at any window height). This also
+  fixed the detail_test note test, which the redesign's
+  taller header had pushed below the fold at 1280×800.
+  Header padding trimmed 16→12 top / 12→10 bottom in
+  the miners + groups headers to recover the breadcrumb's
+  height.
+* Agent app: same light tokens applied to its surfaces
+  only — layout and behaviour unchanged, so the product
+  stays consistent.
+* No oversized KPI cards anywhere (standing ban kept);
+  dense, table-first layout preserved throughout.
+
+## Screenshots (real Flutter render, mock data, 2560×1600)
+
+Linux build (temporary local-only linux/ runner, removed
+before commit) run under Xvfb :99 with --dart-define=
+BEESKY_MOCK=1, driven by XTest clicks + the Ctrl+R rescan
+hotkey; full-window captures in
+~/workspace/beesky-demo/redesign-v39/:
+
+* 01-groups.png — Nhóm mạng (2 demo groups, IP Report panel)
+* 02-miners.png — Máy đào, mock scan filled: 5 miners in
+  254 addresses (3.4 s), S19 Pro detail open (Số liệu tab)
+* 03-detail.png — WhatsMiner M30S detail, OVER_TEMP problem
+  card (chain 2: 87 °C >= 85 °C limit), per-board temps
+* 04-settings.png — Cài đặt, 5 tabs (Chung/Tài khoản/Thời
+  gian chờ/Nhật ký/Nâng cao), zoom 100%, IP Report toggle
+
+Driver scripts kept beside the shots (shoot*.py).
+
+## Tests
+
+* flutter analyze: clean in BOTH apps.
+* flutter test: main **159/159**, agent **34/34** — all
+  green. Two tests broke during the redesign and were
+  fixed by fixing the UI, not by weakening the tests:
+  widget_test "BeeSky v0.38.0" expected once (footer
+  status bar duplicated the sidebar footer's version —
+  version removed from the status bar) and detail_test
+  note save (button below the fold — sticky save row).
+  Test pins updated for the new heat-band hexes
+  (views_test.dart, 6 expects) and the version bump
+  (widget_test, views_test, ipreport_test).
+* Full regression sweep (tests/run_mock_test_v38.sh):
+  vendors5 91, vendors4 45, vendors3 48, arp 18,
+  ipreport 28, views 20, vendors2 59, vendors 51,
+  agent_bg 52, bridge 24, creds 32, groups 41,
+  units 50, ops 32, ops2 34, inspect 33, pools 43,
+  agent_app 41 — all green. Core untouched.
+
+## Version bump
+
+0.38.0 → 0.39.0 everywhere the pin suite checks:
+beesky/__init__.py, app_flutter/pubspec.yaml
+(0.39.0+20), app_agent_flutter/pubspec.yaml (0.39.0+10),
+app_flutter/lib/models.dart (beeskyAppVersion),
+app_flutter/lib/sidecar.dart (mock SysInfo version),
+app_agent_flutter/lib/agent_config.dart
+(agentAppVersion), packaging/installer.iss +
+packaging/agent.iss (MyAppVersion), tests/
+mock_agent_bg_test.py (pin suite). The pin suite
+("versions in sync at 0.39.0") passes.
+
+## Verification status
+
+(a) VERIFIED LOCALLY (this sandbox):
+  * Everything above: both Flutter apps (analyze + full
+    test suites), the full mock sweep, and the four
+    screenshots — real rendered output of the redesigned
+    UI with mock data, screenshot-verified (Groups /
+    Miners / Detail / Settings), including the live mock
+    scan filling the table and the detail panel opening.
+  * The Linux build needed the sandbox toolchain first:
+    ninja-build + clang + libgtk-3-dev (apt; libzstd1
+    downgraded 1.5.5+dfsg2-2build1.1+hatch1 → archive
+    1.5.5+dfsg2-2build1.1 to unbreak the gtk-3-dev
+    install). These are VM packages, not repo changes.
+  * A screenshot-driving note, not an app bug: XTest
+    clicks at coordinates estimated from downscaled
+    views missed the buttons by ~50–60px; coordinates
+    measured from the full-res renders (button bands
+    located by pixel scan) land correctly, and the
+    Ctrl+R hotkey independently proved the scan path.
+
+(b) VERIFIED ONLY BY CI:
+  * The Windows builds (build-flutter.yml /
+    build-windows.yml) for the tag; no workflow files
+    changed in this version. `flutter build windows`
+    cannot run on this Linux VM.
+
+(c) HARDWARE / WINDOWS-UNCONFIRMED:
+  * The redesign on real Windows (Segoe UI rendering,
+    real beesky.exe sidecar, real miners): the Linux
+    render uses DejaVu Sans (no Segoe UI on Linux) and
+    the mock bridge — layout, colours and states are
+    verified, font metrics on Windows will differ
+    slightly (the logo subtitle was set with margin:
+    9px/0 spacing fits the 188px sidebar on both).
+  * Inter is a fallback name, not a bundled font — if
+    Anh wants the exact Inter look on Windows, the font
+    files must be bundled (a new asset, not done here).
+  * Everything carried over from v0.32–v0.38 (vendor
+    adapters, VNish ops tail, Whatsminer token flow,
+    LuxOS / Braiins / IceRiver / Epic reads, IP-Report
+    wire, L9 chip-count check, Z15 raw SUMMARY, unlock
+    residuals U-1..U-5, Jasminer + Pit-Bit gaps).
+
+## Known limitations / minor notes
+
+* Settings "Chung" tab: the two fields under "Quét &
+  điện" sit close together — the "Giá điện (VNĐ/kWh)"
+  floating label nearly touches the field above. It is
+  the pre-existing field spacing (not changed by this
+  redesign), not an overflow; left as-is.
+* Detail panel title shows the model name twice for the
+  mock S19 Pro ("Antminer S19 Pro Pro") — pre-existing
+  mock-sample quirk, not the redesign.

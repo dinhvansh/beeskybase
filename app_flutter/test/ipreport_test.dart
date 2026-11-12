@@ -228,7 +228,7 @@ void main() {
               onOpenCreds: () {},
               onOpenGroups: () {},
               ticketsDir: '(mock) tickets',
-              coreVersion: '0.38.0',
+              coreVersion: '0.39.0',
               sidecarMissing: false,
               dataDir: '(mock) data',
               storeFiles: const [
@@ -261,7 +261,11 @@ void main() {
         find.byType(TextField).at(0),
         '2.5',
       );
-      await tester.tap(find.text('Lưu cài đặt'));
+      // The save button enables on the next frame after the edit
+      // (dirty-tracking); without this pump it is still built
+      // disabled and the tap below lands on nothing.
+      await tester.pump();
+      await tester.tap(find.text('Lưu thay đổi'));
       await tester.pumpAndSettle();
       final saved = getSaved();
       expect(saved, isNotNull);
@@ -278,7 +282,7 @@ void main() {
       expect(find.text('105%'), findsOneWidget);
       await tester.tap(find.byType(Switch));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Lưu cài đặt'));
+      await tester.tap(find.text('Lưu thay đổi'));
       await tester.pumpAndSettle();
       final saved = getSaved();
       expect(saved, isNotNull);
@@ -295,7 +299,10 @@ void main() {
         find.byType(TextField).at(0),
         '99',
       );
-      await tester.tap(find.text('Lưu cài đặt'));
+      // Same one-frame lag as the save-through test above: the
+      // dirty state (and the enabled save button) needs a pump.
+      await tester.pump();
+      await tester.tap(find.text('Lưu thay đổi'));
       await tester.pumpAndSettle();
       expect(find.textContaining('Probe timeout phải'), findsOneWidget);
       expect(getSaved(), isNull);
@@ -310,6 +317,56 @@ void main() {
       expect(find.text('chưa có file'), findsOneWidget);
       expect(find.text('Xóa lịch sử thao tác'), findsOneWidget);
       expect(find.text('Xóa nhật ký sự kiện'), findsOneWidget);
+    });
+
+    testWidgets('save is disabled until the form changes, then '
+        'disables again after saving', (tester) async {
+      final getSaved = await pumpSettings(tester);
+      final saveButton =
+          find.widgetWithText(FilledButton, 'Lưu thay đổi');
+      expect(tester.widget<FilledButton>(saveButton).onPressed, isNull);
+
+      await tester.enterText(find.byType(TextField).at(0), '10.9.0.0/24');
+      await tester.pumpAndSettle();
+      expect(tester.widget<FilledButton>(saveButton).onPressed,
+          isNotNull);
+
+      await tester.tap(saveButton);
+      await tester.pumpAndSettle();
+      expect(getSaved(), isNotNull);
+      expect(getSaved()!.defaultTarget, '10.9.0.0/24');
+      expect(tester.widget<FilledButton>(saveButton).onPressed, isNull);
+    });
+
+    testWidgets('restore defaults fills factory values without '
+        'saving until Lưu thay đổi', (tester) async {
+      final getSaved = await pumpSettings(
+        tester,
+        settings: const AppSettings(
+          defaultTarget: '10.0.0.0/24',
+          priceVndKwh: 3000,
+        ),
+      );
+      expect(getSaved(), isNull);
+      await tester.tap(find.text('Khôi phục mặc định'));
+      await tester.pumpAndSettle();
+      // Factory values are in the form, nothing persisted yet.
+      expect(getSaved(), isNull);
+      expect(
+        tester.widget<TextField>(find.byType(TextField).at(0)).controller
+            ?.text,
+        '',
+      );
+      expect(
+        tester.widget<TextField>(find.byType(TextField).at(1)).controller
+            ?.text,
+        '2000',
+      );
+      await tester.tap(find.text('Lưu thay đổi'));
+      await tester.pumpAndSettle();
+      expect(getSaved(), isNotNull);
+      expect(getSaved()!.defaultTarget, '');
+      expect(getSaved()!.priceVndKwh, 2000);
     });
   });
 

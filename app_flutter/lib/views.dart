@@ -21,16 +21,18 @@ import 'theme.dart';
 // Shared helpers
 // --------------------------------------------------------------------
 
-/// The web heat map's band colours (beesky/web/dashboard.html
-/// `heatColor`), hex for hex: <60 green, 60–70 olive, 70–80 amber,
-/// 80–90 burnt orange, ≥90 dark red, no reading grey.
+/// Heat-map band colours (Cloud Light, v0.39): the web dashboard's
+/// thresholds (<60, 60–70, 70–80, 80–90, ≥90) on a PASTEL scale so
+/// dark text reads on every tile — the web's dark hexes
+/// (#14532D/#4A5D23/#7A5A12/#8A4512/#8A1F1A) are retired with the
+/// dark theme. No-reading grey stays grey, lightened.
 Color heatBandColor(double? tempC) {
-  if (tempC == null) return const Color(0xFF2C2C2C);
-  if (tempC < 60) return const Color(0xFF14532D);
-  if (tempC < 70) return const Color(0xFF4A5D23);
-  if (tempC < 80) return const Color(0xFF7A5A12);
-  if (tempC < 90) return const Color(0xFF8A4512);
-  return const Color(0xFF8A1F1A);
+  if (tempC == null) return const Color(0xFFE5E7EB);
+  if (tempC < 60) return const Color(0xFFD1FAE5);
+  if (tempC < 70) return const Color(0xFFFEF9C3);
+  if (tempC < 80) return const Color(0xFFFDE68A);
+  if (tempC < 90) return const Color(0xFFFED7AA);
+  return const Color(0xFFFECACA);
 }
 
 /// The tooltip status word the web heat map uses.
@@ -204,6 +206,38 @@ class AppSettings {
         'scale': scale,
         'ip_report_enabled': ipReportEnabled,
       };
+
+  /// Value equality (v0.39.3): the settings view's
+  /// didUpdateWidget compares the parent's settings to spot
+  /// outside re-saves (zoom hotkeys) — identity comparison
+  /// would fire on every parent rebuild.
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is AppSettings &&
+          runtimeType == other.runtimeType &&
+          defaultTarget == other.defaultTarget &&
+          priceVndKwh == other.priceVndKwh &&
+          probeTimeoutS == other.probeTimeoutS &&
+          requestTimeoutS == other.requestTimeoutS &&
+          opsStaggerS == other.opsStaggerS &&
+          scanWorkers == other.scanWorkers &&
+          opsWorkers == other.opsWorkers &&
+          scale == other.scale &&
+          ipReportEnabled == other.ipReportEnabled;
+
+  @override
+  int get hashCode => Object.hash(
+        defaultTarget,
+        priceVndKwh,
+        probeTimeoutS,
+        requestTimeoutS,
+        opsStaggerS,
+        scanWorkers,
+        opsWorkers,
+        scale,
+        ipReportEnabled,
+      );
 
   /// One field changed, everything else kept — the tab editors
   /// and the zoom hotkeys build the next settings this way.
@@ -395,8 +429,18 @@ Widget viewHeader(String title, String subtitle) {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Text(
+          'BeeSky / $title',
+          style: const TextStyle(
+            color: BeeSkyColors.muted,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.4,
+          ),
+        ),
+        const SizedBox(height: 6),
         Text(title,
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
         const SizedBox(height: 3),
         Text(subtitle,
             style: const TextStyle(color: BeeSkyColors.muted, fontSize: 12)),
@@ -477,7 +521,7 @@ class HeatMapView extends StatelessWidget {
   Widget _tile(MinerRecord rec) {
     final offline = rec.hasFetchError;
     final problem = !offline && !rec.isOk;
-    final band = offline ? const Color(0xFF2C2C2C) : heatBandColor(rec.maxTempC);
+    final band = offline ? heatBandColor(null) : heatBandColor(rec.maxTempC);
     final octet = rec.ip.split('.').last;
     final tooltip = StringBuffer('${rec.ip} · ${rec.model} · '
         '${heatStatusWord(rec)}');
@@ -540,7 +584,7 @@ class HeatMapView extends StatelessWidget {
                 '${rec.ip} · ${offline ? '—' : rec.rateText}',
                 style: const TextStyle(
                   fontSize: 11,
-                  color: Color(0xD9FFFFFF),
+                  color: Color(0xB3202A28),
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -967,24 +1011,74 @@ class _SettingsViewState extends State<SettingsView> {
   late final TextEditingController _opsWorkersCtrl;
   late bool _ipReport;
   late double _scale;
+  // Last saved settings; the form is dirty while it differs.
+  late AppSettings _baseline;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    final s = widget.settings;
-    _targetCtrl = TextEditingController(text: s.defaultTarget);
-    _priceCtrl = TextEditingController(text: _numText(s.priceVndKwh));
-    _probeCtrl = TextEditingController(text: _numText(s.probeTimeoutS));
+    _baseline = widget.settings;
+    _targetCtrl = TextEditingController(text: _baseline.defaultTarget);
+    _priceCtrl =
+        TextEditingController(text: _numText(_baseline.priceVndKwh));
+    _probeCtrl =
+        TextEditingController(text: _numText(_baseline.probeTimeoutS));
     _requestCtrl =
-        TextEditingController(text: _numText(s.requestTimeoutS));
-    _staggerCtrl = TextEditingController(text: _numText(s.opsStaggerS));
+        TextEditingController(text: _numText(_baseline.requestTimeoutS));
+    _staggerCtrl =
+        TextEditingController(text: _numText(_baseline.opsStaggerS));
     _scanWorkersCtrl =
-        TextEditingController(text: '${s.scanWorkers}');
-    _opsWorkersCtrl = TextEditingController(text: '${s.opsWorkers}');
+        TextEditingController(text: '${_baseline.scanWorkers}');
+    _opsWorkersCtrl =
+        TextEditingController(text: '${_baseline.opsWorkers}');
+    _ipReport = _baseline.ipReportEnabled;
+    _scale = _baseline.scale;
+    for (final c in [
+      _targetCtrl,
+      _priceCtrl,
+      _probeCtrl,
+      _requestCtrl,
+      _staggerCtrl,
+      _scanWorkersCtrl,
+      _opsWorkersCtrl,
+    ]) {
+      c.addListener(_onFormChanged);
+    }
+  }
+
+  @override
+  void didUpdateWidget(SettingsView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // The parent re-saves settings from outside (zoom hotkeys
+    // Ctrl+= / Ctrl+- / Ctrl+0): adopt them only while the form
+    // is clean, so unsaved edits are never wiped.
+    if (widget.settings != oldWidget.settings && !_isDirty) {
+      setState(() {
+        _baseline = widget.settings;
+        _fillForm(widget.settings);
+      });
+    }
+  }
+
+  void _fillForm(AppSettings s) {
+    _setText(_targetCtrl, s.defaultTarget);
+    _setText(_priceCtrl, _numText(s.priceVndKwh));
+    _setText(_probeCtrl, _numText(s.probeTimeoutS));
+    _setText(_requestCtrl, _numText(s.requestTimeoutS));
+    _setText(_staggerCtrl, _numText(s.opsStaggerS));
+    _setText(_scanWorkersCtrl, '${s.scanWorkers}');
+    _setText(_opsWorkersCtrl, '${s.opsWorkers}');
     _ipReport = s.ipReportEnabled;
     _scale = s.scale;
   }
+
+  // Setting identical text would reset the cursor for nothing.
+  static void _setText(TextEditingController c, String text) {
+    if (c.text != text) c.text = text;
+  }
+
+  void _onFormChanged() => setState(() {});
 
   @override
   void dispose() {
@@ -1006,10 +1100,35 @@ class _SettingsViewState extends State<SettingsView> {
     return double.tryParse(text);
   }
 
-  int? _parseInt(TextEditingController c) =>
-      int.tryParse(c.text.trim());
+  int? _parseInt(TextEditingController c) => int.tryParse(c.text.trim());
 
   void _fail(String message) => setState(() => _error = message);
+
+  /// Dirty = the form no longer matches the last saved settings.
+  /// An unparseable field counts as dirty (the user changed
+  /// something; _save surfaces the validation error).
+  bool get _isDirty {
+    if (_targetCtrl.text.trim() != _baseline.defaultTarget) return true;
+    if (_numDiffers(_priceCtrl, _baseline.priceVndKwh)) return true;
+    if (_numDiffers(_probeCtrl, _baseline.probeTimeoutS)) return true;
+    if (_numDiffers(_requestCtrl, _baseline.requestTimeoutS)) return true;
+    if (_numDiffers(_staggerCtrl, _baseline.opsStaggerS)) return true;
+    if (_intDiffers(_scanWorkersCtrl, _baseline.scanWorkers)) return true;
+    if (_intDiffers(_opsWorkersCtrl, _baseline.opsWorkers)) return true;
+    if (_scale != _baseline.scale) return true;
+    if (_ipReport != _baseline.ipReportEnabled) return true;
+    return false;
+  }
+
+  bool _numDiffers(TextEditingController c, double base) {
+    final v = _parseNum(c);
+    return v == null || v != base;
+  }
+
+  bool _intDiffers(TextEditingController c, int base) {
+    final v = _parseInt(c);
+    return v == null || v != base;
+  }
 
   void _save() {
     final price = _parseNum(_priceCtrl);
@@ -1042,8 +1161,7 @@ class _SettingsViewState extends State<SettingsView> {
       _fail('Song song thao tác phải từ 1 đến 8.');
       return;
     }
-    setState(() => _error = null);
-    widget.onSave(AppSettings(
+    final saved = AppSettings(
       defaultTarget: _targetCtrl.text.trim(),
       priceVndKwh: price,
       probeTimeoutS: probe,
@@ -1053,60 +1171,177 @@ class _SettingsViewState extends State<SettingsView> {
       opsWorkers: opsWorkers,
       scale: _scale,
       ipReportEnabled: _ipReport,
-    ));
+    );
+    setState(() {
+      _error = null;
+      _baseline = saved;
+    });
+    widget.onSave(saved);
   }
+
+  void _restoreDefaults() {
+    // Factory defaults into the form through the normal path:
+    // nothing is persisted until the user taps Lưu thay đổi.
+    setState(() {
+      _fillForm(const AppSettings());
+      _error = null;
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // Compact form system (v0.39.3): labels above inputs, 13px text,
+  // 40px fields, 8px radius, 2-column rows, sections in GlassCards.
+  // ------------------------------------------------------------------
+
+  static const _labelStyle = TextStyle(
+    fontSize: 13,
+    fontWeight: FontWeight.w600,
+    color: BeeSkyColors.text,
+  );
+  static const _helpStyle = TextStyle(
+    fontSize: 12,
+    color: BeeSkyColors.muted,
+  );
+  static const _fieldTextStyle = TextStyle(fontSize: 13);
+  static const _fieldHintStyle = TextStyle(
+    fontSize: 13,
+    color: BeeSkyColors.muted,
+  );
 
   @override
   Widget build(BuildContext context) {
     // Five tabs like HashCore's Settings dialog (General, Unlock,
     // Timeouts, Logs, Advanced — docs/settings-mapping.md §1);
     // each tab holds only settings BeeSky really has. One Lưu
-    // button at the bottom saves every tab at once.
+    // button at the bottom saves every tab at once. Content is
+    // capped at 1400px and LEFT-aligned with the page header
+    // (viewHeader's 18px inset) so title, tabs and cards share
+    // one left edge — the reference look; fields never stretch
+    // full-window, the 2-col rows cap each input. (v0.39.4: was
+    // 860px — the owner rightly said the page sat in one corner
+    // with the rest of the window empty; 1400 fills a laptop
+    // window like the reference while inputs stay bounded.)
     return DefaultTabController(
       length: 5,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const TabBar(
-            isScrollable: true,
-            tabAlignment: TabAlignment.start,
-            tabs: [
-              Tab(text: 'Chung'),
-              Tab(text: 'Tài khoản'),
-              Tab(text: 'Thời gian chờ'),
-              Tab(text: 'Nhật ký'),
-              Tab(text: 'Nâng cao'),
-            ],
-          ),
-          Expanded(
-            child: TabBarView(
-              children: [
-                _generalTab(),
-                _unlockTab(),
-                _timeoutsTab(),
-                _logsTab(),
-                _advancedTab(),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(18, 8, 18, 12),
+      child: Align(
+        alignment: Alignment.topLeft,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1400),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 0, 16, 0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (_error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Text(_error!,
-                        style:
-                            const TextStyle(color: BeeSkyColors.bad)),
+                _tabBar(),
+                Expanded(
+                  child: TabBarView(
+                    children: [
+                      _generalTab(),
+                      _unlockTab(),
+                      _timeoutsTab(),
+                      _logsTab(),
+                      _advancedTab(),
+                    ],
                   ),
-                FilledButton.icon(
-                  onPressed: _save,
-                  icon: const Icon(Icons.save_outlined, size: 17),
-                  label: const Text('Lưu cài đặt'),
                 ),
+                _footer(),
               ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _tabBar() {
+    // Compact icon tabs; the ACTIVE tab is the pale-yellow pill
+    // with a stronger yellow underline (the reference look).
+    // Hover stays the theme's neutral pale-grey wash — never
+    // yellow on hover (v0.39.2 owner ruling, kept).
+    const tabs = <({IconData icon, String label})>[
+      (icon: Icons.settings_outlined, label: 'Chung'),
+      (icon: Icons.person_outline, label: 'Tài khoản'),
+      (icon: Icons.timer_outlined, label: 'Thời gian chờ'),
+      (icon: Icons.article_outlined, label: 'Nhật ký'),
+      (icon: Icons.tune, label: 'Nâng cao'),
+    ];
+    return TabBar(
+      isScrollable: true,
+      tabAlignment: TabAlignment.start,
+      labelPadding: const EdgeInsets.symmetric(horizontal: 10),
+      indicatorPadding: const EdgeInsets.symmetric(horizontal: 4),
+      indicator: const BoxDecoration(
+        color: BeeSkyColors.activeNav,
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(radiusWidget),
+          topRight: Radius.circular(radiusWidget),
+        ),
+        border: Border(
+          bottom: BorderSide(color: BeeSkyColors.accent, width: 2),
+        ),
+      ),
+      dividerColor: BeeSkyColors.border,
+      labelColor: BeeSkyColors.text,
+      unselectedLabelColor: BeeSkyColors.muted,
+      labelStyle:
+          const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+      unselectedLabelStyle:
+          const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+      tabs: [
+        for (final t in tabs)
+          Tab(
+            height: 38,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(t.icon, size: 17),
+                const SizedBox(width: 6),
+                Text(t.label),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _footer() {
+    final dirty = _isDirty;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(0, 10, 0, 12),
+      child: Row(
+        children: [
+          if (_error != null)
+            Expanded(
+              child: Text(
+                _error!,
+                style: const TextStyle(
+                  color: BeeSkyColors.bad,
+                  fontSize: 12,
+                ),
+              ),
+            )
+          else
+            const Spacer(),
+          OutlinedButton.icon(
+            onPressed: _restoreDefaults,
+            icon: const Icon(Icons.restart_alt_outlined, size: 17),
+            label: const Text('Khôi phục mặc định'),
+            style: OutlinedButton.styleFrom(
+              textStyle: const TextStyle(fontSize: 13),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            ),
+          ),
+          const SizedBox(width: 10),
+          FilledButton.icon(
+            onPressed: dirty ? _save : null,
+            icon: const Icon(Icons.save_outlined, size: 17),
+            label: const Text('Lưu thay đổi'),
+            style: FilledButton.styleFrom(
+              textStyle:
+                  const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
             ),
           ),
         ],
@@ -1115,281 +1350,440 @@ class _SettingsViewState extends State<SettingsView> {
   }
 
   Widget _tabScroll(Widget child) => ListView(
-        padding: const EdgeInsets.fromLTRB(18, 14, 18, 12),
+        padding: const EdgeInsets.symmetric(vertical: 12),
         children: [child],
       );
 
-  Widget _section(String title, List<Widget> children) => GlassCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title,
+  Widget _section({
+    required IconData icon,
+    required String title,
+    required List<Widget> children,
+  }) {
+    final spaced = <Widget>[];
+    for (var i = 0; i < children.length; i++) {
+      if (i > 0) spaced.add(const SizedBox(height: 10));
+      spaced.add(children[i]);
+    }
+    return GlassCard(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 16, color: BeeSkyColors.accentInk),
+              const SizedBox(width: 8),
+              Text(
+                title,
                 style: const TextStyle(
-                    fontSize: 14, fontWeight: FontWeight.w700)),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ...spaced,
+        ],
+      ),
+    );
+  }
+
+  /// A label above a 40px input (thin border, 8px radius).
+  Widget _field({
+    required String label,
+    required TextEditingController controller,
+    String? hint,
+    TextInputType? keyboardType,
+    IconData? prefixIcon,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: _labelStyle),
+        const SizedBox(height: 6),
+        SizedBox(
+          height: 40,
+          child: TextField(
+            controller: controller,
+            keyboardType: keyboardType,
+            style: _fieldTextStyle,
+            decoration: InputDecoration(
+              hintText: hint,
+              hintStyle: _fieldHintStyle,
+              prefixIcon: prefixIcon == null
+                  ? null
+                  : Icon(prefixIcon, size: 17, color: BeeSkyColors.muted),
+              prefixIconConstraints:
+                  const BoxConstraints(minWidth: 34, minHeight: 40),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Two fields side by side; stacks vertically under 560px so
+  /// nothing clips on a narrow window.
+  Widget _twoCol(Widget a, Widget b) => LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 560) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [a, const SizedBox(height: 10), b],
+            );
+          }
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: a),
+              const SizedBox(width: 12),
+              Expanded(child: b),
+            ],
+          );
+        },
+      );
+
+  Widget _generalTab() => _tabScroll(
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _section(
+              icon: Icons.bolt_outlined,
+              title: 'Quét & điện',
+              children: [
+                _twoCol(
+                  _field(
+                    label: 'Mục tiêu quét mặc định',
+                    controller: _targetCtrl,
+                    hint: 'Để trống = tự nhận diện subnet',
+                    prefixIcon: Icons.radar_outlined,
+                  ),
+                  _field(
+                    label: 'Giá điện (VNĐ/kWh)',
+                    controller: _priceCtrl,
+                    hint: 'Mặc định: 2000',
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    prefixIcon: Icons.bolt_outlined,
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 12),
-            ...children,
+            _section(
+              icon: Icons.tune,
+              title: 'Giao diện & IP Report',
+              children: [
+                _twoCol(
+                  _scaleCell(),
+                  _ipReportCell(),
+                ),
+              ],
+            ),
           ],
         ),
       );
 
-  static const _fieldPad =
-      EdgeInsets.symmetric(horizontal: 12, vertical: 10);
-
-  Widget _generalTab() => _tabScroll(
-        _section('Quét & điện', [
-          TextField(
-            controller: _targetCtrl,
-            decoration: const InputDecoration(
-              labelText: 'Mục tiêu quét mặc định',
-              hintText: 'Để trống = tự nhận diện subnet như hiện tại',
-              contentPadding: _fieldPad,
+  Widget _scaleCell() => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Tỉ lệ giao diện', style: _labelStyle),
+          const SizedBox(height: 6),
+          Container(
+            height: 40,
+            decoration: BoxDecoration(
+              color: BeeSkyColors.surface,
+              border: Border.all(color: BeeSkyColors.entryBorder),
+              borderRadius: BorderRadius.circular(radiusWidget),
             ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _priceCtrl,
-            keyboardType:
-                const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-              labelText: 'Giá điện (VNĐ/kWh)',
-              hintText: 'Mặc định toàn BeeSky: 2000',
-              contentPadding: _fieldPad,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              const Expanded(
-                child: Text('Tỉ lệ giao diện',
-                    style: TextStyle(fontWeight: FontWeight.w600)),
-              ),
-              IconButton(
-                icon: const Icon(Icons.remove, size: 18),
-                tooltip: 'Thu nhỏ (Ctrl+-)',
-                onPressed: _scale <= 0.9
-                    ? null
-                    : () => setState(
-                        () => _scale = (_scale - 0.05).clamp(0.9, 1.3)),
-              ),
-              SizedBox(
-                width: 52,
-                child: Text(
-                  '${(_scale * 100).round()}%',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontWeight: FontWeight.w700),
+            child: Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.remove, size: 18),
+                  tooltip: 'Thu nhỏ (Ctrl+-)',
+                  constraints: const BoxConstraints(
+                    minWidth: 36,
+                    minHeight: 36,
+                  ),
+                  padding: EdgeInsets.zero,
+                  visualDensity: VisualDensity.compact,
+                  onPressed: _scale <= 0.9
+                      ? null
+                      : () => setState(
+                            () => _scale = (_scale - 0.05).clamp(0.9, 1.3),
+                          ),
                 ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.add, size: 18),
-                tooltip: 'Phóng to (Ctrl+=)',
-                onPressed: _scale >= 1.3
-                    ? null
-                    : () => setState(
-                        () => _scale = (_scale + 0.05).clamp(0.9, 1.3)),
-              ),
-            ],
+                Expanded(
+                  child: Text(
+                    '${(_scale * 100).round()}%',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.add, size: 18),
+                  tooltip: 'Phóng to (Ctrl+=)',
+                  constraints: const BoxConstraints(
+                    minWidth: 36,
+                    minHeight: 36,
+                  ),
+                  padding: EdgeInsets.zero,
+                  visualDensity: VisualDensity.compact,
+                  onPressed: _scale >= 1.3
+                      ? null
+                      : () => setState(
+                            () => _scale = (_scale + 0.05).clamp(0.9, 1.3),
+                          ),
+                ),
+              ],
+            ),
           ),
+          const SizedBox(height: 6),
           const Text(
             'Phóng to/thu nhỏ chữ trong bảng và nhãn (90–130%). '
             'Khung cố định (sidebar, chiều cao hàng) không đổi.',
-            style: TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+            style: _helpStyle,
           ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Switch(
-                value: _ipReport,
-                onChanged: (v) => setState(() => _ipReport = v),
-              ),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Nghe IP Report',
-                        style: TextStyle(fontWeight: FontWeight.w600)),
-                    Text(
-                      'Lắng nghe máy đào bấm nút IP Report trên '
-                      'mạng (UDP 14235/8888) — panel ở màn hình '
-                      'Nhóm mạng.',
-                      style: TextStyle(
-                          color: BeeSkyColors.muted, fontSize: 12),
-                    ),
-                  ],
+        ],
+      );
+
+  Widget _ipReportCell() => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Nghe IP Report', style: _labelStyle),
+          const SizedBox(height: 6),
+          SizedBox(
+            height: 40,
+            child: Row(
+              children: [
+                Switch(
+                  value: _ipReport,
+                  materialTapTargetSize:
+                      MaterialTapTargetSize.shrinkWrap,
+                  onChanged: (v) => setState(() => _ipReport = v),
                 ),
-              ),
-            ],
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _ipReport
+                        ? 'Đang nghe (UDP 14235/8888)'
+                        : 'Đang tắt',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ]),
+          const SizedBox(height: 6),
+          const Text(
+            'Lắng nghe máy đào bấm nút IP Report — panel ở màn '
+            'hình Nhóm mạng.',
+            style: _helpStyle,
+          ),
+        ],
       );
 
   Widget _unlockTab() => _tabScroll(
-        _section('Tài khoản máy đào', [
-          const Text(
-            'Cách mở khóa theo từng hãng nằm ở đây — cùng một bộ '
-            'cài đặt dùng cho quét, xem chi tiết và thao tác.',
-            style: TextStyle(color: BeeSkyColors.muted, fontSize: 12),
-          ),
-          const SizedBox(height: 6),
-          _linkRow(
-            Icons.key_outlined,
-            'Tài khoản máy đào',
-            '${widget.credCount} bộ đã lưu',
-            widget.onOpenCreds,
-          ),
-          _linkRow(
-            Icons.device_hub_outlined,
-            'Nhóm mạng',
-            'Dải IP, tài khoản riêng và lịch tự quét theo nhóm',
-            widget.onOpenGroups,
-          ),
-        ]),
+        _section(
+          icon: Icons.key_outlined,
+          title: 'Tài khoản máy đào',
+          children: [
+            const Text(
+              'Cách mở khóa theo từng hãng nằm ở đây — cùng một bộ '
+              'cài đặt dùng cho quét, xem chi tiết và thao tác.',
+              style: _helpStyle,
+            ),
+            _linkRow(
+              Icons.key_outlined,
+              'Tài khoản máy đào',
+              '${widget.credCount} bộ đã lưu',
+              widget.onOpenCreds,
+            ),
+            _linkRow(
+              Icons.device_hub_outlined,
+              'Nhóm mạng',
+              'Dải IP, tài khoản riêng và lịch tự quét theo nhóm',
+              widget.onOpenGroups,
+            ),
+          ],
+        ),
       );
 
   Widget _timeoutsTab() => _tabScroll(
-        _section('Thời gian chờ', [
-          const Text(
-            'Timeout càng lớn quét càng chậm nhưng càng ít sót máy; '
-            'quá nhỏ sẽ bỏ sót máy trả lời chậm.',
-            style: TextStyle(color: BeeSkyColors.muted, fontSize: 12),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _probeCtrl,
-            keyboardType:
-                const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-              labelText: 'Probe timeout — quét tìm máy (giây)',
-              hintText: 'Mặc định: 1,5',
-              contentPadding: _fieldPad,
+        _section(
+          icon: Icons.timer_outlined,
+          title: 'Thời gian chờ',
+          children: [
+            const Text(
+              'Timeout càng lớn quét càng chậm nhưng càng ít sót máy; '
+              'quá nhỏ sẽ bỏ sót máy trả lời chậm.',
+              style: _helpStyle,
             ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _requestCtrl,
-            keyboardType:
-                const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-              labelText: 'Request timeout — xem chi tiết / thao tác (giây)',
-              hintText: 'Mặc định: 3',
-              contentPadding: _fieldPad,
+            _twoCol(
+              _field(
+                label: 'Probe timeout (giây)',
+                controller: _probeCtrl,
+                hint: 'Quét tìm máy — mặc định 1,5',
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+              ),
+              _field(
+                label: 'Request timeout (giây)',
+                controller: _requestCtrl,
+                hint: 'Xem chi tiết / thao tác — mặc định 3',
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _staggerCtrl,
-            keyboardType:
-                const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-              labelText: 'Dừng giữa các máy khi thao tác hàng loạt (giây)',
-              hintText: 'Mặc định: 0 — chạy liền nhau',
-              contentPadding: _fieldPad,
+            _twoCol(
+              _field(
+                label: 'Dừng giữa các máy (giây)',
+                controller: _staggerCtrl,
+                hint: 'Mặc định: 0 — chạy liền nhau',
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+              ),
+              const Padding(
+                padding: EdgeInsets.only(top: 23),
+                child: Text(
+                  'Mỗi lệnh thao tác bắt đầu cách nhau khoảng này, '
+                  'tránh dồn máy cùng lúc.',
+                  style: _helpStyle,
+                ),
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Dừng giữa các máy: mỗi lệnh thao tác bắt đầu cách nhau '
-            'khoảng này, tránh dồn máy cùng lúc.',
-            style: TextStyle(color: BeeSkyColors.muted, fontSize: 12),
-          ),
-        ]),
+          ],
+        ),
       );
 
   Widget _logsTab() => _tabScroll(
         Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _section('Thư mục dữ liệu', [
-              _info('Thư mục', widget.dataDir),
-              const SizedBox(height: 6),
-              for (final f in widget.storeFiles) _info(f.label, f.sizeText),
-              const SizedBox(height: 6),
-              _info('Thư mục phiếu sửa', widget.ticketsDir),
-            ]),
+            _section(
+              icon: Icons.folder_outlined,
+              title: 'Thư mục dữ liệu',
+              children: [
+                _info('Thư mục', widget.dataDir),
+                for (final f in widget.storeFiles)
+                  _info(f.label, f.sizeText),
+                _info('Thư mục phiếu sửa', widget.ticketsDir),
+              ],
+            ),
             const SizedBox(height: 12),
-            _section('Dọn dẹp', [
-              const Text(
-                'Xóa lịch sử thao tác hoặc nhật ký sự kiện đã lưu '
-                'trên máy này. Máy đào và nhóm mạng không bị ảnh hưởng.',
-                style: TextStyle(color: BeeSkyColors.muted, fontSize: 12),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: () => _confirmClear(
-                      'Xóa lịch sử thao tác?',
-                      'Toàn bộ lịch sử thao tác đã chạy sẽ bị xóa.',
-                      widget.onClearOpsHistory,
+            _section(
+              icon: Icons.delete_outline,
+              title: 'Dọn dẹp',
+              children: [
+                const Text(
+                  'Xóa lịch sử thao tác hoặc nhật ký sự kiện đã lưu '
+                  'trên máy này. Máy đào và nhóm mạng không bị ảnh hưởng.',
+                  style: _helpStyle,
+                ),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: () => _confirmClear(
+                        'Xóa lịch sử thao tác?',
+                        'Toàn bộ lịch sử thao tác đã chạy sẽ bị xóa.',
+                        widget.onClearOpsHistory,
+                      ),
+                      icon: const Icon(Icons.delete_outline, size: 17),
+                      label: const Text('Xóa lịch sử thao tác'),
+                      style: OutlinedButton.styleFrom(
+                        textStyle: const TextStyle(fontSize: 13),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
+                        ),
+                      ),
                     ),
-                    icon: const Icon(Icons.delete_outline, size: 17),
-                    label: const Text('Xóa lịch sử thao tác'),
-                  ),
-                  const SizedBox(width: 10),
-                  OutlinedButton.icon(
-                    onPressed: () => _confirmClear(
-                      'Xóa nhật ký sự kiện?',
-                      'Toàn bộ sự kiện đã ghi giữa các lần quét sẽ '
-                      'bị xóa.',
-                      widget.onClearEvents,
+                    OutlinedButton.icon(
+                      onPressed: () => _confirmClear(
+                        'Xóa nhật ký sự kiện?',
+                        'Toàn bộ sự kiện đã ghi giữa các lần quét sẽ '
+                        'bị xóa.',
+                        widget.onClearEvents,
+                      ),
+                      icon: const Icon(Icons.delete_outline, size: 17),
+                      label: const Text('Xóa nhật ký sự kiện'),
+                      style: OutlinedButton.styleFrom(
+                        textStyle: const TextStyle(fontSize: 13),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
+                        ),
+                      ),
                     ),
-                    icon: const Icon(Icons.delete_outline, size: 17),
-                    label: const Text('Xóa nhật ký sự kiện'),
-                  ),
-                ],
-              ),
-            ]),
+                  ],
+                ),
+              ],
+            ),
           ],
         ),
       );
 
   Widget _advancedTab() => _tabScroll(
-        _section('Nâng cao', [
-          const Text(
-            'Sai số ở đây có thể làm quét chậm hoặc bỏ sót máy. '
-            'Mặc định đã hợp với trại vài trăm máy.',
-            style: TextStyle(color: BeeSkyColors.muted, fontSize: 12),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _scanWorkersCtrl,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-              labelText: 'Số luồng quét (1–256)',
-              hintText: 'Mặc định: 64',
-              contentPadding: _fieldPad,
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _section(
+              icon: Icons.tune,
+              title: 'Nâng cao',
+              children: [
+                const Text(
+                  'Sai số ở đây có thể làm quét chậm hoặc bỏ sót máy. '
+                  'Mặc định đã hợp với trại vài trăm máy.',
+                  style: _helpStyle,
+                ),
+                _twoCol(
+                  _field(
+                    label: 'Số luồng quét (1–256)',
+                    controller: _scanWorkersCtrl,
+                    hint: 'Mặc định: 64',
+                    keyboardType: TextInputType.number,
+                  ),
+                  _field(
+                    label: 'Thao tác song song (1–8)',
+                    controller: _opsWorkersCtrl,
+                    hint: 'Mặc định: 4',
+                    keyboardType: TextInputType.number,
+                  ),
+                ),
+                const Text(
+                  'Thao tác song song: số máy được thao tác cùng lúc '
+                  'trong một tác vụ (quét vẫn dò song song theo số luồng '
+                  'quét).',
+                  style: _helpStyle,
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _opsWorkersCtrl,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-              labelText: 'Thao tác song song (1–8)',
-              hintText: 'Mặc định: 4',
-              contentPadding: _fieldPad,
+            const SizedBox(height: 12),
+            _section(
+              icon: Icons.info_outlined,
+              title: 'Giới thiệu',
+              children: [
+                _info('Phiên bản app', 'BeeSky v$beeskyAppVersion'),
+                _info(
+                  'Ruột quét (beesky.exe)',
+                  widget.sidecarMissing
+                      ? 'Chưa có (thiếu beesky.exe)'
+                      : widget.coreVersion != null
+                          ? 'v${widget.coreVersion}'
+                          : 'Chưa đọc được',
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Thao tác song song: số máy được thao tác cùng lúc '
-            'trong một tác vụ (quét vẫn dò song song theo số luồng '
-            'quét).',
-            style: TextStyle(color: BeeSkyColors.muted, fontSize: 12),
-          ),
-          const SizedBox(height: 16),
-          const Text('Giới thiệu',
-              style:
-                  TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 10),
-          _info('Phiên bản app', 'BeeSky v$beeskyAppVersion'),
-          _info(
-            'Ruột quét (beesky.exe)',
-            widget.sidecarMissing
-                ? 'Chưa có (thiếu beesky.exe)'
-                : widget.coreVersion != null
-                    ? 'v${widget.coreVersion}'
-                    : 'Chưa đọc được',
-          ),
-        ]),
+          ],
+        ),
       );
 
   Future<void> _confirmClear(
@@ -1424,23 +1818,22 @@ class _SettingsViewState extends State<SettingsView> {
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 9),
+        padding: const EdgeInsets.symmetric(vertical: 8),
         child: Row(
           children: [
-            Icon(icon, color: BeeSkyColors.muted, size: 21),
-            const SizedBox(width: 14),
+            Icon(icon, color: BeeSkyColors.muted, size: 18),
+            const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title),
-                  Text(sub,
-                      style: const TextStyle(
-                          color: BeeSkyColors.muted, fontSize: 12)),
+                  Text(title, style: _labelStyle),
+                  Text(sub, style: _helpStyle),
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right, color: BeeSkyColors.muted),
+            const Icon(Icons.chevron_right,
+                color: BeeSkyColors.muted, size: 18),
           ],
         ),
       ),
@@ -1454,11 +1847,21 @@ class _SettingsViewState extends State<SettingsView> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 190,
-            child: Text(label,
-                style: const TextStyle(color: BeeSkyColors.muted)),
+            width: 150,
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 13,
+                color: BeeSkyColors.muted,
+              ),
+            ),
           ),
-          Expanded(child: SelectableText(value)),
+          Expanded(
+            child: SelectableText(
+              value,
+              style: const TextStyle(fontSize: 13),
+            ),
+          ),
         ],
       ),
     );

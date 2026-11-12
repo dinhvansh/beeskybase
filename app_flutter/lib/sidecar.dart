@@ -775,7 +775,7 @@ class MockBridge implements BeeSkyBridge {
 
   @override
   Future<SysInfo> sysinfo() async =>
-      const SysInfo(version: '0.38.0', defaultTarget: '192.168.2.0/24');
+      const SysInfo(version: '0.39.0', defaultTarget: '192.168.2.0/24');
 
   /// The sample fleet's event story (v0.32): the Z15 crossed the
   /// temp limit and the L9 lost chips since the previous pass —

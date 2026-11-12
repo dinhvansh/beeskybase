@@ -105,12 +105,12 @@ void main() {
 
   group('pure view helpers', () {
     test('heat bands match the web dashboard hexes + thresholds', () {
-      expect(heatBandColor(null), const Color(0xFF2C2C2C));
-      expect(heatBandColor(59.9), const Color(0xFF14532D));
-      expect(heatBandColor(60), const Color(0xFF4A5D23));
-      expect(heatBandColor(75), const Color(0xFF7A5A12));
-      expect(heatBandColor(85), const Color(0xFF8A4512));
-      expect(heatBandColor(90), const Color(0xFF8A1F1A));
+      expect(heatBandColor(null), const Color(0xFFE5E7EB));
+      expect(heatBandColor(59.9), const Color(0xFFD1FAE5));
+      expect(heatBandColor(60), const Color(0xFFFEF9C3));
+      expect(heatBandColor(75), const Color(0xFFFDE68A));
+      expect(heatBandColor(85), const Color(0xFFFED7AA));
+      expect(heatBandColor(90), const Color(0xFFFECACA));
     });
 
     test('compareIp orders numerically, not lexically', () {
@@ -322,7 +322,7 @@ void main() {
 
       await tester.tap(find.text('Cài đặt'));
       await tester.pumpAndSettle();
-      expect(find.text('BeeSky v0.38.0'), findsWidgets);
+      expect(find.text('BeeSky v0.39.0'), findsWidgets);
       // The credential count lives on the Tài khoản tab now.
       await tester.tap(find.text('Tài khoản'));
       await tester.pumpAndSettle();
@@ -335,7 +335,7 @@ void main() {
       final fields = find.byType(TextField);
       await tester.enterText(fields.at(0), '10.9.0.0/24');
       await tester.enterText(fields.at(1), '1750');
-      await tester.tap(find.text('Lưu cài đặt'));
+      await tester.tap(find.text('Lưu thay đổi'));
       await tester.pumpAndSettle();
 
       final saved = store.load();
@@ -347,6 +347,26 @@ void main() {
       await tester.tap(find.text('Điện năng'));
       await tester.pumpAndSettle();
       expect(find.textContaining('1.750 ₫'), findsWidgets);
+    });
+  });
+
+  group('tab bar contrast (v0.39.1)', () {
+    test('tab labels never render brand yellow on white', () {
+      // Regression: bare TabBars (Settings 5 tabs, Presets center)
+      // inherited labelColor = colorScheme.primary = #FFE000, so the
+      // selected tab — and any tab on hover — was yellow text on white
+      // (≈1.6:1, unreadable). v0.39.2, owner feedback: labels are
+      // plain black and hover carries NO yellow at all, just a
+      // neutral pale-grey wash. Yellow survives only as the
+      // underline indicator (a fill).
+      final tabBar = buildBeeSkyTheme().tabBarTheme;
+      expect(tabBar.labelColor, BeeSkyColors.text);
+      expect(tabBar.unselectedLabelColor, BeeSkyColors.muted);
+      expect(tabBar.indicatorColor, BeeSkyColors.accent);
+      expect(
+        tabBar.overlayColor?.resolve({WidgetState.hovered}),
+        BeeSkyColors.ghostFill,
+      );
     });
   });
 
