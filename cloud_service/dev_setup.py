@@ -17,4 +17,3 @@ else:
     }
     path.write_text('\n'.join(f'{k}={v}' for k,v in values.items())+'\n',encoding='utf-8')
     print('Created private local configuration; no account or sample farm created.')
-
