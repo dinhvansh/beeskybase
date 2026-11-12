@@ -91,6 +91,8 @@ from urllib.parse import parse_qs, urlparse
 from ..core.actions import COMMAND_TYPES
 from .pools import DEFAULT_POLL_S, UNIT_TO_THS, PoolPoller
 from .store import CloudStore
+from .maintenance import MaintenanceService, MaintenanceScheduler
+from .maintenance_http import handle_maintenance
 from .mcp import handle_http as handle_mcp
 
 MAX_BODY_BYTES = 16 * 1024 * 1024
@@ -177,6 +179,7 @@ class SessionStore:
 def make_handler(store: CloudStore, dashboard_html: bytes,
                  password: str | None):
     sessions = SessionStore()
+    maintenance = MaintenanceService(store)
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "BeeSkyCloud/0.13"
@@ -282,6 +285,9 @@ def make_handler(store: CloudStore, dashboard_html: bytes,
                 self._handle_agent_claim(parse_qs(parsed.query))
                 return
             if not self._viewer_gate(path):
+                return
+            if path.startswith("/api/maintenance"):
+                handle_maintenance(self, maintenance)
                 return
             query = parse_qs(parsed.query)
             if path == "/":
@@ -415,6 +421,10 @@ def make_handler(store: CloudStore, dashboard_html: bytes,
         def do_POST(self):  # noqa: N802 — stdlib handler API
             parsed = urlparse(self.path)
             path = parsed.path
+            if path.startswith("/api/maintenance"):
+                if self._viewer_gate(path):
+                    handle_maintenance(self, maintenance)
+                return
             if path == "/mcp":
                 handle_mcp(self, store)
                 return
@@ -784,6 +794,8 @@ def run_cloud_server(store: CloudStore, host: str = "127.0.0.1",
     httpd = ThreadingHTTPServer((host, port),
                                 make_handler(store, dashboard_html, password))
     httpd.daemon_threads = True
+    maintenance_scheduler = MaintenanceScheduler(MaintenanceService(store))
+    maintenance_scheduler.start()
     poller = PoolPoller(store, _pool_poll_interval())
     poller.start()
     print(f"Pool poller: mỗi {poller.interval_s:g} giây cho các xưởng "
@@ -806,6 +818,7 @@ def run_cloud_server(store: CloudStore, host: str = "127.0.0.1",
     except KeyboardInterrupt:
         print("\nbeesky cloud stopped")
     finally:
+        maintenance_scheduler.stop()
         poller.stop()
         httpd.server_close()
         store.close()

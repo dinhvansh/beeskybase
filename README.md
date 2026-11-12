@@ -270,7 +270,7 @@ Chạy bản giao diện có API thật từ thư mục repository:
 python -m tools.serve_preview
 ```
 
-Mở `http://127.0.0.1:8791/#/energy`. Có thể đặt `BEESKY_PREVIEW_PORT` để đổi cổng; `BEESKY_CLOUD_PASSWORD` dùng cơ chế đăng nhập quản trị hiện có. Máy chủ bind localhost. SQLite nằm tại `work/beesky-preview.db`; sao lưu file này khi máy chủ đã dừng. Không đưa database/mã agent lên Git.
+Mở `http://127.0.0.1:8790/#/energy`. Có thể đặt `BEESKY_PREVIEW_PORT` để đổi cổng; `BEESKY_CLOUD_PASSWORD` dùng cơ chế đăng nhập quản trị hiện có. Máy chủ bind localhost. SQLite nằm tại `work/beesky-preview.db`; sao lưu file này khi máy chủ đã dừng. Không đưa database/mã agent lên Git.
 
 - Tự lưu trạm, W xác nhận, tủ/nhánh, nguồn cấp, pha từng máy và bố trí kệ trên máy chủ; trình duyệt có bản dự phòng. API `/api/power-plan` dùng revision, từ chối ghi đè khi cửa sổ khác đã sửa (409). Tải lại để đọc bản mới nhất trước khi tiếp tục sửa. Đây là workspace quản trị chung theo cơ chế backend hiện có, chưa phải hệ thống nhiều tenant.
 - Trong **Thiết lập nguồn điện → Kết nối agent**, chọn site của agent hoặc tạo mã agent mới (chỉ hiện một lần). Agent tại LAN chạy theo hướng dẫn `python -m beesky agent <target> --cloud http://<dia-chi-cloud> --key <key> --site <site>`; máy chủ localhost cần được triển khai/bind qua cấu hình cloud phù hợp trước khi agent trên máy khác truy cập. Không tự quét mạng từ trình duyệt.
@@ -280,3 +280,14 @@ Mở `http://127.0.0.1:8791/#/energy`. Có thể đặt `BEESKY_PREVIEW_PORT` đ
 - Cảnh báo tăng điện: hai số đo có timestamp mới khác nhau, tăng >20% và ≥100 W; hết hiệu lực sau 10 phút. Cảnh báo trong app đang mở; chưa gửi email/Telegram và chưa có tiến trình cảnh báo khi đóng app.
 
 Đã kiểm tra API ingest bằng dữ liệu giả lập qua cơ chế agent thật, lưu SQLite, cách ly site, gate đăng nhập và xung đột revision; chưa kiểm chứng với máy đào vật lý tại xưởng.
+
+
+## Bảo trì hằng tháng và ảnh minh chứng
+
+Mở `http://127.0.0.1:8790/#/maintenance` sau khi chạy `python -m tools.serve_preview`. Lịch tạo phiếu hoạt động trên máy chủ, không cần mở trình duyệt. Xem [hướng dẫn bảo trì](docs/maintenance.md) về phạm vi, checklist, lưu ảnh và báo cáo PDF.
+
+Kiểm tra phần mới:
+
+```powershell
+python -m unittest discover -s tests -p "test_maintenance*.py" -v
+```

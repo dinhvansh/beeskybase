@@ -6,6 +6,7 @@ from urllib.parse import urlparse, unquote
 from http.server import ThreadingHTTPServer
 from beesky.cloud.server import make_handler
 from beesky.cloud.store import CloudStore
+from beesky.cloud.maintenance import MaintenanceService, MaintenanceScheduler
 
 def handler(store, root, password=None):
     root = Path(root).resolve()
@@ -26,5 +27,15 @@ def handler(store, root, password=None):
 if __name__ == '__main__':
     root = Path(__file__).resolve().parents[1]
     store = CloudStore(str(root / 'work' / 'beesky-preview.db'))
-    ThreadingHTTPServer(('127.0.0.1',int(os.environ.get('BEESKY_PREVIEW_PORT','8791'))),handler(store,root/'cloud-preview',os.environ.get('BEESKY_CLOUD_PASSWORD'))).serve_forever()
-
+    server = ThreadingHTTPServer(('127.0.0.1',int(os.environ.get('BEESKY_PREVIEW_PORT','8790'))),handler(store,root/'cloud-preview',os.environ.get('BEESKY_CLOUD_PASSWORD')))
+    scheduler = MaintenanceScheduler(MaintenanceService(store))
+    scheduler.start()
+    print(f'BeeSky: http://127.0.0.1:{server.server_port} — monthly maintenance scheduler active', flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        scheduler.stop()
+        server.server_close()
+        store.close()

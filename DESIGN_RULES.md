@@ -165,3 +165,13 @@ Các màu light đề xuất trong master prompt:
 - Màn hình khám phá ưu tiên cảnh; công cụ chỉnh sửa và lọc mở theo nhu cầu qua Bố trí và Lọc & nhóm.
 - Theo yêu cầu mới, nhãn kệ là bảng gắn phẳng lên tường sau của từng tầng, không phải danh sách nổi hoặc billboard theo camera. Bấm bảng để định vị kệ.
 - Có phối cảnh nhiều tầng dạng tách tầng; chỉnh bố trí trên một tầng cụ thể, không làm thay đổi dữ liệu khi đổi góc nhìn.
+
+### Bảo trì định kỳ (bổ sung)
+
+- Menu Bảo trì định kỳ có lịch tháng, phiếu checklist và báo cáo; ưu tiên danh sách, mở chi tiết khi cần.
+- Dùng chung modal, field, select, bảng, trạng thái và token sáng/tối. Nhập checklist, chụp/chọn ảnh thuận tiện trên điện thoại.
+- Lịch và hồ sơ/ảnh lưu trên máy chủ. Phải phân biệt nháp cục bộ với nháp đã lưu máy chủ; không báo lưu thành công khi API lỗi.
+- Mẫu mới không làm đổi checklist hoặc danh sách máy của phiếu cũ. Trạng thái Chưa làm → Đang làm → Chờ xác nhận → Hoàn tất; phiếu hoàn tất khóa bằng kiểm tra ở API.
+- Mỗi mục Không đạt/Không áp dụng cần ghi chú; yêu cầu ảnh tùy quy trình. Ảnh gắn đúng hạng mục và trước/sau, có người tải và thời gian máy chủ.
+- Báo cáo tháng có trạng thái, lỗi, chi phí, checklist, ảnh, máy trong phạm vi và lịch sử. In/lưu PDF qua trình duyệt; không giả nhận đã xuất file khi mới mở màn hình.
+- Lịch chạy khi máy chủ còn hoạt động; khởi động lại bù kỳ lỡ, không trùng phiếu. Không giả nhận tự chạy khi máy chủ tắt, hay có chữ ký tài khoản cá nhân khi tên xác nhận còn nhập thủ công.
