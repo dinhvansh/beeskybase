@@ -241,3 +241,9 @@ Nhãn kệ hiện là bảng gắn phẳng lên tường sau, gồm tên kệ, s
 Bấm máy → **Tháo khỏi kệ** để trả máy về danh sách chưa xếp, chọn tình trạng và ghi lý do. Có bốn trạng thái thủ công: Sẵn sàng vận hành, Hỏng / chờ sửa, Đang sửa chữa, Hỏng hẳn / ngừng sử dụng. Có thể cập nhật lại từ chi tiết máy hoặc thẻ máy chưa xếp.
 
 Tháo chỉ làm trống ô kệ, giữ ID, serial, nhãn, nhóm và vị trí cuối cùng để đối chiếu. Máy ngừng sử dụng không được xếp lại cho đến khi cập nhật tình trạng; gợi ý xếp theo IP chỉ lấy máy sẵn sàng. Máy đang hỏng/sửa/ngừng sử dụng không phát hiệu ứng đào. Tình trạng nhập thủ công không thay đổi kết nối báo về và không gửi lệnh tới thiết bị. Dữ liệu hiện chỉ lưu trong phiên xem.
+
+### Worker và khách sở hữu trên sơ đồ 2D
+
+Mở **Hiển thị trên ô máy** để bật/tắt riêng Worker và Khách sở hữu. Bấm ô máy (cả khi đang sắp xếp) → **Worker & khách sở hữu** để nhập worker hiển thị và tên/mã khách. Thẻ máy chưa xếp cũng có thao tác này. Tên dài rút gọn trên ô, xem đầy đủ trong chi tiết hoặc tooltip.
+
+Thông tin theo ID máy, giữ khi tháo/đổi kệ, tìm kiếm được qua tên khách hoặc worker. Đây là nhãn thủ công, chưa liên kết tài khoản khách hoặc thay cấu hình pool. Máy chưa gán được ghi rõ; dữ liệu và tùy chọn hiện vẫn chỉ lưu trong phiên xem.
