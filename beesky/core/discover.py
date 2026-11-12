@@ -10,9 +10,19 @@ target, walk the adapter chain in a fixed order —
      STATS "MM ID" module fingerprint; v0.30, see
      docs/vendor-coverage-mapping.md) and a LuxOS refinement
      (the ``version`` Description starts "LUXminer"; v0.33.0,
-     see docs/vendor-docs-mapping.md §2)
+     see docs/vendor-docs-mapping.md §2), Auradine and
+     SealMiner refinements (the ``version`` reply carries
+     "gcminer"/"fluxos" resp. "bdminer", case-insensitive;
+     v0.38.0, see docs/vendor-docs2-mapping.md §1–§2),
+     then the ePIC HTTP
+     JSON probe (GET /summary, Hostname+Session+HBs gate;
+     v0.37.0, see docs/epic-mapping.md §2) — an Epic miner
+     answers the two earlier probes with non-parseable
+     replies, so it falls through to the HTTP probe cleanly
   2. VNish/HashCore dashd HTTP API on :80 (GET /api/v1/summary signature)
   3. Bitmain stock web CGI on :80 (digest auth, /cgi-bin/get_miner_status.cgi)
+  4. IceRiver web API on :80 (console-title gate, then the
+     userpanel shape gate; v0.36.0, docs/vendor-oss-mapping.md §2)
 
 — and keep the first adapter that answers like a miner. Probing is threaded
 with bounded workers and short timeouts so a /24 scans in seconds.
@@ -24,9 +34,14 @@ family — and try them family-first (see ordered_creds). The winning
 set's label is carried on the candidate into the record (cred_label).
 Family tags (v0.30): the HashCore vendor set ported in
 docs/vendor-coverage-mapping.md §6 — detection exists for whatsminer,
-avalon and (v0.33.0) luxos; iceriver / jasminer / braiins are
-tag-only families (their contracts are named gaps in
-docs/vendor-docs-mapping.md §3–§5).
+avalon, luxos (v0.33.0) and braiins + iceriver (v0.36.0,
+docs/vendor-oss-mapping.md); epic (v0.37.0, docs/epic-mapping.md);
+auradine + sealminer (v0.38.0, docs/vendor-docs2-mapping.md);
+jasminer is still a tag-only family
+(its contract is a named gap in
+docs/vendor-oss-mapping.md §4); pit-bit has neither
+a tag nor an adapter (G-PB1 in
+docs/vendor-docs2-mapping.md §3).
 """
 
 from __future__ import annotations
@@ -36,10 +51,16 @@ import socket
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
+from .auradine import is_auradine_version
 from .bitmain import BitmainClient
+from .braiins import is_braiins_version
 from .cgminer import CgminerClient
 from .dashd import DashdClient, DashdError
+from .epic import EpicClient, is_epic_summary
+from .iceriver import (DEFAULT_PASSWORD as ICERIVER_DEFAULT_PASSWORD,
+                       IceRiverClient, IceRiverError, panel_model)
 from .luxos import is_luxos_version
+from .sealminer import is_sealminer_version
 from .whatsminer import WhatsminerClient, is_whatsminer_summary
 
 HTTP_PORT = 80
@@ -96,7 +117,8 @@ class Candidate:
 
     ip: str
     source: str | None = None  # "cgminer" | "vnish" | "stock" |
-    #                            "whatsminer" | "avalon" | "luxos"
+    #                            "whatsminer" | "avalon" | "luxos" |
+    #                            "braiins" | "iceriver" | "epic"
     http_open: bool = False
     cgminer_open: bool = False
     cgminer_ok: bool = False  # answered a real `summary` command
@@ -113,6 +135,9 @@ class Candidate:
     cred_label: str | None = None   # winning set's label (None = default/RPC)
     dashd_token: str | None = None  # JWT minted by the winning dashd login
     dashd_api_key: str | None = None  # x-api-key of the winning vnish set
+    iceriver_password: str | None = None  # winning IceRiver web password
+    # (v0.36.0: the panel probe tries iceriver-tagged sets, then the
+    # factory default; the fetch stage reuses the winner)
     username: str = "root"          # winning stock cred — fetch reuses it
     password: str = "root"
 
@@ -174,7 +199,8 @@ def _port_open(ip: str, port: int, timeout: float) -> bool:
 
 
 CRED_TYPES = ("any", "stock", "vnish", "whatsminer", "avalon",
-              "iceriver", "jasminer", "braiins", "luxos")
+              "iceriver", "jasminer", "braiins", "luxos", "epic",
+              "auradine", "sealminer")
 
 
 def cred_type(entry: dict) -> str:
@@ -304,6 +330,50 @@ def probe_host(ip: str, timeout: float = 1.5, http_port: int = HTTP_PORT,
                     version_resp = {}
                 if is_luxos_version(version_resp):
                     cand.source = "luxos"
+                elif is_braiins_version(version_resp):
+                    # Braiins refinement (v0.36.0,
+                    # docs/vendor-oss-mapping.md §1.2): the same
+                    # `version` reply carrying "bosminer"/"boser"
+                    # (the STATUS Description build string) is a
+                    # Braiins OS miner. Same positive-only rule —
+                    # no other family carries either substring.
+                    cand.source = "braiins"
+                elif is_auradine_version(version_resp):
+                    # Auradine refinement (v0.38.0,
+                    # docs/vendor-docs2-mapping.md §1.2): the
+                    # `version` reply carrying "gcminer"/"fluxos"
+                    # (GCMiner / FluxOS) is a Teraflux miner.
+                    # Case-insensitive — the libraries' own
+                    # fixtures carry the markers mixed-case
+                    # (D-AU1). "cgminer" is not "gcminer".
+                    cand.source = "auradine"
+                elif is_sealminer_version(version_resp):
+                    # SealMiner refinement (v0.38.0,
+                    # docs/vendor-docs2-mapping.md §2.2): the
+                    # `version` reply carrying "bdminer"
+                    # (BDMiner) is a Bitdeer SealMiner.
+                    # Case-insensitive (D-SE1).
+                    cand.source = "sealminer"
+            return cand
+
+        # 1c) ePIC HTTP JSON (v0.37.0, docs/epic-mapping.md §2):
+        # GET :4028/summary, claim on the structural gate
+        # (Hostname + Session/"Average MHs" + HBs). An Epic miner
+        # answers the two probes above with non-parseable
+        # replies, so reaching here is expected for it — and
+        # no cgminer-family device can pass the gate, because
+        # none of them serves HTTP JSON on 4028.
+        try:
+            epic_summary = EpicClient(
+                ip, port=cgminer_port, timeout=timeout).summary()
+        except Exception:  # noqa: BLE001 — a probe must never raise
+            epic_summary = {}
+        if is_epic_summary(epic_summary):
+            cand.source = "epic"
+            cand.summary = epic_summary
+            cand.cgminer_ok = True
+            # The model comes from /capabilities, which the fetch
+            # stage reads — the probe claims on the summary alone.
             return cand
 
     # 2) + 3) HTTP adapters need the web port.
@@ -375,6 +445,41 @@ def probe_host(ip: str, timeout: float = 1.5, http_port: int = HTTP_PORT,
                 cand.username = entry["user"]
                 cand.password = entry["password"]
                 cand.cred_label = entry.get("label")
+                return cand
+
+        # IceRiver (v0.36.0, docs/vendor-oss-mapping.md §2.4):
+        # the console-title gate (one GET — cheap, and it keeps
+        # the two POSTs off every router/admin page in the range),
+        # then the panel-shape gate. Passwords are tried in family
+        # order (iceriver-tagged sets first), then the factory
+        # default 12345678; the winner rides the candidate into
+        # the fetch stage. The shape gate is decisive — the title
+        # alone never claims a host.
+        ice = IceRiverClient(ip, port=http_port,
+                             timeout=fetch_timeout)
+        if ice.has_console_title():
+            passwords: list[str] = []
+            if explicit_creds:
+                # Saved sets only: the implicit single entry (creds
+                # is None) carries the stock legacy pair root/root,
+                # which is never an IceRiver password — trying it
+                # first would "win" on any device whose panel needs
+                # no login, and record the wrong password.
+                for entry in ordered_creds(cred_list, "iceriver"):
+                    pwd = entry.get("password")
+                    if pwd and pwd not in passwords:
+                        passwords.append(pwd)
+            if ICERIVER_DEFAULT_PASSWORD not in passwords:
+                passwords.append(ICERIVER_DEFAULT_PASSWORD)
+            for pwd in passwords:
+                ice.password = pwd
+                try:
+                    panel = ice.userpanel()
+                except IceRiverError:
+                    continue
+                cand.source = "iceriver"
+                cand.iceriver_password = pwd
+                cand.model = panel_model(panel)
                 return cand
 
         # Locked dashd (v0.23, explicit creds only): anonymous

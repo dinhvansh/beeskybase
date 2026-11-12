@@ -104,11 +104,17 @@ from .core import ops as ops_mod
 from .core import notify as notify_mod
 from .core import report
 from .core import updater
+from .core.auradine import AuradineClient, AuradineError
 from .core.bitmain import BitmainClient, BitmainError
+from .core.braiins import BraiinsClient, BraiinsError
 from .core.cgminer import CgminerClient, CgminerError
 from .core.dashd import DashdClient, DashdError
+from .core.epic import EpicClient, EpicError
 from .core.discover import (CRED_TYPES, Candidate, default_scan_target,
                             discover, parse_targets, probe_host)
+from .core.iceriver import (DEFAULT_PASSWORD as ICERIVER_DEFAULT_PASSWORD,
+                            IceRiverClient, IceRiverError)
+from .core.sealminer import SealMinerClient, SealMinerError
 from .core.whatsminer import WhatsminerClient, WhatsminerError
 from .core.events import EventEngine
 from .web.server import MonitorService, run_server
@@ -217,6 +223,59 @@ def _fetch_record(cand: Candidate, args: argparse.Namespace,
         except WhatsminerError as exc:
             record = report.error_record(ip, str(exc),
                                          source="whatsminer")
+    elif cand.source == "braiins":
+        # Braiins OS BOSMiner RPC (v0.36.0) — no auth for reads.
+        client = BraiinsClient(ip, port=cand.cgminer_port,
+                               timeout=timeout)
+        try:
+            record = client.fetch_record(ip)
+        except BraiinsError as exc:
+            record = report.error_record(ip, str(exc),
+                                         source="braiins")
+    elif cand.source == "iceriver":
+        # IceRiver web API (v0.36.0) — the probe's winning
+        # password rides the candidate; the factory default is
+        # the fallback when the probe never ran (direct fetch).
+        client = IceRiverClient(
+            ip, port=cand.http_port, timeout=timeout,
+            password=cand.iceriver_password or DEFAULT_PASSWORD)
+        try:
+            record = client.fetch_record(ip)
+        except IceRiverError as exc:
+            record = report.error_record(ip, str(exc),
+                                         source="iceriver")
+    elif cand.source == "epic":
+        # ePIC HTTP JSON API on 4028 (v0.37.0) — GET reads need
+        # no password, so the fetch never carries one.
+        client = EpicClient(ip, port=cand.cgminer_port,
+                            timeout=timeout)
+        try:
+            record = client.fetch_record(ip)
+        except EpicError as exc:
+            record = report.error_record(ip, str(exc),
+                                         source="epic")
+    elif cand.source == "auradine":
+        # Auradine RPC 4028 + web :8080 (v0.38.0) — reads need
+        # no auth, so the fetch never carries one.
+        client = AuradineClient(ip, port=cand.cgminer_port,
+                                timeout=timeout)
+        try:
+            record = client.fetch_record(ip)
+        except AuradineError as exc:
+            record = report.error_record(ip, str(exc),
+                                         source="auradine")
+    elif cand.source == "sealminer":
+        # SealMiner RPC 4028 + web CGI :80 (v0.38.0) — the web
+        # CGI lives on the HTTP port, so it rides the
+        # candidate's http_port (80 on a real miner).
+        client = SealMinerClient(ip, port=cand.cgminer_port,
+                                 web_port=cand.http_port,
+                                 timeout=timeout)
+        try:
+            record = client.fetch_record(ip)
+        except SealMinerError as exc:
+            record = report.error_record(ip, str(exc),
+                                         source="sealminer")
     elif cand.source == "vnish":
         client = DashdClient(ip, port=cand.http_port, timeout=timeout,
                              api_key=args.api_key or cand.dashd_api_key,

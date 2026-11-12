@@ -4971,3 +4971,479 @@ release-pin suite now pins 0.35.0.
   * Everything carried over from v0.32–v0.34 (VNish ops
     tail, Whatsminer token flow, LuxOS reads, IP-Report
     wire, L9 chip-count check, Z15 raw SUMMARY).
+
+# v0.36.0 — Braiins + IceRiver adapters from open-source implementations
+
+The owner asked the direct question (2026-11-12 07:21): can
+Braiins and IceRiver be pulled out of an app after all? The
+Toolkit-app dissection route is exhausted for them (v0.33:
+AOT materials hold only enum names + cred tags). This leg
+mines established open-source miner-management libraries
+instead — pyasic (Upstream Data, Apache-2.0) as the prime
+source, asic-rs as the independent Braiins corroboration, and
+a real captured IceRiver packet (HackMD KS0 Ultra) as the
+worked example. Full record: docs/vendor-oss-mapping.md.
+
+## Verdicts
+
+| Family | Verdict | Evidence |
+|---|---|---|
+| Braiins OS (BOSMiner RPC) | IMPLEMENTED — detection + reads + pause/resume | CORROBORATED (Academy worked examples + pyasic + asic-rs) |
+| IceRiver | IMPLEMENTED — detection + reads + find_miner | CORROBORATED (pyasic + real packet + manuals) |
+| Jasminer / SunLune | GAP G-J1 — no OSS implementation exists | INSUFFICIENT |
+
+Coverage scoreboard: **9 real read adapters** of HashCore's
+15–16 (stock, vnish, whatsminer, avalon, luxos, braiins,
+iceriver + cgminer-generic). Parity-audit G-B1/G-I1 rows are
+closed by docs/vendor-oss-mapping.md (the audit doc itself,
+a v0.35 snapshot, is not rewritten).
+
+## Braiins OS — what the sources actually showed
+
+* Transport: TCP 4028, cgminer JSON envelope, no auth for
+  reads. The gRPC PAPI (port 50051) is NOT used — no stdlib
+  HTTP/2 + protobuf (mapping U-B3).
+* Fingerprint (the datum v0.33 lacked): every 4028 reply's
+  `STATUS[0].Description` is the build string — the Academy's
+  worked examples all show `"BOSminer+ 0.2.0-ea64aec8e"`.
+  Detection = case-insensitive "bosminer"/"boser" substring
+  in the `version` reply — pyasic's rule and asic-rs's rule,
+  identical. Non-collision re-run against stock, luxos,
+  whatsminer and avalon witnesses: all clean.
+* Reads: summary "MHS 1m" → native TH/s (pyasic's key);
+  pools (cgminer shape); fans RPM; temps (Chip/Board, IDs
+  6–8 with pyasic's offset rule); devdetails (Chips, Model);
+  devs ("MHS 1m"); tunerstatus power (ApproximateMinerPower-
+  Consumption) + chain states (non-stable → TUNER problem).
+* Actions: pause/resume only — the documented 4028 commands
+  (pyasic requires a PAUSE/RESUME section in the reply).
+  Reboot is NOT a 4028 command (pyasic reboots via SSH);
+  it stays honestly unsupported for braiins.
+
+## IceRiver — what the sources actually showed
+
+* Transport: HTTP :80. `POST /user/loginpost` (post=6,
+  admin/12345678) then `POST /user/userpanel` (post=4).
+  Login is best-effort (the HackMD author: no token needed
+  for the API); cookies ride along when the miner sets one.
+* Detection is two-gated: the console title
+  `<TITLE>用户界面</TITLE>` (cheap GET), then the panel-shape
+  gate (error == 0 + a data object carrying `softver1`).
+  The shape gate is decisive; the title alone never claims.
+* Reads from the captured KS0 Ultra packet (verbatim in
+  tests/mock_iceriver.py): rtpow "359G" + unit "G" → native
+  359 GH/s; boards (chipnum 18, intmp 48 as the chain temp);
+  fans [6079, 6079, 0, 0]; pools (addr/user/accepted/rejected,
+  connect/state) — pool `pass` is NEVER copied into the
+  record; mac; runtime "00:01:15:16" → 4516 s; model from
+  softver1 ("ICM168_3_2_14_ks0ultra_miner" → KS0ULTRA).
+  Power is NOT reported by the panel (G-I2).
+* Response-shape divergence (mapping U-I1, handled): the
+  real packet is `{"error": 0, "data": {...}}` while pyasic's
+  backend reads `["userpanel"]["data"]`. BeeSky accepts both;
+  the mock suite covers both shapes.
+* Actions: find_miner via locate (POST userpanel post=5
+  locate=1). Reboot: no documented endpoint. Pool-setting
+  (`/user/machineconfig`) exists in one source with a
+  `?`-separated query form — not trusted for writes (G-I3).
+* Probe password rule (found by the tests, not by design):
+  the implicit legacy pair root/root must NOT be tried for
+  IceRiver — on a device whose panel needs no login it would
+  "win" and record the wrong password. Only saved sets (in
+  family order) plus the factory default 12345678 are tried.
+
+## Jasminer — still a gap, checked twice
+
+No Jasminer backend, factory entry, model or web class in
+pyasic; no support in asic-rs; a web/GitHub search finds
+only the X4 user manual and Find-My-Miner, whose Jasminer
+fingerprint is explicitly "heuristic and firmware-dependent"
+(a `version` query on 4028 + hints), not a read API.
+`jasminer` stays a cred-family tag only.
+
+## Two real bugs found by the tests and fixed in this version
+
+1. The IceRiver probe tried the implicit root/root pair
+   first (see the password rule above) and recorded "root"
+   as the winning password. Fixed: only saved sets + the
+   factory default are tried.
+2. Both new mocks could not be respawned on the same port
+   (the TUNER-bad and wrapped-shape variants): the first
+   run's server-side connections sit in TIME_WAIT and a
+   listener without SO_REUSEADDR cannot rebind. Fixed:
+   both mocks now subclass their servers with
+   `allow_reuse_address = True` set before bind.
+
+## Tests
+
+* New suite mock_vendors3_test: **48 PASS / 0 FAIL**
+  (braiins detection + non-collision + record + pause/
+  resume + TUNER path; iceriver title/shape gates + both
+  response shapes + record + find_miner; jasminer gap).
+* Full sweep via tests/run_mock_test_v36.sh green at
+  established counts: arp 18, ipreport 28, views 20,
+  vendors2 59, vendors 51, agent_bg 52, bridge 24, creds 32,
+  groups 41, units 50, ops 32, ops2 34, inspect 33, pools 43,
+  agent_app 41.
+* Flutter: analyze clean in both apps; main 159/159,
+  agent 34/34 (sourceLabel gained braiins/iceriver; the
+  Tk gui.SOURCE_LABEL mirrors it).
+
+## Verification status
+
+(a) VERIFIED LOCALLY (this sandbox):
+  * Everything above: both adapters against their mocks
+    (incl. the TUNER-bad and wrapped-shape respawns), the
+    full mock sweep, both Flutter apps.
+  * The cgminer pools normaliser refactor (pools_normalised
+    now delegates to pools_normalised_from) — the luxos/
+    stock paths re-run green in the sweep.
+
+(b) VERIFIED ONLY BY CI:
+  * The Windows builds (build-flutter.yml /
+    build-windows.yml) for the tag; no workflow files
+    changed in this version.
+
+(c) HARDWARE / WINDOWS-UNCONFIRMED:
+  * Braiins reads on a real BOSMiner/BOSer machine — above
+    all the BOSer Description string (U-B1) and the
+    pause/resume reply shape (U-B2); a BOSer that dropped
+    the 4028 API entirely would not be detected.
+  * IceRiver reads on a real machine — the wrapped-vs-
+    top-level response shape per firmware generation (U-I1),
+    and whether loginpost enforces the password on newer
+    firmware (the panel works without it either way).
+  * Everything carried over from v0.32–v0.35 (VNish ops
+    tail, Whatsminer token flow, LuxOS reads, IP-Report
+    wire, L9 chip-count check, Z15 raw SUMMARY, unlock
+    residuals U-1..U-5).
+
+# v0.37.0 — ePIC adapter from Epic's own published material
+
+The ePIC family was the last cred-tag-only family with a
+published public contract (docs/epic-mapping.md). Unlike
+Braiins/IceRiver (v0.36: mined from OSS libraries), Epic
+publishes BOTH the API docs AND the dashboard that speaks
+them — so the spec source is Epic's own material: APIv2
+(epic-miner v4.0.0, SC200) + APIv3 (PowerPlay) plus the
+dashboard's connection code (src/portscan.js,
+src/app.jsx handleApi, src/tabs/ControlTab.jsx,
+src/tabs/FanTab.jsx). The dashboard is the ground truth
+where the docs use placeholders: it pins the PORT (4028,
+triple-corroborated), the POST bodies (incl. /coin's
+pool_url/login, /fanspeed as a number, /tune's string
+clks/voltage), and the one /miner value it ever sends
+("stop" — "start" stays UNKNOWN, resume NOT implemented).
+
+## Verdicts
+
+| Family | Verdict | Evidence |
+|---|---|---|
+| ePIC (Epic SC200, v4.0.0 / PowerPlay) | READ + CONTROL, docs + dashboard-verified | APIv2/APIv3 docs + dashboard code; mock from the doc shapes + dashboard payloads |
+| Jasminer | still a cred tag only | no public API spec, no captured packet, no adapter logic in the Toolkit AOT materials |
+
+Scoreboard: **10 real read adapters** (cgminer-generic,
+dashd for hashcore+oldVnish, bitmain stock, canaan,
+microBt, whatsminer-token, luxos, braiins, iceriver,
+epic). Jasminer is the only cred-tag-only family left.
+
+## What the adapter does
+
+* Transport: HTTP JSON to http://<ip>:4028/...; GETs need
+  no password; POSTs carry {"param": ..., "password": "..."}
+  and return {"result": bool, "error": string|null}.
+  Factory default password "letmein" (README, stated
+  twice); a cred set tagged "epic" supplies its password.
+* Detection (probe step 1c, after Whatsminer + cgminer
+  fail on the open 4028): GET /summary -> HTTP 200 + JSON
+  object with a non-empty Hostname + a Session object
+  carrying numeric "Average MHs" + an HBs list. The
+  Hostname prefix is NOT checked (the dashboard never
+  checks it). Non-collision: no other BeeSky family
+  serves HTTP JSON on 4028.
+* Reads: native rate MH/s from Session "Average MHs"
+  (gh_5s from LastAverageMHs); elapsed from Session
+  Uptime; power = PSU "Input Power" else sum of HBs
+  Input Power else sum of Output Power; chains from
+  HBs[] with Index verbatim; temps per board; fans as a
+  percentage only (no rpm pretence — fan_speed_pct);
+  pools from StratumConfigs (current pool "Alive" while
+  IsPoolConnected, standby pools "Dead" — dashboard
+  shows no per-pool liveness either); chips 0/0 (the
+  API has no chip counts); extras: hostname, coin,
+  accepted/rejected, hb_status.
+* Controls (all POST, all verified against the
+  dashboard's handleApi): reboot / softreboot (delay 0 =
+  instant), /miner "stop" (pause_mining; resume is
+  honestly unsupported — no verified "start" value),
+  /identify (find_miner), /mode (set_preset: preset +
+  power_target), /coin (switch_pool: reads /summary
+  first, replaces one slot, re-sends the rest
+  unchanged, max 3), /password (change_password),
+  /power (set_power_target), /shutdowntemp, /fanspeed
+  (1–100 int), /tune (clock MHz + voltage mV as
+  strings). Wrong passwords are refused with the
+  miner's error verbatim; missing payload values fail
+  client-side, never silently default.
+
+## UNKNOWNs (mapping U-E1..U-E6, not guessed)
+
+* U-E1 canonical payload bytes — docs show
+  placeholders; shapes are the docs' + dashboard's.
+* U-E2 model strings beyond SC200.
+* U-E3 /miner "start" — resume NOT implemented.
+* U-E4 /tune/voltage + /tune/clock/all formats.
+* U-E5 /hashrate as a chip-count candidate.
+* U-E6 whether v2 serves /hashrate + /temps +
+  /voltages (v3-only in the docs).
+* Not wired (safety / firmware / destructive scope):
+  /network, /systemupdate, /defaultconfig,
+  /hwconfig, /clearhashrate.
+
+## Tests
+
+* New suite mock_vendors4_test: **45 PASS / 0 FAIL**
+  (detection incl. non-collision rerun vs stock /
+  LuxOS / Braiins / Whatsminer witnesses, record
+  fields/units, control request shapes, auth handling,
+  honest refusals, inspect tabs, jasminer-still-a-gap).
+* Full regression sweep (tests/run_mock_test_v37.sh):
+  vendors4 45, vendors3 48, arp 18, ipreport 28,
+  views 20, vendors2 59, vendors 51, agent_bg 52,
+  bridge 24, creds 32, groups 41, units 50, ops 32,
+  ops2 34, inspect 33, pools 43, agent_app 41 —
+  all green.
+* Flutter: analyze clean both apps; main 159 tests,
+  agent 34 tests, all green (one stale pinned key
+  list in vendors_test.dart updated for the new
+  'epic' family label).
+
+## Verification status
+
+(a) VERIFIED LOCALLY (this sandbox):
+  * Everything above: the ePIC adapter against the
+    doc-shaped mock (incl. wrong-password refusals
+    and the dashboard-shaped control bodies), the
+    full mock sweep, both Flutter apps.
+
+(b) VERIFIED ONLY BY CI:
+  * The Windows builds (build-flutter.yml /
+    build-windows.yml) for the tag; no workflow files
+    changed in this version.
+
+(c) HARDWARE / WINDOWS-UNCONFIRMED:
+  * ePIC reads + controls on a real SC200 / PowerPlay
+    machine — above all U-E3 (is there a /miner
+    "start"?) and U-E6 (does v2 serve /hashrate?).
+    A real /capabilities reply would close U-E2.
+  * Everything carried over from v0.32–v0.36
+    (VNish ops tail, Whatsminer token flow, LuxOS /
+    Braiins / IceRiver reads, IP-Report wire, L9
+    chip-count check, Z15 raw SUMMARY, unlock
+    residuals U-1..U-5).
+
+# v0.38.0 — Auradine + SealMiner adapters from the vendors' own material
+
+The Toolkit re-mining (docs/vendor-remining.md §2) found
+three NEW vendor families in the CLI's --fw-type enum:
+auradine (556 hits), epic (closed as v0.37), pit-bit (19),
+sealminer (6). This version closes two of the three from
+the vendors' own published material
+(docs/vendor-docs2-mapping.md): Auradine and SealMiner
+are both implemented in the two established open-source
+miner libraries, asic-rs and pyasic, which agree on
+transport, auth and every control body — CORROBORATED —
+and the Auradine Hardware Reference confirms the ports.
+Pit-Bit stays a named gap (G-PB1): it is a custom
+Antminer firmware, not a hardware vendor, and no doc,
+no OSS implementation and no fingerprint literal exists
+anywhere — a Pit-Bit machine is already readable by the
+stock/cgminer path, only the "pit-bit" label is missing.
+
+## Verdicts
+
+| Family | Verdict | Evidence |
+|---|---|---|
+| Auradine (Teraflux AT1500/AT2870/AT2880/AI2500/AI3680/AH3880) | READ + CONTROL | asic-rs RPC+web backends with real test-JSON fixtures + pyasic backends, CORROBORATED; hardware reference confirms ports 80/443/4028/8443 |
+| SealMiner (Bitdeer A2, A3 Pro Hydro) | READ + CONTROL | asic-rs RPC+web backends with real test-JSON fixtures + Bitdeer setup guides for the web-UI facts |
+| Pit-Bit | still a gap (G-PB1) | no vendor doc, no OSS implementation in pyasic or asic-rs, no fingerprint literal; Toolkit trace is only `PitBitApiSession.fromBitmainSession` (it speaks the stock protocol) |
+
+Scoreboard: **12 real read adapters** (cgminer-generic,
+dashd for hashcore+oldVnish, bitmain stock, canaan,
+microBt, whatsminer-token, luxos, braiins, iceriver,
+epic, auradine, sealminer). Jasminer + pit-bit are the
+only families without a read adapter; pit-bit has no
+cred tag either (its sets are tagged "stock", the
+protocol it speaks).
+
+## What the adapters do
+
+* Auradine — transport: cgminer RPC on TCP 4028
+  ({"command": ...}\n, STATUS array) + web HTTP :8080
+  with token auth (POST /token {"command": "token",
+  "user", "password"} -> token at /Token/0/Token;
+  later requests carry a `Token` header; a 401 or a
+  TOKEN/SESSION/EXPIRED/UNAUTHORIZED error re-auths
+  once and retries). Default auth admin/admin (both
+  libraries agree). Detection: the `version` reply
+  contains "gcminer" or "fluxos" (case-insensitive —
+  D-AU1: asic-rs checks case-sensitively but its own
+  fixtures carry "GCMiner"/"FluxOS"). Reads: native
+  rate MH/s from summary "MHS 5s"/"MHS av" (rate_value
+  = MHS av / 1e6 TH/s); boards from devs (temp) +
+  asccount (396 chips / 3 boards = 132/board, asic-rs
+  expected-minus-failed rule over the temperature /
+  voltage / frequency chip data); fans rpm from web
+  fan; power = summary Wattage else PSU PowerIn parsed
+  from its units string ("58.94W"); pools from RPC
+  pools (cgminer shape); hostname/MAC/serial from web
+  ipreport; board temp spread (min/max of BoardTemp)
+  rides board_temp_min_c / board_temp_max_c. Controls
+  (all web POST, token auth): reboot (restart, no
+  params), restart_mining (restart, param "gcminer"),
+  pause/resume (mode {"sleep": "on"/"off"}),
+  find_miner (led {"code": 3} on / 2 off),
+  set_power_target (mode {"mode": "custom", "tune":
+  "power", "power": <watts>}), switch_pool
+  (updatepools {"pools": [{url, user, pass}]}, max 3,
+  empty password becomes "x"; reads the current RPC
+  pools first, replaces one slot, re-sends the rest).
+  set_fan_speed is NOT wired — only a per-fan form
+  exists and BeeSky's task carries no fan selector.
+* SealMiner — transport: cgminer RPC on TCP 4028 +
+  web HTTP :80 CGI (POST /cgi-bin/login.php with form
+  username=<user>&origin_pwd=<pass> +
+  X-Requested-With -> session cookie; later calls are
+  GET/POST /cgi-bin/<command>.php with a Cookie
+  header). Default auth seal/seal (asic-rs code;
+  D-SE2: the setup guides disagree on case).
+  Detection: the `version` reply contains "bdminer"
+  (case-insensitive — D-SE1: asic-rs checks
+  case-sensitively but its fixtures carry "bdminer
+  4.11.1" / "BDMiner"). The "amazeui" web fingerprint
+  is NOT used (U-SE1, suspected Avalon collision).
+  Reads: native rate MH/s from summary "MHS 5s"/"MHS
+  av"; boards from the flat stats object ("<n> Chip
+  Count" minus "<n> Bad Chip Count", temp = max of
+  the non-zero "<n> Temp 0..3", intake = first,
+  outlet = last); fans rpm from "<n> Speed" for n in
+  0.."Fan Count" (4 in the fixture); power = stats
+  "PSU Input Power" else web miner_psu_status Power;
+  pools from RPC pools; MAC from stats, serial from
+  "Ctrl Board SN". Controls: reboot (web GET
+  reboot.php), pause (RPC ascset "0,suspend"), resume
+  (stats PM State == "Running" -> no-op success, else
+  RPC restart — asic-rs's own guard), find_miner (web
+  POST led_conf.php {"key": "led", "value":
+  "on"|"off"}), set_power_target (RPC ascset
+  "0,powerlimit,{\"value\":\"<watts>\"}", success =
+  STATUS S + Code 119), set_mining_mode (new command
+  type; RPC ascset "0,workmode,{\"mode\":
+  "low_power"|"normal"|"high_performance"}";
+  low_power is A2-only — the model is read from
+  devdetails first and an unreadable model refuses
+  rather than guessing), switch_pool (RPC updatepools
+  with the parameter as a JSON STRING, then a web
+  reboot fire-and-forget). restart_mining is honestly
+  unsupported (asic-rs's impl is empty); change
+  password / logs / factory reset / firmware upgrade
+  are unsupported by the vendor's own client.
+* Probe: both are refinements on the SAME `version`
+  reply as LuxOS/Braiins inside the cgminer claim
+  (after the Avalon refinement) — one extra call the
+  probe already pays for. Non-collision rerun covers
+  stock, LuxOS, Braiins, Whatsminer, Epic and
+  IceRiver witnesses.
+* Cred tags "auradine" + "sealminer" added (CRED_TYPES);
+  the ops password rule is the whatsminer/luxos one
+  (winning set's password, else the factory default);
+  the SealMiner web CGI rides the candidate's
+  http_port (80 on a real miner), the Auradine web
+  API rides its fixed vendor port 8080. New ops
+  command type "set_mining_mode" (SealMiner only).
+  Flutter labels added (sourceLabel + cred type
+  labels); the ops UI needs no change (the epic-only
+  controls were never exposed there either).
+
+## UNKNOWNs (mapping U-AU1..U-AU5, U-SE1..U-SE4, not guessed)
+
+* U-AU1 exact canonical payload bytes (fixtures are
+  asic-rs test captures, not a live-miner session).
+* U-AU2 the :8443 REST API shapes (known to exist,
+  no endpoint evidenced).
+* U-AU3 fixture rate magnitudes (look like a dev
+  unit; units are MH/s per convention).
+* U-AU4 board/chip counts for AT2870/AD2500/AD3500
+  (Unknown fallback covers; devdetails + asccount
+  report the real counts at runtime).
+* U-AU5 web STATUS descriptions vary by endpoint
+  ("2.2.0" vs "GCMiner-…" vs "FluxOS-…") — no impact.
+* U-SE1 the "amazeui" web fingerprint (not used).
+* U-SE2 exact canonical payload bytes (same caveat
+  as U-AU1).
+* U-SE3 the web numeric mining-mode values (the RPC
+  ascset form is wired instead).
+* U-SE4 PM State values other than "Running".
+* Not wired (safety / firmware / destructive scope):
+  Auradine factory-reset, firmware_upgrade,
+  set_network, set_psu, register, restart_api_server;
+  SealMiner change_password, logs, factory reset,
+  firmware upgrade.
+* A mock-construction note, recorded in the mapping
+  doc: neither library ships a devdetails fixture,
+  so both mocks construct a minimal devdetails reply
+  carrying ONLY the field the client reads
+  (/DEVDETAILS/0/Model) with the value evidenced in
+  the ipreport/sysinfo fixtures ("AT1500" / "A2").
+
+## Tests
+
+* New suite mock_vendors5_test: **91 PASS / 0 FAIL**
+  (detection incl. fingerprint units + non-collision
+  rerun vs stock / LuxOS / Braiins / Whatsminer /
+  Epic / IceRiver witnesses, record fields/units for
+  both families, every wired control with its exact
+  request body, token-expiry re-auth, the resume
+  no-op + restart branches, the low_power A2 gate,
+  wrong-password refusals, inspect tabs,
+  pit-bit-still-a-gap).
+* Full regression sweep (tests/run_mock_test_v38.sh):
+  vendors5 91, vendors4 45, vendors3 48, arp 18,
+  ipreport 28, views 20, vendors2 59, vendors 51,
+  agent_bg 52, bridge 24, creds 32, groups 41,
+  units 50, ops 32, ops2 34, inspect 33, pools 43,
+  agent_app 41 — all green.
+* Flutter: analyze clean both apps; main 159 tests,
+  agent 34 tests, all green (one stale pinned key
+  list in vendors_test.dart updated for the two new
+  family labels, same as v0.37's epic update).
+
+## Verification status
+
+(a) VERIFIED LOCALLY (this sandbox):
+  * Everything above: both adapters against the
+    fixture-verbatim mocks (incl. wrong-password
+    refusals, the exact control bodies, the token
+    re-auth, the A2 gate and the resume branches),
+    the full mock sweep, both Flutter apps.
+
+(b) VERIFIED ONLY BY CI:
+  * The Windows builds (build-flutter.yml /
+    build-windows.yml) for the tag; no workflow files
+    changed in this version.
+
+(c) HARDWARE / WINDOWS-UNCONFIRMED:
+  * Auradine reads + controls on a real Teraflux
+    machine — above all U-AU1 (one real reply) and
+    U-AU3 (fixture rate magnitudes), plus the
+    :8443 REST API (U-AU2) and the AT2870/AD
+    board counts (U-AU4).
+  * SealMiner reads + controls on a real A2 / A3 Pro
+    Hydro — above all U-SE2 (one real reply), the
+    web numeric mining-mode values (U-SE3), and the
+    PM State values beyond "Running" (U-SE4).
+  * Everything carried over from v0.32–v0.37
+    (VNish ops tail, Whatsminer token flow, LuxOS /
+    Braiins / IceRiver / ePIC reads, IP-Report wire,
+    L9 chip-count check, Z15 raw SUMMARY, unlock
+    residuals U-1..U-5).

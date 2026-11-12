@@ -53,10 +53,16 @@ import re
 from collections import Counter
 
 from . import report
+from .auradine import AuradineClient, AuradineError
 from .bitmain import BitmainClient, BitmainError, _to_cgminer_shape
+from .braiins import BraiinsClient, BraiinsError
 from .cgminer import CgminerClient, CgminerError
 from .dashd import DashdClient, DashdError, _temp_max
 from .discover import probe_host
+from .epic import EpicClient, EpicError
+from .iceriver import (DEFAULT_PASSWORD as ICERIVER_DEFAULT_PASSWORD,
+                       IceRiverClient, IceRiverError)
+from .sealminer import SealMinerClient, SealMinerError
 from .whatsminer import WhatsminerClient, WhatsminerError
 
 
@@ -327,6 +333,58 @@ def _whatsminer_sections(client: WhatsminerClient) -> tuple[dict, dict, dict]:
 
 
 # ---------------------------------------------------------------------------
+# braiins + iceriver sections — derived from the shared record
+# ---------------------------------------------------------------------------
+
+def _sections_from_record(record: dict) -> tuple[dict, dict, dict]:
+    """(boards, pools, fans) in inspect shape, read off a record the
+    adapter already built.
+
+    Braiins and IceRiver have no cgminer STATS acs strings, so the
+    generic cgminer branch below would report "no chain_acs data"
+    for boards that DO exist. Deriving the sections from the record
+    keeps inspect and the scan in exact agreement (the same rule
+    _boards_from_stats follows for cgminer): the boards are the
+    record's chains, the pools the record's pool list, the fans the
+    record's fan speeds.
+    """
+    chains = record.get("chains") or []
+    if chains:
+        boards = {"supported": True, "boards": [{
+            "index": c.get("index"),
+            "chips_total": c.get("chips_total"),
+            "chips_ok": c.get("chips_alive"),
+            "dead_positions": list(c.get("dead_positions") or []),
+            "other_chars": {},
+            "temp_c": c.get("temp_c"),
+        } for c in chains if isinstance(c, dict)]}
+    else:
+        boards = _unsupported("record carries no boards")
+    pools_list = record.get("pools")
+    if isinstance(pools_list, list) and pools_list:
+        pools = {"supported": True, "pools": [{
+            "id": i + 1,
+            "url": entry.get("url"),
+            "user": entry.get("worker"),
+            "status": entry.get("status"),
+            "accepted": entry.get("accepted"),
+            "rejected": entry.get("rejected"),
+        } for i, entry in enumerate(pools_list)
+            if isinstance(entry, dict)]}
+    else:
+        pools = _unsupported("record carries no pools")
+    speeds = [rpm for rpm in (record.get("fans_rpm") or [])
+              if isinstance(rpm, (int, float))]
+    if speeds:
+        fans = {"supported": True, "mode": None,
+                "fans": [{"id": i + 1, "rpm": int(rpm)}
+                         for i, rpm in enumerate(speeds)]}
+    else:
+        fans = _unsupported("record carries no fan speeds")
+    return boards, pools, fans
+
+
+# ---------------------------------------------------------------------------
 # entry point
 # ---------------------------------------------------------------------------
 
@@ -376,6 +434,110 @@ def inspect_device(ip: str, *, timeout: float = 3.0,
         client = WhatsminerClient(ip, port=cand.cgminer_port,
                                   timeout=fetch_timeout)
         boards, pools, fans = _whatsminer_sections(client)
+        doc.update({"boards": boards, "pools": pools, "fans": fans})
+        return doc
+
+    if cand.source == "braiins":
+        # Boards ride the record (temps + devdetails + devs) — the
+        # generic cgminer branch below would report "no chain_acs
+        # data" for boards that exist (mapping §1.3).
+        try:
+            record = BraiinsClient(
+                ip, port=cand.cgminer_port,
+                timeout=fetch_timeout).fetch_record(ip)
+        except BraiinsError as exc:
+            reason = str(exc)
+            doc.update({"boards": _unsupported(reason),
+                        "pools": _unsupported(reason),
+                        "fans": _unsupported(reason)})
+            return doc
+        boards, pools, fans = _sections_from_record(record)
+        doc.update({"boards": boards, "pools": pools, "fans": fans})
+        return doc
+
+    if cand.source == "iceriver":
+        # Same derivation: the panel's boards are not cgminer
+        # STATS, so the record is the source of truth here too.
+        try:
+            record = IceRiverClient(
+                ip, port=cand.http_port, timeout=fetch_timeout,
+                password=cand.iceriver_password
+                or ICERIVER_DEFAULT_PASSWORD).fetch_record(ip)
+        except IceRiverError as exc:
+            reason = str(exc)
+            doc.update({"boards": _unsupported(reason),
+                        "pools": _unsupported(reason),
+                        "fans": _unsupported(reason)})
+            return doc
+        boards, pools, fans = _sections_from_record(record)
+        doc.update({"boards": boards, "pools": pools, "fans": fans})
+        return doc
+
+    if cand.source == "epic":
+        # Same derivation: HBs are not cgminer STATS, so the
+        # record is the source of truth here too. Fans differ:
+        # the API reports one speed % (record fan_speed_pct),
+        # not per-fan rpm, so the fans section says so instead
+        # of pretending (mapping §5).
+        try:
+            record = EpicClient(
+                ip, port=cand.cgminer_port,
+                timeout=fetch_timeout).fetch_record(ip)
+        except EpicError as exc:
+            reason = str(exc)
+            doc.update({"boards": _unsupported(reason),
+                        "pools": _unsupported(reason),
+                        "fans": _unsupported(reason)})
+            return doc
+        boards, pools, _fans = _sections_from_record(record)
+        pct = record.get("fan_speed_pct")
+        if pct is not None:
+            fans = {"supported": True, "mode": None, "fans": [],
+                    "fan_speed_pct": pct,
+                    "note": "ePIC reports one fan speed % "
+                            "(Fans Speed), not per-fan rpm"}
+        else:
+            fans = _unsupported(
+                "record carries no fan speed percentage")
+        doc.update({"boards": boards, "pools": pools, "fans": fans})
+        return doc
+
+    if cand.source == "auradine":
+        # Same derivation: devs/asccount are not cgminer STATS,
+        # so the record is the source of truth here too. Fans
+        # are rpm lists (web fan Speed), so no epic-style
+        # special case.
+        try:
+            record = AuradineClient(
+                ip, port=cand.cgminer_port,
+                timeout=fetch_timeout).fetch_record(ip)
+        except AuradineError as exc:
+            reason = str(exc)
+            doc.update({"boards": _unsupported(reason),
+                        "pools": _unsupported(reason),
+                        "fans": _unsupported(reason)})
+            return doc
+        boards, pools, fans = _sections_from_record(record)
+        doc.update({"boards": boards, "pools": pools, "fans": fans})
+        return doc
+
+    if cand.source == "sealminer":
+        # Same derivation: the flat stats object has no
+        # chain_acs strings, so the record is the source of
+        # truth here too. Fans are rpm lists ("<n> Speed").
+        # The web CGI lives on the HTTP port.
+        try:
+            record = SealMinerClient(
+                ip, port=cand.cgminer_port,
+                web_port=cand.http_port,
+                timeout=fetch_timeout).fetch_record(ip)
+        except SealMinerError as exc:
+            reason = str(exc)
+            doc.update({"boards": _unsupported(reason),
+                        "pools": _unsupported(reason),
+                        "fans": _unsupported(reason)})
+            return doc
+        boards, pools, fans = _sections_from_record(record)
         doc.update({"boards": boards, "pools": pools, "fans": fans})
         return doc
 

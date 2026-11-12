@@ -23,6 +23,9 @@ void main() {
         'jasminer',
         'braiins',
         'luxos',
+        'epic',
+        'auradine',
+        'sealminer',
       ]) {
         final set = CredSet(label: 'Kho', user: 'root', secret: 'pw', type: type);
         expect(CredSet.fromJson(set.toJson()).type, type, reason: type);
@@ -40,6 +43,9 @@ void main() {
         'jasminer',
         'braiins',
         'luxos',
+        'epic',
+        'auradine',
+        'sealminer',
       ]);
       expect(credTypeLabels['whatsminer'], 'Whatsminer (MicroBT)');
       expect(credTypeLabels['avalon'], 'Avalon (Canaan)');
@@ -47,6 +53,9 @@ void main() {
       expect(credTypeLabels['jasminer'], 'Jasminer (SunLune)');
       expect(credTypeLabels['braiins'], 'Braiins OS');
       expect(credTypeLabels['luxos'], 'LuxOS');
+      expect(credTypeLabels['epic'], 'Epic');
+      expect(credTypeLabels['auradine'], 'Auradine');
+      expect(credTypeLabels['sealminer'], 'Sealminer (Bitdeer)');
     });
 
     testWidgets('the cred editor shows the Whatsminer family label',

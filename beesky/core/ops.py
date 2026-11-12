@@ -74,11 +74,17 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import actions, inspect as inspect_mod, patterns, report
+from .auradine import AuradineClient, AuradineError
 from .bitmain import BitmainClient, BitmainError
+from .braiins import BraiinsClient, BraiinsError
 from .cgminer import CgminerClient, CgminerError
 from .dashd import DashdClient, DashdError
 from .discover import CRED_TYPES, ordered_creds, probe_host
+from .epic import EpicClient, EpicError
 from .groups import GroupStore, effective_creds
+from .iceriver import (DEFAULT_PASSWORD as ICERIVER_DEFAULT_PASSWORD,
+                       IceRiverClient, IceRiverError)
+from .sealminer import SealMinerClient, SealMinerError
 from .whatsminer import WhatsminerClient, WhatsminerError
 
 TASK_TYPES = ("rescan", "reboot", "switch_pool",
@@ -90,6 +96,15 @@ TASK_TYPES = ("rescan", "reboot", "switch_pool",
               "find_miner", "throttle",
               "reset_autotune_all", "reset_autotune_current",
               "configure_api_key", "set_preset", "change_password",
+              # v0.37.0 ePIC-only controls (docs/epic-mapping.md §4):
+              # the dashboard-verified params the generic vocabulary
+              # has no name for.
+              "set_power_target", "set_shutdown_temp",
+              "set_fan_speed", "tune",
+              # v0.38.0 SealMiner-only control
+              # (docs/vendor-docs2-mapping.md §2.4): the RPC
+              # ascset workmode form.
+              "set_mining_mode",
               "diagnostic_report")
 
 MAX_TARGETS = 1024
@@ -433,11 +448,27 @@ def _action_creds(cand, merged: list[dict] | None,
                         break
             out = {**out, "password": known}
         return out
-    if cand.source in ("whatsminer", "luxos"):
+    if cand.source == "epic":
+        # ePIC writes authenticate with a plain password
+        # (mapping §4, D-E5): the first epic-tagged set's, else
+        # "" — the handler falls back to the documented factory
+        # default "letmein" (never the merged "root" filler).
+        out = base
+        if merged:
+            for entry in ordered_creds(merged, "epic"):
+                if entry.get("password"):
+                    out = {**base, "password": entry["password"]}
+                    break
+        if "password" not in out:
+            out = {**base, "password": ""}
+        return out
+    if cand.source in ("whatsminer", "luxos", "auradine", "sealminer"):
         # Anonymous reads, authenticated writes: the first
         # family-ordered set's password is the write method (the
         # whatsminer handler falls back to the factory default
         # "admin" when there is none — see actions._wm_password;
+        # the auradine handler falls back to "admin/admin" and
+        # the sealminer handler to "seal/seal" the same way;
         # "" here is the explicit "no set" marker, never the
         # merged "root" filler).
         out = base
@@ -465,6 +496,54 @@ def _fetch_record(cand, timeout: float) -> dict:
         except WhatsminerError as exc:
             record = report.error_record(ip, str(exc),
                                          source="whatsminer")
+    elif cand.source == "braiins":
+        client = BraiinsClient(ip, port=cand.cgminer_port,
+                               timeout=fetch_timeout)
+        try:
+            record = client.fetch_record(ip)
+        except BraiinsError as exc:
+            record = report.error_record(ip, str(exc),
+                                         source="braiins")
+    elif cand.source == "iceriver":
+        client = IceRiverClient(
+            ip, port=cand.http_port, timeout=fetch_timeout,
+            password=cand.iceriver_password or ICERIVER_DEFAULT_PASSWORD)
+        try:
+            record = client.fetch_record(ip)
+        except IceRiverError as exc:
+            record = report.error_record(ip, str(exc),
+                                         source="iceriver")
+    elif cand.source == "epic":
+        # ePIC HTTP JSON API on 4028 (v0.37.0) — GET reads need
+        # no password.
+        client = EpicClient(ip, port=cand.cgminer_port,
+                            timeout=fetch_timeout)
+        try:
+            record = client.fetch_record(ip)
+        except EpicError as exc:
+            record = report.error_record(ip, str(exc),
+                                         source="epic")
+    elif cand.source == "auradine":
+        # Auradine RPC 4028 + web :8080 (v0.38.0) — reads need
+        # no auth.
+        client = AuradineClient(ip, port=cand.cgminer_port,
+                                timeout=fetch_timeout)
+        try:
+            record = client.fetch_record(ip)
+        except AuradineError as exc:
+            record = report.error_record(ip, str(exc),
+                                         source="auradine")
+    elif cand.source == "sealminer":
+        # SealMiner RPC 4028 + web CGI :80 (v0.38.0) — the web
+        # CGI lives on the HTTP port (the cli fetch's twin).
+        client = SealMinerClient(ip, port=cand.cgminer_port,
+                                 web_port=cand.http_port,
+                                 timeout=fetch_timeout)
+        try:
+            record = client.fetch_record(ip)
+        except SealMinerError as exc:
+            record = report.error_record(ip, str(exc),
+                                         source="sealminer")
     elif cand.source == "vnish":
         client = DashdClient(ip, port=cand.http_port, timeout=fetch_timeout,
                              api_key=cand.dashd_api_key,

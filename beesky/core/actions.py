@@ -117,10 +117,22 @@ Adding a command type = one handler function + one registry entry.
 
 from __future__ import annotations
 
+from .auradine import DEFAULT_PASSWORD as AURADINE_DEFAULT_PASSWORD
+from .auradine import DEFAULT_USERNAME as AURADINE_DEFAULT_USERNAME
+from .auradine import AuradineClient, AuradineError
 from .bitmain import BitmainClient, BitmainError
+from .braiins import BraiinsClient, BraiinsError
 from .cgminer import CgminerClient, CgminerError
 from .dashd import DashdClient, DashdError
+from .epic import DEFAULT_PASSWORD as EPIC_DEFAULT_PASSWORD
+from .epic import EpicClient, EpicError
+from .iceriver import (DEFAULT_PASSWORD as ICERIVER_DEFAULT_PASSWORD,
+                       IceRiverClient, IceRiverError)
 from .luxos import LuxosClient, LuxosError
+from .sealminer import DEFAULT_PASSWORD as SEALMINER_DEFAULT_PASSWORD
+from .sealminer import DEFAULT_USERNAME as SEALMINER_DEFAULT_USERNAME
+from .sealminer import MINING_MODES as SEALMINER_MINING_MODES
+from .sealminer import SealMinerClient, SealMinerError
 from .whatsminer import (DEFAULT_PASSWORD as WM_DEFAULT_PASSWORD,
                          WhatsminerClient, WhatsminerError)
 
@@ -128,7 +140,14 @@ COMMAND_TYPES = ("reboot", "switch_pool",
                  "pause_mining", "resume_mining", "restart_mining",
                  "find_miner", "throttle",
                  "reset_autotune_all", "reset_autotune_current",
-                 "configure_api_key", "set_preset", "change_password")
+                 "configure_api_key", "set_preset", "change_password",
+                 # v0.37.0 ePIC-only controls (docs/epic-mapping.md §4)
+                 "set_power_target", "set_shutdown_temp",
+                 "set_fan_speed", "tune",
+                 # v0.38.0 SealMiner-only control
+                 # (docs/vendor-docs2-mapping.md §2.4): the RPC
+                 # ascset workmode form.
+                 "set_mining_mode")
 
 NOT_SUPPORTED = "not supported for this source yet"
 
@@ -240,6 +259,156 @@ def _reboot_luxos(ip: str, cfg: dict) -> tuple[bool, str]:
 
 
 # ---------------------------------------------------------------------------
+# ePIC family actions (v0.37.0, docs/epic-mapping.md §4)
+# ---------------------------------------------------------------------------
+
+def _epic_password(raw_creds: dict | None) -> tuple[str, bool]:
+    """The password an ePIC write authenticates with.
+
+    The winning epic-tagged set's password when one was supplied;
+    otherwise the README's factory default "letmein" (mapping
+    §4, D-E5 — documented for ALL miners, not a guess). The
+    second value says the default was used, so the message can
+    tell the operator to save a set when their fleet changed
+    the password. NOTE: this reads the RAW creds dict, not the
+    merged cfg — the merge fills "root" when nothing was
+    supplied, and "root" is never an ePIC password.
+    """
+    password = (raw_creds or {}).get("password") or ""
+    if password:
+        return password, False
+    return EPIC_DEFAULT_PASSWORD, True
+
+
+def _epic_client(ip: str, cfg: dict,
+                 raw_creds: dict | None) -> EpicClient:
+    password, _used = _epic_password(raw_creds)
+    return EpicClient(ip, port=int(cfg["cgminer_port"]),
+                      password=password,
+                      timeout=float(cfg["timeout"]))
+
+
+def _epic_simple(ip: str, cfg: dict, raw_creds: dict | None,
+                 method: str, label: str,
+                 *args) -> tuple[bool, str]:
+    """One ePIC POST call, honest result."""
+    password, used_default = _epic_password(raw_creds)
+    client = _epic_client(ip, cfg, raw_creds)
+    try:
+        getattr(client, method)(*args)
+    except EpicError as exc:
+        return False, f"epic {label} failed: {exc}"
+    note = (" (default letmein password — save an epic "
+            "credential set if this fleet changed it)"
+            if used_default else "")
+    return True, f"epic accepted {label}" + note
+
+
+def _reboot_epic(ip: str, cfg: dict,
+                 raw_creds: dict | None) -> tuple[bool, str]:
+    return _epic_simple(ip, cfg, raw_creds, "reboot",
+                        "reboot (/reboot, delay 0)")
+
+
+def _switch_pool_epic(ip: str, payload: dict, cfg: dict,
+                      raw_creds: dict | None) -> tuple[bool, str]:
+    """Rewrite pool slot pool_id via POST /coin (mapping §4).
+
+    The dashboard-faithful body: the current /summary is read
+    first (coin + existing configs + unique_id), slot pool_id
+    is replaced, the rest re-sent unchanged. A bare pool_id
+    has no meaning here — the payload must carry the new pool.
+    """
+    url = payload.get("url")
+    user = payload.get("user")
+    if not url or not user:
+        return False, ("switch_pool on epic needs 'url' and "
+                       "'user' in the payload — /coin always "
+                       "rewrites the pool configs, there is no "
+                       "activate-a-configured-slot form")
+    try:
+        pool_id = int(payload.get("pool_id", 0))
+    except (TypeError, ValueError):
+        return False, (f"switch_pool: pool_id must be an integer, "
+                       f"got {payload.get('pool_id')!r}")
+    if pool_id not in (0, 1, 2):
+        return False, (f"switch_pool: epic has 3 pool slots, "
+                       f"pool_id must be 0-2, got {pool_id}")
+    client = _epic_client(ip, cfg, raw_creds)
+    try:
+        summary = client.summary()
+    except EpicError as exc:
+        return False, f"epic switch_pool failed: {exc}"
+    mining = summary.get("Mining") or {}
+    coin = mining.get("Coin") if isinstance(mining, dict) else None
+    if not isinstance(coin, str) or not coin:
+        return False, ("epic switch_pool failed: the miner's "
+                       "current coin is unknown (no Mining.Coin "
+                       "in /summary)")
+    configs = summary.get("StratumConfigs")
+    norm = []
+    if isinstance(configs, list):
+        for entry in configs:
+            if isinstance(entry, dict) and entry.get("pool"):
+                norm.append({
+                    "pool": str(entry.get("pool")),
+                    "login": str(entry.get("login") or ""),
+                    "password": str(entry.get("password") or ""),
+                })
+    while len(norm) <= pool_id:
+        norm.append({"pool": "", "login": "", "password": ""})
+    norm[pool_id] = {"pool": str(url), "login": str(user),
+                     "password": str(payload.get("password", ""))}
+    misc = summary.get("Misc") or {}
+    unique_id = bool(misc.get("Append Unique Id To Worker")) \
+        if isinstance(misc, dict) else False
+    try:
+        client.set_coin(coin, norm, unique_id=unique_id)
+    except EpicError as exc:
+        return False, f"epic switch_pool failed: {exc}"
+    _password, used_default = _epic_password(raw_creds)
+    note = (" (default letmein password — save an epic "
+            "credential set if this fleet changed it)"
+            if used_default else "")
+    return True, (f"epic pool slot {pool_id} set to {url} "
+                  f"(coin {coin})" + note)
+
+
+def _set_preset_epic(ip: str, payload: dict, cfg: dict,
+                     raw_creds: dict | None) -> tuple[bool, str]:
+    """POST /mode (mapping §4): preset from /capabilities,
+    optional power_target in watts."""
+    preset = payload.get("preset")
+    if not isinstance(preset, str) or not preset:
+        return False, "set_preset on epic needs 'preset' in the payload"
+    power = payload.get("power_target", payload.get("power"))
+    try:
+        power_int = int(power) if power is not None else None
+    except (TypeError, ValueError):
+        return False, (f"set_preset: power_target must be an integer, "
+                       f"got {power!r}")
+    return _epic_simple(ip, cfg, raw_creds, "set_mode",
+                        f"set_preset ({preset}"
+                        f"{f' @ {power_int}W' if power_int else ''})",
+                        preset, power_int)
+
+
+def _change_password_epic(ip: str, payload: dict, cfg: dict,
+                          raw_creds: dict | None) -> tuple[bool, str]:
+    """POST /password (mapping §4): param is the new password,
+    "password" the old one — the old one is the winning set's
+    (or the documented default), exactly like the dashd
+    handler's current-password rule."""
+    new_password = payload.get("new_password")
+    if not isinstance(new_password, str) or not new_password:
+        return False, ("change_password: payload needs a "
+                       "non-empty 'new_password'")
+    return _epic_simple(ip, cfg, raw_creds, "set_password",
+                        "change_password (/password)",
+                        new_password)
+
+
+# ---------------------------------------------------------------------------
 # whatsminer / luxos family actions (v0.33.0)
 # ---------------------------------------------------------------------------
 
@@ -309,6 +478,44 @@ def _curtail_luxos(ip: str, cfg: dict, action: str,
         tail = (" (a sleeping LuxOS rig wakes ONLY via resume_mining "
                 "— the curtailment state survives a reboot)")
     return True, f"luxos accepted {label} (curtail {action})" + tail
+
+
+# ---------------------------------------------------------------------------
+# braiins / iceriver family actions (v0.36.0)
+# ---------------------------------------------------------------------------
+
+def _braiins_simple(ip: str, cfg: dict, method: str,
+                    label: str) -> tuple[bool, str]:
+    """One Braiins 4028 call (pause/resume — mapping §1.4)."""
+    client = BraiinsClient(ip, port=int(cfg["cgminer_port"]),
+                           timeout=float(cfg["timeout"]))
+    try:
+        getattr(client, method)()
+    except BraiinsError as exc:
+        return False, f"braiins {label} failed: {exc}"
+    return True, f"braiins accepted {label}"
+
+
+def _find_miner_iceriver(ip: str, cfg: dict,
+                         raw_creds: dict | None) -> tuple[bool, str]:
+    """IceRiver locate (pyasic's locate(True) — mapping §2.5).
+
+    The password is the winning iceriver-tagged set's when one was
+    supplied, else the factory default — the same rule as the
+    probe (discover.py); the API needs no token, so a wrong
+    password costs nothing but a failed login attempt.
+    """
+    password = None
+    if raw_creds:
+        password = raw_creds.get("password")
+    client = IceRiverClient(
+        ip, port=int(cfg["http_port"]), timeout=float(cfg["timeout"]),
+        password=password or ICERIVER_DEFAULT_PASSWORD)
+    try:
+        client.locate(True)
+    except IceRiverError as exc:
+        return False, f"iceriver find_miner failed: {exc}"
+    return True, "iceriver accepted find_miner (locate on)"
 
 
 # ---------------------------------------------------------------------------
@@ -596,6 +803,364 @@ _DASHD_ONLY = {
 }
 
 
+def _epic_int(payload: dict, *keys: str) -> int | None:
+    """First present payload value as int, or None (a missing
+    value must fail honestly — never a silent 0)."""
+    for key in keys:
+        if key in payload and payload[key] is not None:
+            try:
+                return int(payload[key])
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def _set_power_epic(ip: str, payload: dict, cfg: dict,
+                    raw_creds: dict | None) -> tuple[bool, str]:
+    watts = _epic_int(payload, "watts", "power_target")
+    if watts is None:
+        return False, ("set_power_target on epic needs 'watts' "
+                       "(or 'power_target') in the payload")
+    return _epic_simple(ip, cfg, raw_creds, "set_power",
+                        "set_power_target (/power)", watts)
+
+
+def _set_shutdown_epic(ip: str, payload: dict, cfg: dict,
+                       raw_creds: dict | None) -> tuple[bool, str]:
+    temp = _epic_int(payload, "temp_c", "shutdowntemp")
+    if temp is None:
+        return False, ("set_shutdown_temp on epic needs 'temp_c' "
+                       "(or 'shutdowntemp') in the payload")
+    return _epic_simple(ip, cfg, raw_creds, "set_shutdown_temp",
+                        "set_shutdown_temp (/shutdowntemp)", temp)
+
+
+def _set_fan_epic(ip: str, payload: dict, cfg: dict,
+                  raw_creds: dict | None) -> tuple[bool, str]:
+    speed = _epic_int(payload, "speed", "fan_speed")
+    if speed is None:
+        return False, ("set_fan_speed on epic needs 'speed' "
+                       "(1-100) in the payload")
+    return _epic_simple(ip, cfg, raw_creds, "set_fan_speed",
+                        "set_fan_speed (/fanspeed)", speed)
+
+
+def _tune_epic(ip: str, payload: dict, cfg: dict,
+               raw_creds: dict | None) -> tuple[bool, str]:
+    clock = _epic_int(payload, "clock_mhz", "clock")
+    voltage = _epic_int(payload, "voltage_mv", "voltage")
+    if clock is None or voltage is None:
+        return False, ("tune on epic needs 'clock_mhz' and "
+                       "'voltage_mv' in the payload")
+    return _epic_simple(ip, cfg, raw_creds, "tune", "tune (/tune)",
+                        clock, voltage)
+
+
+# ---------------------------------------------------------------------------
+# Auradine family actions (v0.38.0, docs/vendor-docs2-mapping.md §1.4)
+# ---------------------------------------------------------------------------
+
+def _auradine_auth(raw_creds: dict | None) -> tuple[str, str, bool]:
+    """The (username, password, used_default) a web write
+    authenticates with.
+
+    The winning auradine-tagged set's pair when one was
+    supplied; otherwise the factory default admin/admin
+    (mapping §1.4 — documented for the fleet, not a guess).
+    NOTE: this reads the RAW creds dict, not the merged cfg
+    — the merge fills "root" when nothing was supplied, and
+    "root" is never an Auradine login.
+    """
+    raw = raw_creds or {}
+    password = raw.get("password") or ""
+    if password:
+        return (raw.get("user") or AURADINE_DEFAULT_USERNAME,
+                password, False)
+    return AURADINE_DEFAULT_USERNAME, AURADINE_DEFAULT_PASSWORD, True
+
+
+def _auradine_client(ip: str, cfg: dict,
+                     raw_creds: dict | None) -> AuradineClient:
+    username, password, _used = _auradine_auth(raw_creds)
+    return AuradineClient(ip, port=int(cfg["cgminer_port"]),
+                          username=username, password=password,
+                          timeout=float(cfg["timeout"]))
+
+
+def _auradine_simple(ip: str, cfg: dict, raw_creds: dict | None,
+                     method: str, label: str,
+                     *args) -> tuple[bool, str]:
+    """One Auradine web call, honest result."""
+    _username, _password, used_default = _auradine_auth(raw_creds)
+    client = _auradine_client(ip, cfg, raw_creds)
+    try:
+        getattr(client, method)(*args)
+    except AuradineError as exc:
+        return False, f"auradine {label} failed: {exc}"
+    note = (" (default admin/admin credentials — save an auradine "
+            "credential set if this fleet changed them)"
+            if used_default else "")
+    return True, f"auradine accepted {label}" + note
+
+
+def _reboot_auradine(ip: str, cfg: dict,
+                     raw_creds: dict | None) -> tuple[bool, str]:
+    return _auradine_simple(ip, cfg, raw_creds, "reboot",
+                            "reboot (web restart)")
+
+
+def _auradine_current_pools(client: AuradineClient) -> list[dict]:
+    """The current RPC pools as {url, user, password} dicts —
+    the password is unknowable from RPC (cgminer does not
+    return it), so an unchanged slot re-sends "" and the
+    client turns it into "x" (asic-rs build rule, mapping
+    §1.4). A failed pools read yields an empty list (the
+    switch then writes the new pool alone)."""
+    try:
+        resp = client._cg.pools()
+    except Exception:  # noqa: BLE001 — enrichment must not sink the task
+        return []
+    pools = []
+    raw = resp.get("POOLS") if isinstance(resp, dict) else None
+    if isinstance(raw, list):
+        for entry in raw:
+            if isinstance(entry, dict) and entry.get("URL"):
+                pools.append({
+                    "url": str(entry.get("URL")),
+                    "user": str(entry.get("User") or ""),
+                    "password": str(entry.get("Passwd") or ""),
+                })
+    return pools
+
+
+def _switch_pool_auradine(ip: str, payload: dict, cfg: dict,
+                          raw_creds: dict | None) -> tuple[bool, str]:
+    """Rewrite pool slot pool_id via POST updatepools
+    (mapping §1.4): the current RPC pools are read first,
+    slot pool_id is replaced, the rest re-sent unchanged
+    (empty URLs dropped, asic-rs's own parse rule)."""
+    url = payload.get("url")
+    user = payload.get("user")
+    if not url or not user:
+        return False, ("switch_pool on auradine needs 'url' and "
+                       "'user' in the payload — updatepools always "
+                       "rewrites the pool list, there is no "
+                       "activate-a-configured-slot form")
+    try:
+        pool_id = int(payload.get("pool_id", 0))
+    except (TypeError, ValueError):
+        return False, (f"switch_pool: pool_id must be an integer, "
+                       f"got {payload.get('pool_id')!r}")
+    if pool_id < 0 or pool_id > 2:
+        return False, (f"switch_pool: auradine has 3 pool slots, "
+                       f"pool_id must be 0-2, got {pool_id}")
+    client = _auradine_client(ip, cfg, raw_creds)
+    norm = _auradine_current_pools(client)
+    while len(norm) <= pool_id:
+        norm.append({"url": "", "user": "", "password": ""})
+    norm[pool_id] = {"url": str(url), "user": str(user),
+                     "password": str(payload.get("password", ""))}
+    norm = [entry for entry in norm if entry.get("url")]
+    try:
+        client.set_pools(norm)
+    except AuradineError as exc:
+        return False, f"auradine switch_pool failed: {exc}"
+    _u, _p, used_default = _auradine_auth(raw_creds)
+    note = (" (default admin/admin credentials — save an auradine "
+            "credential set if this fleet changed them)"
+            if used_default else "")
+    return True, (f"auradine pool slot {pool_id} set to {url} "
+                  f"(user {user}) via updatepools" + note)
+
+
+def _set_power_auradine(ip: str, payload: dict, cfg: dict,
+                        raw_creds: dict | None) -> tuple[bool, str]:
+    watts = _epic_int(payload, "watts", "power_target")
+    if watts is None:
+        return False, ("set_power_target on auradine needs 'watts' "
+                       "(or 'power_target') in the payload")
+    return _auradine_simple(ip, cfg, raw_creds, "set_power_limit",
+                            "set_power_target (web mode custom/power)",
+                            watts)
+
+
+# ---------------------------------------------------------------------------
+# SealMiner family actions (v0.38.0, docs/vendor-docs2-mapping.md §2.4)
+# ---------------------------------------------------------------------------
+
+def _sealminer_auth(raw_creds: dict | None) -> tuple[str, str, bool]:
+    """The (username, password, used_default) a web/RPC write
+    authenticates with — the winning sealminer-tagged set's
+    pair when supplied, else the factory default seal/seal
+    (mapping §2.4, D-SE2). Reads the RAW creds dict (the
+    merge fills "root", which is never a SealMiner login)."""
+    raw = raw_creds or {}
+    password = raw.get("password") or ""
+    if password:
+        return (raw.get("user") or SEALMINER_DEFAULT_USERNAME,
+                password, False)
+    return SEALMINER_DEFAULT_USERNAME, SEALMINER_DEFAULT_PASSWORD, True
+
+
+def _sealminer_client(ip: str, cfg: dict,
+                       raw_creds: dict | None) -> SealMinerClient:
+    username, password, _used = _sealminer_auth(raw_creds)
+    # The web CGI lives on the HTTP port (80 on a real miner);
+    # cfg["http_port"] is the job's HTTP port, which the tests
+    # override to the mock's port.
+    return SealMinerClient(ip, port=int(cfg["cgminer_port"]),
+                           web_port=int(cfg["http_port"]),
+                           username=username, password=password,
+                           timeout=float(cfg["timeout"]))
+
+
+def _sealminer_simple(ip: str, cfg: dict, raw_creds: dict | None,
+                      method: str, label: str,
+                      *args) -> tuple[bool, str]:
+    """One SealMiner call, honest result."""
+    _username, _password, used_default = _sealminer_auth(raw_creds)
+    client = _sealminer_client(ip, cfg, raw_creds)
+    try:
+        getattr(client, method)(*args)
+    except SealMinerError as exc:
+        return False, f"sealminer {label} failed: {exc}"
+    note = (" (default seal/seal credentials — save a sealminer "
+            "credential set if this fleet changed them)"
+            if used_default else "")
+    return True, f"sealminer accepted {label}" + note
+
+
+def _reboot_sealminer(ip: str, cfg: dict,
+                      raw_creds: dict | None) -> tuple[bool, str]:
+    return _sealminer_simple(ip, cfg, raw_creds, "reboot",
+                             "reboot (web reboot.php)")
+
+
+def _resume_sealminer(ip: str, payload: dict, cfg: dict,
+                      raw_creds: dict | None) -> tuple[bool, str]:
+    """Resume: the client's own already-running guard (asic-rs
+    Resume) is reported as a success without a restart."""
+    client = _sealminer_client(ip, cfg, raw_creds)
+    try:
+        reply = client.resume()
+    except SealMinerError as exc:
+        return False, f"sealminer resume_mining failed: {exc}"
+    if isinstance(reply, dict) and reply.get("already_running"):
+        return True, ("sealminer already hashing (PM State Running "
+                      "— no restart sent)")
+    return True, "sealminer accepted resume_mining (RPC restart)"
+
+
+def _sealminer_current_pools(client: SealMinerClient) -> list[dict]:
+    """The current RPC pools as {url, user, password} dicts
+    (same unknowable-password caveat as Auradine — the
+    client sends "" for an unchanged slot)."""
+    try:
+        resp = client._cg.pools()
+    except Exception:  # noqa: BLE001 — enrichment must not sink the task
+        return []
+    pools = []
+    raw = resp.get("POOLS") if isinstance(resp, dict) else None
+    if isinstance(raw, list):
+        for entry in raw:
+            if isinstance(entry, dict) and entry.get("URL"):
+                pools.append({
+                    "url": str(entry.get("URL")),
+                    "user": str(entry.get("User") or ""),
+                    "password": str(entry.get("Passwd") or ""),
+                })
+    return pools
+
+
+def _switch_pool_sealminer(ip: str, payload: dict, cfg: dict,
+                           raw_creds: dict | None) -> tuple[bool, str]:
+    """Rewrite pool slot pool_id via RPC updatepools + web
+    reboot (mapping §2.4): the current RPC pools are read
+    first, slot pool_id is replaced, the rest re-sent
+    unchanged. No evidenced slot cap — pool_id may address
+    any existing slot or append one past the end."""
+    url = payload.get("url")
+    user = payload.get("user")
+    if not url or not user:
+        return False, ("switch_pool on sealminer needs 'url' and "
+                       "'user' in the payload — updatepools always "
+                       "rewrites the pool list, there is no "
+                       "activate-a-configured-slot form")
+    try:
+        pool_id = int(payload.get("pool_id", 0))
+    except (TypeError, ValueError):
+        return False, (f"switch_pool: pool_id must be an integer, "
+                       f"got {payload.get('pool_id')!r}")
+    if pool_id < 0:
+        return False, (f"switch_pool: pool_id must be >= 0, "
+                       f"got {pool_id}")
+    client = _sealminer_client(ip, cfg, raw_creds)
+    norm = _sealminer_current_pools(client)
+    if pool_id > len(norm):
+        return False, (f"switch_pool: sealminer has {len(norm)} "
+                       f"pool(s), pool_id {pool_id} is past the end "
+                       f"(append is pool_id == {len(norm)})")
+    while len(norm) <= pool_id:
+        norm.append({"url": "", "user": "", "password": ""})
+    norm[pool_id] = {"url": str(url), "user": str(user),
+                     "password": str(payload.get("password", ""))}
+    norm = [entry for entry in norm if entry.get("url")]
+    try:
+        client.set_pools(norm)
+    except SealMinerError as exc:
+        return False, f"sealminer switch_pool failed: {exc}"
+    _u, _p, used_default = _sealminer_auth(raw_creds)
+    note = (" (default seal/seal credentials — save a sealminer "
+            "credential set if this fleet changed them)"
+            if used_default else "")
+    return True, (f"sealminer pool slot {pool_id} set to {url} "
+                  f"(user {user}) via updatepools + reboot" + note)
+
+
+def _set_power_sealminer(ip: str, payload: dict, cfg: dict,
+                         raw_creds: dict | None) -> tuple[bool, str]:
+    watts = _epic_int(payload, "watts", "power_target")
+    if watts is None:
+        return False, ("set_power_target on sealminer needs 'watts' "
+                       "(or 'power_target') in the payload")
+    return _sealminer_simple(ip, cfg, raw_creds, "set_power_limit",
+                             "set_power_target (ascset powerlimit)",
+                             watts)
+
+
+def _set_mining_mode_sealminer(ip: str, payload: dict, cfg: dict,
+                               raw_creds: dict | None) -> tuple[bool, str]:
+    """Set the mining mode via RPC ascset workmode (mapping
+    §2.4). low_power is A2-only (asic-rs set_tuning_config)
+    — the model is read from devdetails first, and an
+    unreadable model refuses low_power rather than guessing."""
+    mode = payload.get("mode")
+    if mode not in SEALMINER_MINING_MODES:
+        return False, (f"set_mining_mode on sealminer needs 'mode' "
+                       f"one of {list(SEALMINER_MINING_MODES)}, "
+                       f"got {mode!r}")
+    if mode == "low_power":
+        client = _sealminer_client(ip, cfg, raw_creds)
+        try:
+            devdetails = client._cg.command("devdetails")
+        except Exception as exc:  # noqa: BLE001 — gate must fail closed
+            return False, (f"set_mining_mode low_power refused: "
+                           f"cannot confirm this is an A2 ({exc})")
+        model = None
+        entries = devdetails.get("DEVDETAILS") \
+            if isinstance(devdetails, dict) else None
+        if isinstance(entries, list) and entries \
+                and isinstance(entries[0], dict):
+            model = entries[0].get("Model")
+        if model != "A2":
+            return False, ("Low-power mining mode is only supported "
+                           f"on SealMiner A2 (this miner reports "
+                           f"model {model!r})")
+    return _sealminer_simple(ip, cfg, raw_creds, "set_mining_mode",
+                             f"set_mining_mode (ascset workmode {mode})",
+                             mode)
+
+
 # Family actions beyond dashd (v0.33.0) — keyed (source, command);
 # each handler is (ip, payload, cfg, raw_creds) -> (ok, message).
 # Whatsminer handlers read the password from raw_creds (see
@@ -613,6 +1178,45 @@ _FAMILY_ONLY = {
         ip, c, "sleep", "pause_mining (curtail sleep)"),
     ("luxos", "resume_mining"): lambda ip, p, c, r: _curtail_luxos(
         ip, c, "wakeup", "resume_mining (curtail wakeup)"),
+    ("braiins", "pause_mining"): lambda ip, p, c, r: _braiins_simple(
+        ip, c, "pause", "pause_mining (pause)"),
+    ("braiins", "resume_mining"): lambda ip, p, c, r: _braiins_simple(
+        ip, c, "resume", "resume_mining (resume)"),
+    ("iceriver", "find_miner"): lambda ip, p, c, r: _find_miner_iceriver(
+        ip, c, r),
+    ("epic", "pause_mining"): lambda ip, p, c, r: _epic_simple(
+        ip, c, r, "stop_mining", "pause_mining (/miner stop)"),
+    ("epic", "restart_mining"): lambda ip, p, c, r: _epic_simple(
+        ip, c, r, "softreboot", "restart_mining (/softreboot)"),
+    ("epic", "find_miner"): lambda ip, p, c, r: _epic_simple(
+        ip, c, r, "identify", "find_miner (/identify on)"),
+    ("epic", "set_preset"): _set_preset_epic,
+    ("epic", "change_password"): _change_password_epic,
+    ("epic", "set_power_target"): _set_power_epic,
+    ("epic", "set_shutdown_temp"): _set_shutdown_epic,
+    ("epic", "set_fan_speed"): _set_fan_epic,
+    ("epic", "tune"): _tune_epic,
+    ("auradine", "pause_mining"): lambda ip, p, c, r: _auradine_simple(
+        ip, c, r, "set_sleep", "pause_mining (web mode sleep on)",
+        True),
+    ("auradine", "resume_mining"): lambda ip, p, c, r: _auradine_simple(
+        ip, c, r, "set_sleep", "resume_mining (web mode sleep off)",
+        False),
+    ("auradine", "restart_mining"): lambda ip, p, c, r: _auradine_simple(
+        ip, c, r, "restart_mining",
+        "restart_mining (web restart gcminer)"),
+    ("auradine", "find_miner"): lambda ip, p, c, r: _auradine_simple(
+        ip, c, r, "set_fault_light", "find_miner (web led code 3)",
+        True),
+    ("auradine", "set_power_target"): _set_power_auradine,
+    ("sealminer", "pause_mining"): lambda ip, p, c, r: _sealminer_simple(
+        ip, c, r, "pause", "pause_mining (ascset 0,suspend)"),
+    ("sealminer", "resume_mining"): _resume_sealminer,
+    ("sealminer", "find_miner"): lambda ip, p, c, r: _sealminer_simple(
+        ip, c, r, "set_fault_light", "find_miner (web led_conf on)",
+        True),
+    ("sealminer", "set_power_target"): _set_power_sealminer,
+    ("sealminer", "set_mining_mode"): _set_mining_mode_sealminer,
 }
 
 
@@ -643,12 +1247,27 @@ def execute(ip: str, source: str | None, command_type: str,
                 return _reboot_whatsminer(ip, cfg, creds)
             if source == "luxos":
                 return _reboot_luxos(ip, cfg)
+            if source == "epic":
+                return _reboot_epic(ip, cfg, creds)
+            if source == "auradine":
+                # G-AU closed in v0.38.0: web POST restart
+                # (mapping §1.4).
+                return _reboot_auradine(ip, cfg, creds)
+            if source == "sealminer":
+                # Web GET reboot.php (mapping §2.4).
+                return _reboot_sealminer(ip, cfg, creds)
             return False, f"reboot: unknown miner source {source!r}"
         if command_type == "switch_pool":
             if source == "vnish":
                 return _switch_pool_dashd(ip, payload, cfg)
             if source == "whatsminer":
                 return _switch_pool_whatsminer(ip, payload, cfg, creds)
+            if source == "epic":
+                return _switch_pool_epic(ip, payload, cfg, creds)
+            if source == "auradine":
+                return _switch_pool_auradine(ip, payload, cfg, creds)
+            if source == "sealminer":
+                return _switch_pool_sealminer(ip, payload, cfg, creds)
             return False, (f"switch_pool is {NOT_SUPPORTED} "
                            f"(source: {source or 'unknown'})")
         family = _FAMILY_ONLY.get((source, command_type))
@@ -663,3 +1282,4 @@ def execute(ip: str, source: str | None, command_type: str,
         return False, f"unknown command type {command_type!r}"
     except Exception as exc:  # noqa: BLE001 — executors must never raise
         return False, f"{command_type} executor error: {exc}"
+

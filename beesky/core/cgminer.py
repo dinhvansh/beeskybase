@@ -145,16 +145,26 @@ class CgminerClient:
             resp = self.pools()
         except Exception:  # noqa: BLE001 — enrichment must not sink a scan
             return None
-        status = resp.get("STATUS")
-        if isinstance(status, list) and status and \
-                isinstance(status[0], dict) and \
-                status[0].get("STATUS") == "E":
-            return None
-        raw = resp.get("POOLS")
-        if not isinstance(raw, list):
-            return None
-        return [{
-            "url": entry.get("URL"),
-            "worker": entry.get("User"),
-            "status": entry.get("Status"),
-        } for entry in raw if isinstance(entry, dict)]
+        return pools_normalised_from(resp)
+
+
+def pools_normalised_from(resp: dict) -> list[dict] | None:
+    """Normalise an already-fetched `pools` reply (same shape as
+    pools_normalised). Adapters that already hold the reply — e.g.
+    Braiins, whose fetch reads pools alongside the other sections —
+    use this instead of paying for a second call."""
+    if not isinstance(resp, dict):
+        return None
+    status = resp.get("STATUS")
+    if isinstance(status, list) and status and \
+            isinstance(status[0], dict) and \
+            status[0].get("STATUS") == "E":
+        return None
+    raw = resp.get("POOLS")
+    if not isinstance(raw, list):
+        return None
+    return [{
+        "url": entry.get("URL"),
+        "worker": entry.get("User"),
+        "status": entry.get("Status"),
+    } for entry in raw if isinstance(entry, dict)]

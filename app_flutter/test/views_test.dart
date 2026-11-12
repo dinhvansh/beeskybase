@@ -322,7 +322,7 @@ void main() {
 
       await tester.tap(find.text('Cài đặt'));
       await tester.pumpAndSettle();
-      expect(find.text('BeeSky v0.35.0'), findsWidgets);
+      expect(find.text('BeeSky v0.38.0'), findsWidgets);
       // The credential count lives on the Tài khoản tab now.
       await tester.tap(find.text('Tài khoản'));
       await tester.pumpAndSettle();

@@ -1,9 +1,9 @@
 name: beesky_agent_app
 description: "BeeSky Agent — Cấu hình agent tại trại (bản Flutter, stage 2)."
 publish_to: "none"
-# Mirror of the Python package version (0.35.0) + sixth Flutter build
+# Mirror of the Python package version (0.36.0) + seventh Flutter build
 # of the agent app (its own build counter, like the main app's +N).
-version: 0.35.0+6
+version: 0.38.0+9
 
 environment:
   sdk: ">=3.5.0 <4.0.0"

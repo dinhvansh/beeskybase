@@ -228,7 +228,7 @@ void main() {
               onOpenCreds: () {},
               onOpenGroups: () {},
               ticketsDir: '(mock) tickets',
-              coreVersion: '0.35.0',
+              coreVersion: '0.38.0',
               sidecarMissing: false,
               dataDir: '(mock) data',
               storeFiles: const [

@@ -16,7 +16,7 @@ import 'theme.dart';
 ///
 ///   [{"label": "...", "user": "...", "password": "...",
 ///     "type": "any" | "stock" | "vnish" | "whatsminer" | "avalon" |
-///      "iceriver" | "jasminer" | "braiins" | "luxos"}, ...]
+///      "iceriver" | "jasminer" | "braiins" | "luxos" | "epic"}, ...]
 ///
 /// "type" is the machine-family tag: the core tries sets tagged for
 /// the detected family first, then "any", then the rest (a wrong tag
@@ -73,6 +73,8 @@ class CredSet {
 /// docs/vendor-coverage-mapping.md §6 (v0.30): detection exists
 /// for whatsminer + avalon; iceriver / jasminer / braiins / luxos
 /// are tag-only families until their contracts are evidenced.
+/// v0.37 adds epic (docs/epic-mapping.md) — detected + read +
+/// controlled from Epic's own published API docs + dashboard.
 const credTypeLabels = <String, String>{
   'any': 'Mọi loại máy',
   'stock': 'Antminer gốc',
@@ -83,6 +85,9 @@ const credTypeLabels = <String, String>{
   'jasminer': 'Jasminer (SunLune)',
   'braiins': 'Braiins OS',
   'luxos': 'LuxOS',
+  'epic': 'Epic',
+  'auradine': 'Auradine',
+  'sealminer': 'Sealminer (Bitdeer)',
 };
 
 /// Persistence for the creds file.
