@@ -249,3 +249,15 @@ Mở **Hiển thị trên ô máy** để bật/tắt Worker và Khách sở h�
 Bấm máy → **Gán khách** → chọn khách có sẵn. Nếu chưa có, chọn **Tạo khách mới**, nhập tên và **Tạo & chọn khách**, sau đó **Lưu gán khách**. Khách được lưu trong danh sách riêng của xưởng, gán bằng ID; bỏ gán không xóa khách. Một khách có thể có nhiều máy, khách trùng tên được chặn để chọn lại khách đã có. Không sửa cấu hình pool hoặc tạo tài khoản đăng nhập cho khách.
 
 Thông tin khách giữ theo ID máy khi tháo/đổi kệ; dữ liệu hiện chỉ lưu trong phiên xem.
+
+## Kế hoạch điện trạm trong bản xem trước
+
+Trang Điện năng nhận model máy đã xếp vào kệ của xưởng, gộp mọi tầng. Hỗ trợ tham chiếu BITMAIN S19 Pro 110T (3250 W), S21 Hyd 335/319/302T (5360/5104/4832 W); tên chưa có biến thể được ghi rõ là dùng bản tham chiếu. Model khác cần nhập W xác nhận theo tem; không đoán từ tên gần giống.
+
+- Công suất tác dụng = kVA × PF (hoặc nhập trực tiếp kW).
+- Tải mục tiêu = công suất tác dụng × mức tải mục tiêu (%).
+- Tải dự kiến = tổng max(W định mức, W máy báo về hợp lệ) × (1 + dự phòng %) / 1000 + phụ tải phụ kW.
+- Số máy thêm = làm tròn xuống phần tải mục tiêu còn lại / tải mỗi máy có dự phòng.
+- Máy chưa xếp không cộng tải; máy offline còn trong kệ vẫn cộng. Model chưa xác nhận định mức chặn đề xuất thêm máy, kể cả có số đo tức thời. Số đo có timestamp quá 10 phút bị loại; số đo không timestamp chưa xác minh được độ mới.
+
+Cấu hình và W xác nhận tách theo xưởng, chỉ lưu trong phiên của bản preview. Chưa nối dữ liệu quét trực tiếp/backend và chưa tính bảo vệ điện, nhánh cấp hay cân pha. Nguồn thông số chính hãng được dẫn ngay trong bảng.
