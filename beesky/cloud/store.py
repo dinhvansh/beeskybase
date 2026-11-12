@@ -1119,6 +1119,6 @@ class CloudStore:
             if not snap:
                 continue
             for record in snap[1]:
-                merged.append({**record, "site": agent["site"]})
+                merged.append({**record, "site": agent["site"], "snapshot_ts": snap[0], "agent_id": agent["id"]})
         merged.sort(key=lambda r: (r["site"], r.get("ip") or ""))
         return merged

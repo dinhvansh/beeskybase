@@ -35,7 +35,7 @@ class PowerPlanner {
     const limitKw=config?capacityKw*config.target/100:null;
     const loadKw=config?knownW/1000*(1+config.margin/100)+config.auxKw:knownW/1000;
     const remainingKw=config?limitKw-loadKw:null;
-    return {rows,unknown,knownW,config,capacityKw,limitKw,loadKw,remainingKw,unplaced:devices.filter(d=>d.site===site&&!ids.has(d.id)).length,complete:!!config&&!unknown.length};
+    return {site,rows,unknown,knownW,config,capacityKw,limitKw,loadKw,remainingKw,unplaced:devices.filter(d=>d.site===site&&!ids.has(d.id)).length,complete:!!config&&!unknown.length};
   }
   fit(report,watts){if(!report.complete||!Number.isFinite(watts)||watts<=0)return null;return Math.max(0,Math.floor((report.remainingKw*1000+1e-8)/(watts*(1+report.config.margin/100))))}
   clear(){this.stations.clear();this.overrides.clear()}

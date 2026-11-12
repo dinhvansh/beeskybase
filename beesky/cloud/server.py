@@ -286,6 +286,8 @@ def make_handler(store: CloudStore, dashboard_html: bytes,
             query = parse_qs(parsed.query)
             if path == "/":
                 self._send(200, dashboard_html, "text/html; charset=utf-8")
+            elif path == "/api/power-plan":
+                self._send_json(200, json.loads(store.get_setting("power_plan", '{"revision":0,"data":null}')))
             elif path == "/api/sites":
                 now = time.time()
                 self._send_json(200, {
@@ -433,6 +435,37 @@ def make_handler(store: CloudStore, dashboard_html: bytes,
             elif path == "/api/pool-config":
                 if self._viewer_gate(path):
                     self._handle_upsert_pool_config()
+            elif path == "/api/power-plan":
+                if not self._viewer_gate(path):
+                    return
+                body = self._read_json_body()
+                if body is None:
+                    self._send_json(400, {"error": "invalid JSON body"})
+                    return
+                if not isinstance(body.get("data"), dict) or len(json.dumps(body)) > 2000000:
+                    self._send_json(400, {"error": "Invalid or oversized plan"})
+                    return
+                plan = body["data"]
+                try:
+                    json.dumps(plan, allow_nan=False)
+                    valid = (plan.get("version") == 1 and isinstance(plan.get("stations"), list)
+                             and isinstance(plan.get("farms"), list) and isinstance(plan.get("layout"), dict)
+                             and isinstance(plan["layout"].get("racks"), list)
+                             and isinstance(plan["layout"].get("devices"), list))
+                except (ValueError, TypeError):
+                    valid = False
+                if not valid:
+                    self._send_json(400, {"error": "invalid plan schema"})
+                    return
+                with store._lock, store._db:
+                    row = store._db.execute("SELECT value FROM settings WHERE key = 'power_plan'").fetchone()
+                    current = json.loads(row["value"]) if row else {"revision": 0}
+                    if body.get("revision") != current["revision"]:
+                        self._send_json(409, {"error": "Plan changed; reload before saving"})
+                        return
+                    result = {"revision": current["revision"] + 1, "data": body["data"]}
+                    store._db.execute("INSERT INTO settings(key,value) VALUES('power_plan',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (json.dumps(result, allow_nan=False),))
+                self._send_json(200, result)
             elif path == "/api/settings":
                 if self._viewer_gate(path):
                     self._handle_update_settings()

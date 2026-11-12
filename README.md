@@ -261,3 +261,22 @@ Trang Điện năng nhận model máy đã xếp vào kệ của xưởng, gộp
 - Máy chưa xếp không cộng tải; máy offline còn trong kệ vẫn cộng. Model chưa xác nhận định mức chặn đề xuất thêm máy, kể cả có số đo tức thời. Số đo có timestamp quá 10 phút bị loại; số đo không timestamp chưa xác minh được độ mới.
 
 Cấu hình và W xác nhận tách theo xưởng, chỉ lưu trong phiên của bản preview. Chưa nối dữ liệu quét trực tiếp/backend và chưa tính bảo vệ điện, nhánh cấp hay cân pha. Nguồn thông số chính hãng được dẫn ngay trong bảng.
+
+## Điện trạm: lưu dữ liệu, agent và nhánh/pha
+
+Chạy bản giao diện có API thật từ thư mục repository:
+
+```powershell
+python -m tools.serve_preview
+```
+
+Mở `http://127.0.0.1:8791/#/energy`. Có thể đặt `BEESKY_PREVIEW_PORT` để đổi cổng; `BEESKY_CLOUD_PASSWORD` dùng cơ chế đăng nhập quản trị hiện có. Máy chủ bind localhost. SQLite nằm tại `work/beesky-preview.db`; sao lưu file này khi máy chủ đã dừng. Không đưa database/mã agent lên Git.
+
+- Tự lưu trạm, W xác nhận, tủ/nhánh, nguồn cấp, pha từng máy và bố trí kệ trên máy chủ; trình duyệt có bản dự phòng. API `/api/power-plan` dùng revision, từ chối ghi đè khi cửa sổ khác đã sửa (409). Tải lại để đọc bản mới nhất trước khi tiếp tục sửa. Đây là workspace quản trị chung theo cơ chế backend hiện có, chưa phải hệ thống nhiều tenant.
+- Trong **Thiết lập nguồn điện → Kết nối agent**, chọn site của agent hoặc tạo mã agent mới (chỉ hiện một lần). Agent tại LAN chạy theo hướng dẫn `python -m beesky agent <target> --cloud http://<dia-chi-cloud> --key <key> --site <site>`; máy chủ localhost cần được triển khai/bind qua cấu hình cloud phù hợp trước khi agent trên máy khác truy cập. Không tự quét mạng từ trình duyệt.
+- Kết nối source sẽ bỏ máy mẫu khỏi xưởng đó và làm trống các ô tương ứng; kệ được giữ lại. Máy mới đi vào danh sách chưa xếp; xếp đúng kệ để tính tải. API `/api/miners` bổ sung `snapshot_ts` và `agent_id`; cập nhật model, W, nhiệt độ từ bản quét mỗi 30 giây khi app mở. Không suy diễn máy mất kết nối là đã ngắt điện.
+- Cây điện: trạm → tủ (giới hạn tổng kW) → nhánh (giới hạn kW A/B/C) → kệ (pha mặc định) → máy (ghi đè pha riêng). ABC chỉ dành cho tải thực sự đấu 3 pha, chia W đều ba pha. S21 Hydro gán một pha và S19 Pro gán ABC đều được cảnh báo. Nhập giới hạn dựa trên thiết kế điện thực tế; ứng dụng không tự chuyển pha hay điều khiển thiết bị điện.
+- Bảng báo tải dự kiến có dự phòng; lệch tải = độ lệch pha lớn nhất so với trung bình / trung bình. Cảnh báo khi vượt mức trạm/tủ/pha, lệch tải trên 20%, chưa gán nhánh/pha hoặc thiếu định mức. Phụ tải phụ cộng ở trạm, chưa phân bổ vào nhánh, được ghi rõ trên UI.
+- Cảnh báo tăng điện: hai số đo có timestamp mới khác nhau, tăng >20% và ≥100 W; hết hiệu lực sau 10 phút. Cảnh báo trong app đang mở; chưa gửi email/Telegram và chưa có tiến trình cảnh báo khi đóng app.
+
+Đã kiểm tra API ingest bằng dữ liệu giả lập qua cơ chế agent thật, lưu SQLite, cách ly site, gate đăng nhập và xung đột revision; chưa kiểm chứng với máy đào vật lý tại xưởng.
