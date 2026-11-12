@@ -242,8 +242,10 @@ Bấm máy → **Tháo khỏi kệ** để trả máy về danh sách chưa xế
 
 Tháo chỉ làm trống ô kệ, giữ ID, serial, nhãn, nhóm và vị trí cuối cùng để đối chiếu. Máy ngừng sử dụng không được xếp lại cho đến khi cập nhật tình trạng; gợi ý xếp theo IP chỉ lấy máy sẵn sàng. Máy đang hỏng/sửa/ngừng sử dụng không phát hiệu ứng đào. Tình trạng nhập thủ công không thay đổi kết nối báo về và không gửi lệnh tới thiết bị. Dữ liệu hiện chỉ lưu trong phiên xem.
 
-### Worker và khách sở hữu trên sơ đồ 2D
+### Worker từ máy và danh sách khách sở hữu trên sơ đồ 2D
 
-Mở **Hiển thị trên ô máy** để bật/tắt riêng Worker và Khách sở hữu. Bấm ô máy (cả khi đang sắp xếp) → **Worker & khách sở hữu** để nhập worker hiển thị và tên/mã khách. Thẻ máy chưa xếp cũng có thao tác này. Tên dài rút gọn trên ô, xem đầy đủ trong chi tiết hoặc tooltip.
+Mở **Hiển thị trên ô máy** để bật/tắt Worker và Khách sở hữu. Worker chỉ đọc từ trường `worker` hoặc dữ liệu pool `pools` / `POOLS` của máy (ưu tiên pool đang hoạt động), không dùng nhãn nhập tay và không tự tạo từ IP/serial. Bản preview hiện chưa kết nối luồng dữ liệu agent, nên khi thiếu trường này sẽ hiện **Chưa nhận dữ liệu**.
 
-Thông tin theo ID máy, giữ khi tháo/đổi kệ, tìm kiếm được qua tên khách hoặc worker. Đây là nhãn thủ công, chưa liên kết tài khoản khách hoặc thay cấu hình pool. Máy chưa gán được ghi rõ; dữ liệu và tùy chọn hiện vẫn chỉ lưu trong phiên xem.
+Bấm máy → **Gán khách** → chọn khách có sẵn. Nếu chưa có, chọn **Tạo khách mới**, nhập tên và **Tạo & chọn khách**, sau đó **Lưu gán khách**. Khách được lưu trong danh sách riêng của xưởng, gán bằng ID; bỏ gán không xóa khách. Một khách có thể có nhiều máy, khách trùng tên được chặn để chọn lại khách đã có. Không sửa cấu hình pool hoặc tạo tài khoản đăng nhập cho khách.
+
+Thông tin khách giữ theo ID máy khi tháo/đổi kệ; dữ liệu hiện chỉ lưu trong phiên xem.
