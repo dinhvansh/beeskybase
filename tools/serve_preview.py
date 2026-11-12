@@ -14,7 +14,11 @@ def handler(store, root, password=None):
     class Preview(base):
         def do_GET(self):
             path = urlparse(self.path).path
-            if path == '/' or path.startswith('/api/') or path in ('/login', '/logout', '/mcp'):
+            if path == '/':
+                if self._viewer_gate(path):
+                    self._send(200, (root / 'index.html').read_bytes(), 'text/html; charset=utf-8', {'Cache-Control':'no-store'})
+                return
+            if path.startswith('/api/') or path in ('/login', '/logout', '/mcp'):
                 return super().do_GET()
             if not self._viewer_gate(path):
                 return
