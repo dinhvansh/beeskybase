@@ -1,0 +1,10 @@
+**
+!cloud_service/
+!cloud_service/**
+!cloud-preview/
+!cloud-preview/*.css
+!cloud-preview/assets/
+!cloud-preview/assets/**
+cloud_service/.env
+cloud_service/**/__pycache__/
+cloud_service/collected_static/

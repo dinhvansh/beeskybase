@@ -25,3 +25,5 @@ output/playwright/
 
 # Local model conversion inputs and portable tools
 /work/
+/cloud_service/.env
+/cloud_service/collected_static/

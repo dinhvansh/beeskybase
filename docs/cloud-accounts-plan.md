@@ -6,7 +6,7 @@ Ngày: 11/11/2026. Nguồn: dinhvansh/beeskybase, commit dcebb90 (v0.23.0).
 
 Người dùng tự đăng ký, xác thực email, tạo tổ chức và trại. Mỗi tổ chức chỉ truy cập dữ liệu của mình. Chủ sở hữu có thể mời người khác với quyền phù hợp. Web cloud là phạm vi chính; công cụ quét, desktop và sửa agent để giai đoạn sau.
 
-**Điểm dừng hiện tại:** hoàn thành kế hoạch và giao diện local dùng dữ liệu mẫu để chủ dự án duyệt. Chưa mở đăng ký thật, chưa gửi email, chưa thay backend production hoặc triển khai công khai. Sau khi duyệt giao diện mới triển khai các giai đoạn backend bên dưới.
+**Cập nhật 12/11/2026:** chủ dự án đã duyệt giao diện và yêu cầu triển khai backend thật. Dịch vụ Django/PostgreSQL riêng đã bắt đầu; phạm vi và cách chạy xem [cloud-backend.md](cloud-backend.md). Chưa triển khai công khai hoặc tự nhập dữ liệu cũ.
 
 ## 2. Bản duyệt giao diện
 
