@@ -43,18 +43,26 @@ def me(request):
 def register(request):
     strict(request.data,['email','password','name']);email=email_input(request.data)
     throttle(request,'register',email,limit=5,seconds=3600)
+    def existing_account_response(existing):
+        needs_verification=existing.is_active and not existing.email_verified_at
+        return Response({'code':'email_exists','message':'Email này đã có tài khoản. '+('Tài khoản chưa xác thực email.' if needs_verification else 'Bạn có thể đăng nhập hoặc đặt lại mật khẩu.'),'nextAction':'verify' if needs_verification else 'login'},status=409)
+    existing=User.objects.filter(email=email).first()
+    if existing:
+        return existing_account_response(existing)
     name=clean_text(request.data.get('name'),'name')
     user=User(email=email,display_name=name)
     validate_new_password(request.data.get('password'),user)
-    if not User.objects.filter(email=email).exists():
-        try:
-            with transaction.atomic():
-                user=User.objects.create_user(email,request.data['password'],display_name=name)
-                send_token(user,'verify')
-                audit(request,'account.registered',target=user.id)
-        except IntegrityError:
-            pass  # Same generic response on concurrent registration/existing email.
-    return Response({'message':'Nếu email có thể đăng ký, hướng dẫn xác thực đã được đưa vào hàng đợi gửi.'},status=202)
+    try:
+        with transaction.atomic():
+            user=User.objects.create_user(email,request.data['password'],display_name=name)
+            send_token(user,'verify')
+            audit(request,'account.registered',target=user.id)
+    except IntegrityError:
+        existing=User.objects.filter(email=email).first()
+        if existing:
+            return existing_account_response(existing)
+        raise
+    return Response({'message':'Tài khoản đã được tạo. Hướng dẫn xác thực đã được đưa vào hàng đợi gửi.'},status=202)
 
 @api_view(['POST'])
 @permission_classes([AllowAny])

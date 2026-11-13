@@ -54,9 +54,18 @@ class AccountTests(TestCase):
     def test_login_rate_limit_and_casefolded_email_uniqueness(self):
         u=user('lower@example.com')
         response=self.client.post('/api/v2/auth/register',{'email':'LOWER@EXAMPLE.COM','name':'Duplicate','password':PASSWORD},format='json')
-        self.assertEqual(response.status_code,202);self.assertEqual(User.objects.filter(email__iexact=u.email).count(),1)
+        self.assertEqual(response.status_code,409);self.assertEqual(response.json()['code'],'email_exists');self.assertEqual(response.json()['nextAction'],'login');self.assertEqual(User.objects.filter(email__iexact=u.email).count(),1)
         for _ in range(10):self.assertEqual(self.client.post('/api/v2/auth/login',{'email':u.email,'password':'wrong'},format='json').status_code,400)
         self.assertEqual(self.client.post('/api/v2/auth/login',{'email':u.email,'password':'wrong'},format='json').status_code,429)
+    def test_duplicate_unverified_registration_does_not_change_password_or_send_mail(self):
+        u=User.objects.create_user('pending@example.com',PASSWORD,display_name='Original')
+        old_password=u.password
+        response=self.client.post('/api/v2/auth/register',{'email':'PENDING@example.com','name':'Replacement','password':'Different!Quartz-2027'},format='json')
+        self.assertEqual(response.status_code,409)
+        self.assertEqual(response.json()['nextAction'],'verify')
+        u.refresh_from_db();self.assertEqual(u.password,old_password);self.assertEqual(u.display_name,'Original')
+        self.assertEqual(Outbox.objects.count(),0);self.assertEqual(EmailToken.objects.count(),0)
+
     def test_onboarding_creates_organization_site_and_owner_atomically(self):
         u=user('new@example.com');self.client.force_login(u)
         response=self.client.post('/api/v2/organizations',{'name':'Org','siteName':'Xưởng','location':'VN'},format='json')
