@@ -11,9 +11,9 @@ from rest_framework.decorators import api_view,permission_classes
 from rest_framework.exceptions import PermissionDenied,ValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
-from .models import User,Organization,Membership,Site,EmailToken,UserSession
+from .models import User,Organization,Membership,Site,EmailToken,UserSession,Outbox
 from .security import throttle,scope,strict,clean_text
-from .services import audit,send_token,consume_token,validate_new_password,email_token,enqueue_mail
+from .services import audit,send_token,consume_token,validate_new_password,email_token,enqueue_mail,deliver_mail_once
 from django.conf import settings
 
 
@@ -38,6 +38,15 @@ def csrf(request):
 def me(request):
     response=Response(me_data(request));response['Cache-Control']='no-store';return response
 
+def token_delivery_response(token,kind='verify',created=False):
+    # The account/token transaction is committed before SMTP; the worker can retry failures.
+    deliver_mail_once(outbox_id=token.outbox_id)
+    row=Outbox.objects.get(id=token.outbox_id)
+    if row.sent_at:
+        return Response({'code':'email_sent','message':'Đã gửi email '+('xác thực' if kind=='verify' else 'đặt lại mật khẩu')+'. Vui lòng kiểm tra hộp thư và mục Spam.','emailStatus':'sent'},status=202 if created else 200)
+    return Response({'code':'email_send_failed','message':('Tài khoản đã được tạo, nhưng chưa gửi được email xác thực.' if created else 'Chưa gửi được email. Dịch vụ gửi thư đang gặp lỗi.')+' Hệ thống sẽ tự thử lại; bạn cũng có thể bấm gửi lại sau.','emailStatus':'failed','accountCreated':created},status=503)
+
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def register(request):
@@ -55,23 +64,28 @@ def register(request):
     try:
         with transaction.atomic():
             user=User.objects.create_user(email,request.data['password'],display_name=name)
-            send_token(user,'verify')
+            token=send_token(user,'verify')
             audit(request,'account.registered',target=user.id)
     except IntegrityError:
         existing=User.objects.filter(email=email).first()
         if existing:
             return existing_account_response(existing)
         raise
-    return Response({'message':'Tài khoản đã được tạo. Hướng dẫn xác thực đã được đưa vào hàng đợi gửi.'},status=202)
+    return token_delivery_response(token,created=True)
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def resend(request):
     strict(request.data,['email']);email=email_input(request.data);throttle(request,'resend',email,limit=3,seconds=900)
-    user=User.objects.filter(email=email,is_active=True,email_verified_at__isnull=True).first()
-    if user:
-        with transaction.atomic():send_token(user,'verify')
-    return Response({'message':'Nếu email cần xác thực, hướng dẫn đã được đưa vào hàng đợi gửi.'},status=202)
+    user=User.objects.filter(email=email).first()
+    if not user:
+        return Response({'code':'email_not_found','message':'Email này chưa có tài khoản. Vui lòng đăng ký trước.'},status=404)
+    if not user.is_active:
+        return Response({'code':'account_disabled','message':'Tài khoản đang bị khóa. Vui lòng liên hệ quản trị viên.'},status=403)
+    if user.email_verified_at:
+        return Response({'code':'already_verified','message':'Email đã được xác thực. Bạn có thể đăng nhập.','nextAction':'login'},status=200)
+    with transaction.atomic():token=send_token(user,'verify')
+    return token_delivery_response(token)
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -110,10 +124,15 @@ def logout(request):
 @permission_classes([AllowAny])
 def forgot(request):
     strict(request.data,['email']);email=email_input(request.data);throttle(request,'forgot',email,limit=3)
-    user=User.objects.filter(email=email,is_active=True,email_verified_at__isnull=False).first()
-    if user:
-        with transaction.atomic():send_token(user,'reset')
-    return Response({'message':'Nếu tài khoản phù hợp, hướng dẫn đặt lại mật khẩu đã được đưa vào hàng đợi gửi.'},status=202)
+    user=User.objects.filter(email=email).first()
+    if not user:
+        return Response({'code':'email_not_found','message':'Email này chưa có tài khoản. Vui lòng đăng ký trước.'},status=404)
+    if not user.is_active:
+        return Response({'code':'account_disabled','message':'Tài khoản đang bị khóa. Vui lòng liên hệ quản trị viên.'},status=403)
+    if not user.email_verified_at:
+        return Response({'code':'verification_required','message':'Email chưa được xác thực. Vui lòng xác thực email trước.','nextAction':'verify'},status=409)
+    with transaction.atomic():token=send_token(user,'reset')
+    return token_delivery_response(token,kind='reset')
 
 @api_view(['POST'])
 @permission_classes([AllowAny])

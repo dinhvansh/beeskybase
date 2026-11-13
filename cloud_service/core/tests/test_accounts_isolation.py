@@ -1,3 +1,4 @@
+from unittest.mock import patch
 import re
 from datetime import timedelta
 from django.core import mail
@@ -23,8 +24,8 @@ class AccountTests(TestCase):
         self.assertEqual(self.client.post('/api/v2/auth/register',body,format='json').status_code,202)
         u=User.objects.get(email='test@example.com');self.assertTrue(u.password.startswith('argon2$'));self.assertIsNone(u.email_verified_at)
         self.assertEqual(self.client.post('/api/v2/auth/login',{'email':u.email,'password':PASSWORD},format='json').status_code,403)
-        self.assertNotIn(b'test@example.com',bytes(Outbox.objects.get().encrypted_payload))
-        self.assertEqual(deliver_mail_once(),1);self.assertEqual(bytes(Outbox.objects.get().encrypted_payload),b'')
+        self.assertIsNotNone(Outbox.objects.get().sent_at)
+        self.assertEqual(deliver_mail_once(),0);self.assertEqual(bytes(Outbox.objects.get().encrypted_payload),b'')
         token=re.search(r'token=([\w-]+)',mail.outbox[-1].body)[1]
         self.assertEqual(self.client.post('/api/v2/auth/verify',{'token':token},format='json').status_code,200)
         self.assertEqual(self.client.post('/api/v2/auth/verify',{'token':token},format='json').status_code,400)
@@ -39,11 +40,12 @@ class AccountTests(TestCase):
         self.assertEqual(client.post('/api/v2/auth/login',body,format='json',HTTP_X_CSRFTOKEN=token,HTTP_ORIGIN='https://attacker.invalid').status_code,403)
         response=client.post('/api/v2/auth/login',body,format='json',HTTP_X_CSRFTOKEN=token)
         self.assertEqual(response.status_code,200);self.assertTrue(response.cookies['beesky_cloud_session']['httponly']);self.assertEqual(response.cookies['beesky_cloud_session']['samesite'],'Lax')
-    def test_expired_token_and_generic_forgot_responses(self):
+    def test_expired_token_and_explicit_forgot_responses(self):
         u=user('reset@example.com');record,raw=email_token(u,'verify');record.expires_at=timezone.now()-timedelta(seconds=1);record.save()
         self.assertEqual(self.client.post('/api/v2/auth/verify',{'token':raw},format='json').status_code,400)
         known=self.client.post('/api/v2/auth/forgot',{'email':u.email},format='json');unknown=self.client.post('/api/v2/auth/forgot',{'email':'absent@example.com'},format='json')
-        self.assertEqual(known.status_code,unknown.status_code);self.assertEqual(known.json(),unknown.json())
+        self.assertEqual(known.status_code,200);self.assertEqual(known.json()['code'],'email_sent')
+        self.assertEqual(unknown.status_code,404);self.assertEqual(unknown.json()['code'],'email_not_found')
     def test_reset_revokes_existing_sessions_and_cannot_be_replayed(self):
         u=user('reset2@example.com');a=APIClient();b=APIClient()
         for client in (a,b):self.assertEqual(client.post('/api/v2/auth/login',{'email':u.email,'password':PASSWORD},format='json').status_code,200)
@@ -65,6 +67,40 @@ class AccountTests(TestCase):
         self.assertEqual(response.json()['nextAction'],'verify')
         u.refresh_from_db();self.assertEqual(u.password,old_password);self.assertEqual(u.display_name,'Original')
         self.assertEqual(Outbox.objects.count(),0);self.assertEqual(EmailToken.objects.count(),0)
+
+    def test_resend_verified_and_missing_email_do_not_send(self):
+        u=user('verified@example.com')
+        response=self.client.post('/api/v2/auth/resend',{'email':u.email},format='json')
+        self.assertEqual(response.status_code,200);self.assertEqual(response.json()['code'],'already_verified')
+        response=self.client.post('/api/v2/auth/resend',{'email':'absent@example.com'},format='json')
+        self.assertEqual(response.status_code,404)
+        self.assertEqual(Outbox.objects.count(),0)
+
+    def test_resend_reports_smtp_result_and_preserves_encrypted_retry(self):
+        u=User.objects.create_user('retry@example.com',PASSWORD)
+        with patch('core.services.send_mail',side_effect=OSError('SMTP unavailable')):
+            response=self.client.post('/api/v2/auth/resend',{'email':u.email},format='json')
+        self.assertEqual(response.status_code,503);self.assertEqual(response.json()['code'],'email_send_failed')
+        row=Outbox.objects.get();self.assertIsNone(row.sent_at);self.assertEqual(row.attempts,1)
+        self.assertNotIn(b'retry@example.com',bytes(row.encrypted_payload))
+        row.next_attempt_at=timezone.now();row.save()
+        self.assertEqual(deliver_mail_once(),1)
+        row.refresh_from_db();self.assertIsNotNone(row.sent_at);self.assertEqual(bytes(row.encrypted_payload),b'')
+
+    def test_registration_smtp_failure_keeps_account_and_is_not_success(self):
+        with patch('core.services.send_mail',return_value=0):
+            response=self.client.post('/api/v2/auth/register',{'email':'new-failed@example.com','name':'Test','password':PASSWORD},format='json')
+        self.assertEqual(response.status_code,503);self.assertTrue(response.json()['accountCreated'])
+        self.assertTrue(User.objects.filter(email='new-failed@example.com').exists())
+        self.assertIsNone(Outbox.objects.get().sent_at)
+
+    def test_targeted_delivery_does_not_drain_unrelated_mail(self):
+        from core.services import enqueue_mail
+        other=enqueue_mail('other@example.com','Other','Other message')
+        u=User.objects.create_user('target@example.com',PASSWORD)
+        response=self.client.post('/api/v2/auth/resend',{'email':u.email},format='json')
+        self.assertEqual(response.status_code,200);self.assertEqual(response.json()['code'],'email_sent')
+        other.refresh_from_db();self.assertIsNone(other.sent_at);self.assertEqual(other.attempts,0)
 
     def test_onboarding_creates_organization_site_and_owner_atomically(self):
         u=user('new@example.com');self.client.force_login(u)

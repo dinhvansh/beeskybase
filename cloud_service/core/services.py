@@ -41,13 +41,14 @@ def email_token(user,kind,organization=None,payload=None):
 
 def enqueue_mail(recipient,subject,message):
     data=json.dumps({'to':recipient,'subject':subject,'body':message},ensure_ascii=False).encode()
-    Outbox.objects.create(encrypted_payload=cipher().encrypt(data),next_attempt_at=timezone.now())
+    return Outbox.objects.create(encrypted_payload=cipher().encrypt(data),next_attempt_at=timezone.now())
 
 def send_token(user,kind):
     token,raw=email_token(user,kind)
     route='verify' if kind=='verify' else 'reset'
     link=settings.PUBLIC_URL+'/#/'+route+'?token='+raw
-    enqueue_mail(user.email,'BeeSky · '+('Xác thực email' if kind=='verify' else 'Đặt lại mật khẩu'),'Mở đường dẫn sau để '+('xác thực email' if kind=='verify' else 'đặt lại mật khẩu')+':\n'+link+'\nĐường dẫn chỉ dùng một lần và sẽ hết hạn.')
+    outbox=enqueue_mail(user.email,'BeeSky · '+('Xác thực email' if kind=='verify' else 'Đặt lại mật khẩu'),'Mở đường dẫn sau để '+('xác thực email' if kind=='verify' else 'đặt lại mật khẩu')+':\n'+link+'\nĐường dẫn chỉ dùng một lần và sẽ hết hạn.')
+    token.outbox_id=outbox.id
     return token
 
 def consume_token(raw,kind):
@@ -62,18 +63,20 @@ def consume_token(raw,kind):
         raise ValidationError('Đường dẫn không hợp lệ, đã dùng hoặc hết hạn.')
     return token
 
-def deliver_mail_once():
+def deliver_mail_once(outbox_id=None):
     sent=0
-    for _ in range(20):
+    for _ in range(1 if outbox_id else 20):
         with transaction.atomic():
             query=Outbox.objects.filter(sent_at__isnull=True,next_attempt_at__lte=timezone.now()).order_by('created_at')
+            if outbox_id:query=query.filter(id=outbox_id)
             from django.db import connection
-            row=query.select_for_update(skip_locked=connection.features.has_select_for_update_skip_locked).first()
+            row=query.select_for_update(skip_locked=not outbox_id and connection.features.has_select_for_update_skip_locked).first()
             if not row:break
             row.attempts+=1
             try:
                 data=json.loads(cipher().decrypt(bytes(row.encrypted_payload)))
-                send_mail(data['subject'],data['body'],settings.DEFAULT_FROM_EMAIL,[data['to']],fail_silently=False)
+                accepted=send_mail(data['subject'],data['body'],settings.DEFAULT_FROM_EMAIL,[data['to']],fail_silently=False)
+                if accepted!=1:raise RuntimeError('Mail provider did not accept the message')
                 row.sent_at=timezone.now();row.encrypted_payload=b'';row.last_error='';sent+=1
             except Exception as exc:
                 row.last_error=type(exc).__name__[:80]
