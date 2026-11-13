@@ -1,4 +1,6 @@
 (()=>{
+ const flowHero=document.querySelector('body[data-page="flow"] .document-visual');
+ if(flowHero)flowHero.outerHTML='<figure class="flow-real-hero"><img src="assets/flowdocker-dashboard-studio-v1.png" alt="Minh họa 3D FlowDocker từ giao diện tổng quan thực tế" width="1672" height="941"><figcaption>Giao diện minh họa từ sản phẩm FlowDocker</figcaption></figure>';
  const nav=document.querySelector('header nav');if(!nav)return;
  nav.setAttribute('aria-label','Điều hướng chính');
  const menu=document.createElement('details');menu.className='products-menu';
