@@ -93,3 +93,8 @@ Company marketing is served at https://beeskybase.com/ with product pages /mine.
 
 Cloud release 0eadbf0 adds /control/ and protected /api/v2/platform/* APIs. A pre-update PostgreSQL dump is retained in /opt/beesky-mine/backups/. Twenty-three account/admin isolation tests passed against a separate PostgreSQL test database before activation; browser administration was checked independently. The initial Super Admin uses the operator-approved email. Credentials and setup links are kept outside Git. SMTP configuration remains a separate delivery dependency.
 
+
+## Resend SMTP
+
+Production email uses the existing encrypted outbox with `smtp.resend.com:587`, STARTTLS and SMTP username `resend`. The sender is `BeeSky Mine <no-reply@beeskybase.com>`. The Resend API key is stored only as the private server environment value `BEESKY_SMTP_PASSWORD`; never commit it. Domain verification requires the DNS records returned by the Resend Domains API. Mail CNAME records must be DNS only on Cloudflare. Restart the web/worker containers after an environment change. Resend acceptance and delivery must be checked separately from queue creation.
+
