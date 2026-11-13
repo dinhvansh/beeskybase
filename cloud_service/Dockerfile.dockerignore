@@ -3,8 +3,11 @@
 !cloud_service/**
 !cloud-preview/
 !cloud-preview/*.css
+!cloud-preview/rack-scene.js
 !cloud-preview/assets/
 !cloud-preview/assets/**
 cloud_service/.env
 cloud_service/**/__pycache__/
 cloud_service/collected_static/
+
+cloud_service/.env.production

@@ -1,9 +1,9 @@
 name: Cloud backend
 on:
   push:
-    paths: ['cloud_service/**', '.github/workflows/cloud-backend.yml']
+    paths: ['cloud_service/**', '.github/workflows/cloud-backend.yml', 'tools/check_cloud_agent.py']
   pull_request:
-    paths: ['cloud_service/**', '.github/workflows/cloud-backend.yml']
+    paths: ['cloud_service/**', '.github/workflows/cloud-backend.yml', 'tools/check_cloud_agent.py']
 permissions:
   contents: read
 jobs:
@@ -34,3 +34,9 @@ jobs:
       - run: python cloud_service/manage.py makemigrations --check --dry-run
       - run: python cloud_service/manage.py check
       - run: python cloud_service/manage.py test core.tests --noinput
+
+      - run: node --check cloud_service/static/cloud-app.js && node --check cloud_service/static/cloud-ops.js
+      - name: Build real service image
+        run: docker build -f cloud_service/Dockerfile -t beesky-real-ci .
+      - name: Validate production Compose
+        run: BEESKY_DOMAIN=ci.invalid POSTGRES_PASSWORD=ci-only BEESKY_ENV_FILE=.env.example docker compose -f cloud_service/compose.production.yaml config --quiet

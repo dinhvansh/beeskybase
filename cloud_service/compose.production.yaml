@@ -1,0 +1,57 @@
+name: beesky-cloud-production
+services:
+  db:
+    image: postgres:17-alpine@sha256:e5d2edd28b1f8d40a0a6c0c9cdc545b19b56a0d5d88f94bc11a97d970d4700d0
+    environment:
+      POSTGRES_DB: beesky
+      POSTGRES_USER: beesky
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Generate .env.production first}
+    volumes: ["production-db:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U beesky -d beesky"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+  web:
+    build:
+      context: ..
+      dockerfile: cloud_service/Dockerfile
+    env_file: ${BEESKY_ENV_FILE:-.env.production}
+    command: ["sh", "-c", "python manage.py migrate --noinput && python manage.py collectstatic --noinput --verbosity 0 && exec gunicorn beesky_cloud.wsgi:application --bind 0.0.0.0:8000 --workers 2 --threads 4 --timeout 60 --access-logfile -"]
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8000/health/ready',headers={'Host':'localhost'}),timeout=3).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+  worker:
+    build:
+      context: ..
+      dockerfile: cloud_service/Dockerfile
+    env_file: ${BEESKY_ENV_FILE:-.env.production}
+    command: ["python", "manage.py", "cloud_worker"]
+    depends_on:
+      web:
+        condition: service_healthy
+    restart: unless-stopped
+  proxy:
+    image: caddy:2-alpine@sha256:78bd35025c7ba85961dd149ae670315129954e77abe2383ac47c89106b35ade9
+    environment:
+      BEESKY_DOMAIN: ${BEESKY_DOMAIN:?Set your real domain}
+    ports: ["80:80", "443:443", "443:443/udp"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - production-caddy-data:/data
+      - production-caddy-config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  production-db:
+  production-caddy-data:
+  production-caddy-config:

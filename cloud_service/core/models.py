@@ -165,3 +165,100 @@ class RateBucket(models.Model):
     key=models.CharField(primary_key=True,max_length=64)
     count=models.PositiveIntegerField(default=0)
     expires_at=models.DateTimeField()
+
+class SitePlan(models.Model):
+    site=models.OneToOneField(Site,on_delete=models.CASCADE,primary_key=True)
+    revision=models.PositiveIntegerField(default=0)
+    data=models.JSONField(default=dict)
+    updated_at=models.DateTimeField(auto_now=True)
+
+class Customer(models.Model):
+    id=models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False)
+    organization=models.ForeignKey(Organization,on_delete=models.CASCADE)
+    name=models.CharField(max_length=120)
+    class Meta:
+        constraints=[models.UniqueConstraint('organization',Lower('name'),name='customer_name_in_org')]
+
+class MachineGroup(models.Model):
+    id=models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False)
+    site=models.ForeignKey(Site,on_delete=models.CASCADE)
+    name=models.CharField(max_length=120)
+    cooling_label=models.CharField(max_length=120,blank=True)
+    class Meta:
+        constraints=[models.UniqueConstraint('site',Lower('name'),name='group_name_in_site')]
+
+class MinerAssignment(models.Model):
+    miner=models.OneToOneField(Miner,on_delete=models.CASCADE,primary_key=True)
+    customer=models.ForeignKey(Customer,on_delete=models.PROTECT,null=True)
+    group=models.ForeignKey(MachineGroup,on_delete=models.PROTECT,null=True)
+    condition=models.CharField(max_length=20,default='operating')
+    note=models.CharField(max_length=500,blank=True)
+
+class MaintenanceSchedule(models.Model):
+    id=models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False)
+    site=models.ForeignKey(Site,on_delete=models.CASCADE)
+    name=models.CharField(max_length=120)
+    day=models.PositiveSmallIntegerField(default=1)
+    template=models.CharField(max_length=20)
+    checklist=models.JSONField()
+    active=models.BooleanField(default=True)
+    start_month=models.DateField()
+    created_by=models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT)
+
+class MaintenanceTicket(models.Model):
+    id=models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False)
+    schedule=models.ForeignKey(MaintenanceSchedule,on_delete=models.PROTECT)
+    period=models.DateField()
+    due_date=models.DateField()
+    checklist=models.JSONField()
+    status=models.CharField(max_length=20,default='open')
+    revision=models.PositiveIntegerField(default=0)
+    note=models.TextField(blank=True)
+    assignee=models.CharField(max_length=120,blank=True)
+    submitted_by=models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,null=True,related_name='+')
+    approved_by=models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,null=True,related_name='+')
+    approved_at=models.DateTimeField(null=True)
+    class Meta:
+        constraints=[models.UniqueConstraint(fields=['schedule','period'],name='monthly_ticket_once')]
+
+class MaintenancePhoto(models.Model):
+    id=models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False)
+    ticket=models.ForeignKey(MaintenanceTicket,on_delete=models.CASCADE,related_name='photos')
+    item=models.PositiveSmallIntegerField()
+    stage=models.CharField(max_length=10)
+    mime=models.CharField(max_length=30)
+    body=models.BinaryField()
+    created_by=models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT)
+    created_at=models.DateTimeField(auto_now_add=True)
+
+class Repair(models.Model):
+    id=models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False)
+    miner=models.ForeignKey(Miner,on_delete=models.PROTECT)
+    ticket=models.ForeignKey(MaintenanceTicket,on_delete=models.PROTECT,null=True)
+    issue=models.CharField(max_length=500)
+    resolution=models.CharField(max_length=1000,blank=True)
+    status=models.CharField(max_length=20,default='open')
+    created_at=models.DateTimeField(auto_now_add=True)
+    closed_at=models.DateTimeField(null=True)
+
+class AlertRule(models.Model):
+    id=models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False)
+    site=models.ForeignKey(Site,on_delete=models.CASCADE)
+    name=models.CharField(max_length=120)
+    metric=models.CharField(max_length=30)
+    threshold=models.FloatField()
+    active=models.BooleanField(default=True)
+
+class Alert(models.Model):
+    id=models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False)
+    site=models.ForeignKey(Site,on_delete=models.CASCADE)
+    key=models.CharField(max_length=180)
+    message=models.CharField(max_length=500)
+    active=models.BooleanField(default=True)
+    first_seen=models.DateTimeField(auto_now_add=True)
+    last_seen=models.DateTimeField(auto_now=True)
+    acknowledged_by=models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.SET_NULL,null=True)
+    acknowledged_at=models.DateTimeField(null=True)
+    expires_at=models.DateTimeField(null=True)
+    class Meta:
+        constraints=[models.UniqueConstraint(fields=['site','key'],name='alert_key_in_site')]

@@ -27,3 +27,7 @@ output/playwright/
 /work/
 /cloud_service/.env
 /cloud_service/collected_static/
+
+/cloud_service/.env.production
+*.dump
+*.dump.partial

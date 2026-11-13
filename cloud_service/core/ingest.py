@@ -9,7 +9,7 @@ from rest_framework.authentication import BaseAuthentication
 from rest_framework.decorators import api_view,authentication_classes
 from rest_framework.exceptions import AuthenticationFailed,ValidationError
 from rest_framework.response import Response
-from .models import Agent,Site,Miner,Snapshot,Observation,Event
+from .models import Agent,Site,Miner,Snapshot,Observation,Event,Alert
 from .services import digest,audit
 
 class AgentPrincipal:
@@ -87,6 +87,9 @@ def ingest(request):
                 miner=Miner(site=agent.site,identity=identity,ip=ip,model=model,serial=serial,identity_status='reported' if serial else 'unverified',last_seen_at=ts,telemetry=record,last_agent=agent)
                 miner.save()
             elif ts>=miner.last_seen_at:
+                previous=miner.telemetry.get('power_w');current=record.get('power_w');now=timezone.now()
+                if isinstance(previous,(int,float)) and isinstance(current,(int,float)) and not isinstance(previous,bool) and previous>=0 and ts>miner.last_seen_at and (now-miner.last_seen_at).total_seconds()<600 and (now-ts).total_seconds()<600 and current-previous>=100 and current>previous*1.2:
+                    Alert.objects.update_or_create(site=agent.site,key='surge:'+str(miner.id),defaults={'message':miner.ip+' tăng công suất bất thường: '+str(previous)+' → '+str(current)+' W','active':True,'expires_at':now+timedelta(minutes=10),'acknowledged_by':None,'acknowledged_at':None})
                 miner.ip=ip;miner.model=model;miner.serial=serial;miner.last_seen_at=ts;miner.telemetry=record;miner.last_agent=agent;miner.save()
             observations.append(Observation(snapshot=snapshot,miner=miner,record=record))
         Observation.objects.bulk_create(observations)

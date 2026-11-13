@@ -76,6 +76,6 @@ class PlacementRaceTests(TransactionTestCase):
         def move(miner):
             close_old_connections();client=APIClient();client.force_authenticate(user=owner);barrier.wait()
             try:return client.post(f'/api/v2/sites/{site.id}/miners/{miner.id}/placement',{'slotId':str(slot.id),'reason':'race'},format='json').status_code
-            finally:close_old_connections()
+            finally:connection.close()
         with ThreadPoolExecutor(max_workers=2) as pool:statuses=list(pool.map(move,machines))
         self.assertEqual(sorted(statuses),[200,400]);self.assertEqual(Placement.objects.count(),1);self.assertEqual(AuditLog.objects.filter(action='placement.changed').count(),1)

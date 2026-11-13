@@ -1,4 +1,4 @@
-# BeeSky real cloud backend — first slice
+# BeeSky real cloud backend
 
 ## Run locally
 
@@ -45,12 +45,16 @@ Agent contract: `POST /api/ingest` accepts `{ts, miners:[{ip, model, mac_or_seri
 
 ## Verification
 
-24 automated tests passed on PostgreSQL, including organization isolation, CSRF, roles, token replay, session revocation, ingest identity/retry rules, database placement guards and a real two-thread placement race. Browser walkthrough passed registration, Mailpit verification, login, onboarding, agent issuance, synthetic telemetry, rack creation and persisted placement after reload. No real miner hardware was used. Mobile checked at 390px.
+35 automated tests passed on PostgreSQL, including organization isolation, CSRF, roles, token replay, session revocation, ingest identity/retry rules, database placement guards and a real two-thread placement race. Browser walkthrough passed registration, Mailpit verification, login, onboarding, agent issuance, synthetic telemetry, rack creation and persisted placement after reload. No real miner hardware was used. Mobile checked at 390px. Added walkthroughs for station persistence, Three.js scene loading, checklist/image persistence and the actual agent transport (synthetic snapshot + retry + event + revoked-key rejection). Physical miner adapters have not been tested on hardware.
 
 CI runs PostgreSQL tests, schema drift checks and Django system checks. To run locally, install `requirements.lock`, provide a dedicated PostgreSQL database URL and set `BEESKY_TESTING=1`; run `python cloud_service/manage.py test core.tests`. Django creates a separate test database; the database user needs permission to create it.
 
-## Remaining work
+## Operational modules added
 
-This is the first working backend slice. Power network/phase calculations, maintenance/photos/reports, customer/worker grouping, 2D/3D layout editing and workflows still use the legacy preview and are not yet migrated to the tenant service. No old SQLite data is imported automatically: a later importer must require an explicit owner/site mapping, read-only dry run and reconciliation. MFA, hardware control, production backup/restore, observability and fleet-scale tuning remain separate work.
+Tenant-scoped `GET/PUT /sites/{id}/plan` uses revision checks and validates all rack/miner/branch references. `GET /sites/{id}/power` calculates station/cabinet/branch/phase loads server-side. `GET /sites/{id}/layout` returns the real fleet/placements; rack edits persist floor/X/Z/90-degree rotation and reject overlaps. `/customers`, site `/groups`, miner `/assignment` persist ownership, cooling group and condition. Worker names come from telemetry.
 
-Before public deployment configure a real HTTPS domain, `BEESKY_DEBUG=0`, allowed hosts/CSRF origins, private PostgreSQL, external SMTP, private keys, backup and restore procedures. Startup fails closed without required secrets/PostgreSQL/HTTPS configuration. Compose is local-only; it does not deploy or secure a public reverse proxy. Do not expose Mailpit publicly. Keep the old preview separate from authenticated traffic.
+Site `/maintenance/schedules`, `/maintenance/tickets`, ticket `/photos` and `/maintenance/photos/{id}` provide monthly checklists, revision protection, authenticated image evidence and submit/owner approval/rejection. JPEG/PNG/WebP images are decoded, size-limited and re-encoded as JPEG to discard metadata/active content. Photos are stored in PostgreSQL. The browser's report view supports printing/saving PDF. Site `/repairs` tracks failure/resolution and condition.
+
+Site `/rules`, `/alerts`, alert `/acknowledge` and `/events` expose server-evaluated alerts and agent events. Rules support temperature, measured power and stale minutes; no physical commands or arbitrary workflow nodes. The worker runs independently of the browser, every 30 seconds for alerts and current-month tickets.
+
+Production Compose/HTTPS, setup and agent checks: see [cloud-deployment.md](cloud-deployment.md). No public deployment performed; hardware agent testing and SMTP/domain setup remain for the selected server. No implicit old-SQLite import, MFA or remote command dispatcher is enabled. Existing preview remains separate.

@@ -76,3 +76,7 @@ if not DEBUG and not TESTING and not PUBLIC_URL.startswith('https://'):
 STORAGES = {'default':{'BACKEND':'django.core.files.storage.FileSystemStorage'},'staticfiles':{'BACKEND':'whitenoise.storage.CompressedStaticFilesStorage'}}
 
 SECURE_REDIRECT_EXEMPT = ['^health/ready$']
+
+TRUST_PROXY = os.getenv("BEESKY_TRUST_PROXY") == "1"
+if TRUST_PROXY:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

@@ -44,6 +44,11 @@ def throttle(request,action,account='',limit=10,seconds=900):
     now=timezone.now();window=int(time.time())//seconds
     # Do not trust client-supplied forwarding headers.
     address=request.META.get('REMOTE_ADDR','unknown')
+    from django.conf import settings
+    if getattr(settings,'TRUST_PROXY',False):
+        import ipaddress
+        try:address=str(ipaddress.ip_address(request.META.get('HTTP_X_REAL_IP',address)))
+        except ValueError:pass
     keys=[f'{action}:ip:{address}:{window}']
     if account:
         keys.append(f'{action}:account:{account.casefold()}:{window}')

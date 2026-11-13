@@ -8,7 +8,7 @@ from django.utils import timezone
 from rest_framework.decorators import api_view
 from rest_framework.exceptions import ValidationError,PermissionDenied
 from rest_framework.response import Response
-from .models import Site,Agent,Miner,Rack,RackSlot,Placement,AuditLog
+from .models import Site,Agent,Miner,Rack,RackSlot,Placement,AuditLog,MinerAssignment,SitePlan
 from .security import scope,strict,clean_text
 from .services import audit,digest
 
@@ -80,9 +80,11 @@ def agent_detail(request,site_id,agent_id):
     response=Response({**agent_data(agent),'key':raw});response['Cache-Control']='no-store';return response
 
 def miner_data(miner):
-    placement=Placement.objects.filter(miner=miner).select_related('slot__rack').first()
+    placement=getattr(miner,'placement',None)
+    assignment=getattr(miner,'minerassignment',None)
+    extra={'customerId':assignment.customer_id if assignment else None,'customerName':assignment.customer.name if assignment and assignment.customer_id else '', 'groupId':assignment.group_id if assignment else None,'groupName':assignment.group.name if assignment and assignment.group_id else '', 'coolingLabel':assignment.group.cooling_label if assignment and assignment.group_id else '', 'condition':assignment.condition if assignment else 'operating','note':assignment.note if assignment else ''}
     fresh=(timezone.now()-miner.last_seen_at).total_seconds()<=600
-    return {'id':miner.id,'siteId':miner.site_id,'ip':miner.ip,'serial':miner.serial,'model':miner.model,'identityStatus':miner.identity_status,'lastSeenAt':miner.last_seen_at,'stale':not fresh,'telemetry':miner.telemetry,'placement':{'slotId':placement.slot_id,'rackId':placement.slot.rack_id,'rackName':placement.slot.rack.name,'row':placement.slot.row,'col':placement.slot.col} if placement else None}
+    return {**extra,'id':miner.id,'siteId':miner.site_id,'ip':miner.ip,'serial':miner.serial,'model':miner.model,'identityStatus':miner.identity_status,'lastSeenAt':miner.last_seen_at,'stale':not fresh,'telemetry':miner.telemetry,'placement':{'slotId':placement.slot_id,'rackId':placement.slot.rack_id,'rackName':placement.slot.rack.name,'row':placement.slot.row,'col':placement.slot.col} if placement else None}
 
 @api_view(['GET'])
 def miners(request,site_id):
@@ -102,9 +104,32 @@ def integer(value,low,high,field):
     if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or int(value)!=value or not low<=value<=high:raise ValidationError({field:'Số không hợp lệ.'})
     return int(value)
 
+def rack_geometry(rack,data,creating=False):
+    from .facility import number,default_plan
+    floor=clean_text(data.get('floor',rack.floor),'floor',80)
+    plan=SitePlan.objects.filter(site=rack.site).first()
+    floors=plan.data.get('floors',['Tầng 1']) if plan else ['Tầng 1']
+    if floor not in floors:raise ValidationError('Tạo tầng trong cấu hình xưởng trước.')
+    rotation=integer(data.get('rotation',rack.rotation),0,270,'rotation')
+    if rotation%90:raise ValidationError('Kệ chỉ xoay theo bước 90 độ.')
+    x=number(data.get('x',float(rack.x)),'x',-200,200);z=number(data.get('z',float(rack.z)),'z',-200,200)
+    def bounds(cols,rotation,x,z):
+        w=cols*1.18+.6;d=1.7
+        if rotation%180:w,d=d,w
+        return x-w/2,x+w/2,z-d/2,z+d/2
+    a=bounds(rack.cols,rotation,x,z)
+    for other in Rack.objects.filter(site=rack.site,floor=floor).exclude(pk=rack.pk):
+        b=bounds(other.cols,other.rotation,float(other.x),float(other.z))
+        if a[0]<b[1]+.3 and a[1]>b[0]-.3 and a[2]<b[3]+.3 and a[3]>b[2]-.3:
+            if creating and 'x' not in data and 'z' not in data:
+                # Find a free row for ordinary add-rack forms.
+                return rack_geometry(rack,{**data,'x':0,'z':max(float(r.z) for r in Rack.objects.filter(site=rack.site,floor=floor))+4},False)
+            raise ValidationError('Kệ đè lên kệ khác; để trống khoảng cách ít nhất 0,3 đơn vị.')
+    rack.floor=floor;rack.x=x;rack.z=z;rack.rotation=rotation
+
 def rack_data(rack):
     slots=rack.slots.select_related('placement__miner').order_by('row','col')
-    return {'id':rack.id,'siteId':rack.site_id,'name':rack.name,'rows':rack.rows,'cols':rack.cols,'floor':rack.floor,'slots':[{'id':slot.id,'row':slot.row,'col':slot.col,'minerId':getattr(getattr(slot,'placement',None),'miner_id',None)} for slot in slots]}
+    return {'id':rack.id,'siteId':rack.site_id,'name':rack.name,'rows':rack.rows,'cols':rack.cols,'floor':rack.floor,'x':float(rack.x),'z':float(rack.z),'rotation':rack.rotation,'slots':[{'id':slot.id,'row':slot.row,'col':slot.col,'minerId':getattr(getattr(slot,'placement',None),'miner_id',None)} for slot in slots]}
 
 @api_view(['GET','POST'])
 def racks(request,site_id):
@@ -112,11 +137,12 @@ def racks(request,site_id):
     if request.method=='GET':
         count,rows=paginate(request,site.racks.order_by('name','id'))
         return Response({'count':count,'results':[rack_data(r) for r in rows]})
-    strict(request.data,['name','rows','cols'])
+    strict(request.data,['name','rows','cols','floor','x','z','rotation'])
     name=clean_text(request.data.get('name'),'name',80);rows=integer(request.data.get('rows',4),1,12,'rows');cols=integer(request.data.get('cols',6),1,12,'cols')
     with transaction.atomic():
         Site.objects.select_for_update().get(pk=site.id)
-        rack=Rack.objects.create(site=site,name=name,rows=rows,cols=cols)
+        rack=Rack(site=site,name=name,rows=rows,cols=cols)
+        rack_geometry(rack,request.data,creating=True);rack.save()
         RackSlot.objects.bulk_create([RackSlot(rack=rack,row=r,col=c) for r in range(1,rows+1) for c in range(1,cols+1)])
         audit(request,'rack.created',member.organization,rack.id,{'siteId':str(site.id)})
     return Response(rack_data(rack),status=201)
@@ -130,8 +156,10 @@ def rack_detail(request,site_id,rack_id):
         if request.method=='DELETE':
             strict(request.data,[])
             if Placement.objects.filter(slot__rack=rack).exists():raise ValidationError('Tháo máy khỏi kệ trước khi xóa kệ.')
+            plan=SitePlan.objects.filter(site=site).first()
+            if plan and str(rack.id) in plan.data.get('feeds',{}):raise ValidationError('Gỡ nguồn cấp kệ trong cấu hình điện trước khi xóa.')
             rack.delete();audit(request,'rack.deleted',member.organization,rack_id);return Response(status=204)
-        strict(request.data,['name','rows','cols'])
+        strict(request.data,['name','rows','cols','floor','x','z','rotation'])
         rows=integer(request.data.get('rows',rack.rows),1,12,'rows');cols=integer(request.data.get('cols',rack.cols),1,12,'cols')
         removed=rack.slots.filter(Q(row__gt=rows)|Q(col__gt=cols))
         if Placement.objects.filter(slot__in=removed).exists():raise ValidationError('Không thu nhỏ kệ qua vị trí đang có máy.')
@@ -139,7 +167,7 @@ def rack_detail(request,site_id,rack_id):
         RackSlot.objects.bulk_create([RackSlot(rack=rack,row=r,col=c) for r in range(1,rows+1) for c in range(1,cols+1) if (r,c) not in existing])
         rack.rows=rows;rack.cols=cols
         if 'name' in request.data:rack.name=clean_text(request.data['name'],'name',80)
-        rack.save();audit(request,'rack.updated',member.organization,rack.id)
+        rack_geometry(rack,request.data);rack.save();audit(request,'rack.updated',member.organization,rack.id)
     return Response(rack_data(rack))
 
 @api_view(['POST'])
