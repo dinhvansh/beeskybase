@@ -24,3 +24,8 @@ Active entry points use story.js, story.css and hardware.js; main.js, style.css 
 
 The company entry loads portal.js, company-sections.js, ivory.js, product-scroll.js, page-depth.js and tech-background.js, with matching CSS overrides. Local generated artwork is stored in assets/. The four-panel hero has animated data paths; lower sections use pearl illustrations, scroll parallax and full-width technology scenery. A translucent bee hovers at the left edge. Footer motion controls and reduced-motion preferences pause or disable decorative movement.
 
+
+## Public delivery
+
+Approved public domain: https://beeskybase.com/ (company), /mine.html (Mine introduction), /flowdocker.html (FlowDocker introduction). Cloud application links use https://mine.beeskybase.com/. Build the static release with `python tools/build_marketing_site.py work/marketing-site.tar.gz`; it includes public fonts, logo, artwork and miner GLBs, with no backend configuration or credentials. The existing proxy serves the versioned static directory independently of the Mine backend.
+

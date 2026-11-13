@@ -4,13 +4,13 @@ import {miningEffects} from './mining-effects.js';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 
 const minerTemplates=new Map();
-function minerTemplate(kind){
-  if(!minerTemplates.has(kind)){
-    const url=kind==='hydro'?'assets/models/s21-hydro.glb?v=5':'assets/models/s19-pro-air.glb?v=5';
-    const promise=new GLTFLoader().loadAsync(url).then(gltf=>{gltf.scene.traverse(o=>{if(o.geometry)o.geometry.userData.minerShared=true;for(const mat of Array.isArray(o.material)?o.material:[o.material])if(mat)for(const value of Object.values(mat))if(value?.isTexture)value.userData.minerShared=true});return gltf.scene}).catch(error=>{minerTemplates.delete(kind);throw error});
-    minerTemplates.set(kind,promise);
+function minerTemplate(kind,base="assets/models/"){
+  const key=base+kind;if(!minerTemplates.has(key)){
+    const url=base+(kind==='hydro'?'s21-hydro.glb?v=5':'s19-pro-air.glb?v=5');
+    const promise=new GLTFLoader().loadAsync(url).then(gltf=>{gltf.scene.traverse(o=>{if(o.geometry)o.geometry.userData.minerShared=true;for(const mat of Array.isArray(o.material)?o.material:[o.material])if(mat)for(const value of Object.values(mat))if(value?.isTexture)value.userData.minerShared=true});return gltf.scene}).catch(error=>{minerTemplates.delete(key);throw error});
+    minerTemplates.set(key,promise);
   }
-  return minerTemplates.get(kind);
+  return minerTemplates.get(key);
 }
 
 // Render only when the camera, size or selection changes. Data stays in the host.
@@ -64,7 +64,7 @@ export function mount(host,api){
       if(d){
         const fan=new T.Mesh(fanGeo,fanMat);fan.rotation.x=Math.PI/2;fan.position.set(0,0,.515);m.add(fan);const hub=new T.Mesh(hubGeo,frameMat);hub.rotation.x=Math.PI/2;hub.position.set(0,0,.54);m.add(hub);
         const kind=api.visualModel(d);
-        if(kind==='air'||kind==='hydro')modelLoads.push(()=>minerTemplate(kind).then(template=>{
+        if(kind==='air'||kind==='hydro')modelLoads.push(()=>minerTemplate(kind,api.modelBase).then(template=>{
           if(disposed)return;
           m.remove(fan,hub);
           const clone=template.clone(true),holder=new T.Group();
@@ -211,3 +211,4 @@ export function mount(host,api){
   modelLoads.forEach(load=>load());
   return {view,selectRack,focusDevice,setEffects(value){effects.setEnabled(value)},highlight(){reset();effects.refresh();draw()},cameraState(){return{position:camera.position.toArray(),target:controls.target.toArray()}},dispose(){if(disposed)return;disposed=true;effects.dispose();observer.disconnect();controls.dispose();window.removeEventListener('keydown',escape);api.hover(null);const geometries=new Set(),materials=new Set();scene.traverse(o=>{if(o.geometry&&!o.geometry.userData.minerShared)geometries.add(o.geometry);for(const material of Array.isArray(o.material)?o.material:[o.material])if(material)materials.add(material)});materials.forEach(m=>{for(const texture of Object.values(m))if(texture?.isTexture&&!texture.userData.minerShared)texture.dispose();m.dispose()});geometries.forEach(g=>g.dispose());renderer.dispose();renderer.forceContextLoss();canvas.remove()}};
 }
+
