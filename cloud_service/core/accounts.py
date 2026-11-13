@@ -50,7 +50,7 @@ def token_delivery_response(token,kind='verify',created=False):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def register(request):
-    strict(request.data,['email','password','name']);email=email_input(request.data)
+    strict(request.data,['email','password','passwordConfirm','name']);email=email_input(request.data)
     throttle(request,'register',email,limit=5,seconds=3600)
     def existing_account_response(existing):
         needs_verification=existing.is_active and not existing.email_verified_at
@@ -58,6 +58,8 @@ def register(request):
     existing=User.objects.filter(email=email).first()
     if existing:
         return existing_account_response(existing)
+    if request.data.get('passwordConfirm')!=request.data.get('password') or not isinstance(request.data.get('passwordConfirm'),str):
+        raise ValidationError({'passwordConfirm':'Mật khẩu nhập lại không khớp.'})
     name=clean_text(request.data.get('name'),'name')
     user=User(email=email,display_name=name)
     validate_new_password(request.data.get('password'),user)

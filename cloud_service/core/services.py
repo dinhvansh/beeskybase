@@ -9,6 +9,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.mail import send_mail
 from django.db import transaction
 from django.utils import timezone
+from django.template.loader import render_to_string
 from rest_framework.exceptions import ValidationError
 from .models import AuditLog, EmailToken, Outbox, RateBucket, User, Organization
 
@@ -39,15 +40,25 @@ def email_token(user,kind,organization=None,payload=None):
     token=EmailToken.objects.create(user=user,kind=kind,organization=organization,digest=digest(raw),expires_at=timezone.now()+ttl,payload=payload or {})
     return token,raw
 
-def enqueue_mail(recipient,subject,message):
-    data=json.dumps({'to':recipient,'subject':subject,'body':message},ensure_ascii=False).encode()
+def enqueue_mail(recipient,subject,message,html_message=None):
+    if html_message is None:
+        html_message=render_to_string('email/account.html',{'title':subject.removeprefix('BeeSky · '),'intro':'Bạn có thông báo mới từ BeeSky Mine.','body':message,'safety_note':'Nếu bạn không nhận ra yêu cầu này, vui lòng liên hệ quản trị viên của tổ chức.','public_url':settings.PUBLIC_URL})
+    data=json.dumps({'to':recipient,'subject':subject,'body':message,'html':html_message},ensure_ascii=False).encode()
     return Outbox.objects.create(encrypted_payload=cipher().encrypt(data),next_attempt_at=timezone.now())
 
 def send_token(user,kind):
     token,raw=email_token(user,kind)
     route='verify' if kind=='verify' else 'reset'
     link=settings.PUBLIC_URL+'/#/'+route+'?token='+raw
-    outbox=enqueue_mail(user.email,'BeeSky · '+('Xác thực email' if kind=='verify' else 'Đặt lại mật khẩu'),'Mở đường dẫn sau để '+('xác thực email' if kind=='verify' else 'đặt lại mật khẩu')+':\n'+link+'\nĐường dẫn chỉ dùng một lần và sẽ hết hạn.')
+    verify=kind=='verify'
+    title='Xác thực email của bạn' if verify else 'Đặt lại mật khẩu'
+    ttl='24 giờ' if verify else '1 giờ'
+    action='Xác thực email' if verify else 'Đặt mật khẩu mới'
+    intro=('Cảm ơn bạn đã đăng ký BeeSky Mine. Xác thực địa chỉ email này để kích hoạt tài khoản và bắt đầu quản lý xưởng của bạn.' if verify else 'Chúng tôi nhận được yêu cầu đặt lại mật khẩu cho tài khoản BeeSky Mine của bạn. Bấm nút bên dưới để chọn mật khẩu mới.')
+    safety=('Nếu bạn không tạo tài khoản này, bạn có thể bỏ qua email. Tài khoản sẽ chưa được kích hoạt khi email chưa được xác thực.' if verify else 'Nếu bạn không yêu cầu đặt lại mật khẩu, hãy bỏ qua email này. Mật khẩu hiện tại của bạn vẫn giữ nguyên. Không chia sẻ liên kết này với người khác.')
+    html=render_to_string('email/account.html',{'title':title,'preheader':title+' · Liên kết có hiệu lực trong '+ttl+'.','name':user.display_name,'intro':intro,'action_url':link,'action_label':action,'ttl':ttl,'safety_note':safety,'public_url':settings.PUBLIC_URL})
+    text=f"Xin chào {user.display_name or 'bạn'},\n\n{intro}\n\n{action}:\n{link}\n\nLiên kết có hiệu lực trong {ttl} và chỉ sử dụng một lần.\n\n{safety}\n\nBeeSky Mine\n{settings.PUBLIC_URL}"
+    outbox=enqueue_mail(user.email,'BeeSky Mine · '+title,text,html_message=html)
     token.outbox_id=outbox.id
     return token
 
@@ -75,7 +86,7 @@ def deliver_mail_once(outbox_id=None):
             row.attempts+=1
             try:
                 data=json.loads(cipher().decrypt(bytes(row.encrypted_payload)))
-                accepted=send_mail(data['subject'],data['body'],settings.DEFAULT_FROM_EMAIL,[data['to']],fail_silently=False)
+                accepted=send_mail(data['subject'],data['body'],settings.DEFAULT_FROM_EMAIL,[data['to']],fail_silently=False,html_message=data.get('html'))
                 if accepted!=1:raise RuntimeError('Mail provider did not accept the message')
                 row.sent_at=timezone.now();row.encrypted_payload=b'';row.last_error='';sent+=1
             except Exception as exc:

@@ -3,7 +3,7 @@ import re
 from datetime import timedelta
 from django.core import mail
 from django.db import IntegrityError,transaction
-from django.test import TestCase
+from django.test import TestCase,override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 from core.models import User,Organization,Membership,Site,EmailToken,Outbox,UserSession,Agent,Miner,Rack,RackSlot,Placement,Snapshot,Observation,AuditLog
@@ -20,7 +20,7 @@ def organization(owner,name):
 class AccountTests(TestCase):
     def setUp(self):self.client=APIClient()
     def test_registration_email_is_encrypted_and_verification_is_single_use(self):
-        body={'email':'TEST@Example.com','name':'Test User','password':PASSWORD}
+        body={'email':'TEST@Example.com','name':'Test User','password':PASSWORD,'passwordConfirm':PASSWORD}
         self.assertEqual(self.client.post('/api/v2/auth/register',body,format='json').status_code,202)
         u=User.objects.get(email='test@example.com');self.assertTrue(u.password.startswith('argon2$'));self.assertIsNone(u.email_verified_at)
         self.assertEqual(self.client.post('/api/v2/auth/login',{'email':u.email,'password':PASSWORD},format='json').status_code,403)
@@ -55,14 +55,14 @@ class AccountTests(TestCase):
         self.assertEqual(UserSession.objects.filter(user=u).count(),0);self.assertEqual(self.client.post('/api/v2/auth/reset',data,format='json').status_code,400)
     def test_login_rate_limit_and_casefolded_email_uniqueness(self):
         u=user('lower@example.com')
-        response=self.client.post('/api/v2/auth/register',{'email':'LOWER@EXAMPLE.COM','name':'Duplicate','password':PASSWORD},format='json')
+        response=self.client.post('/api/v2/auth/register',{'email':'LOWER@EXAMPLE.COM','name':'Duplicate','password':PASSWORD,'passwordConfirm':PASSWORD},format='json')
         self.assertEqual(response.status_code,409);self.assertEqual(response.json()['code'],'email_exists');self.assertEqual(response.json()['nextAction'],'login');self.assertEqual(User.objects.filter(email__iexact=u.email).count(),1)
         for _ in range(10):self.assertEqual(self.client.post('/api/v2/auth/login',{'email':u.email,'password':'wrong'},format='json').status_code,400)
         self.assertEqual(self.client.post('/api/v2/auth/login',{'email':u.email,'password':'wrong'},format='json').status_code,429)
     def test_duplicate_unverified_registration_does_not_change_password_or_send_mail(self):
         u=User.objects.create_user('pending@example.com',PASSWORD,display_name='Original')
         old_password=u.password
-        response=self.client.post('/api/v2/auth/register',{'email':'PENDING@example.com','name':'Replacement','password':'Different!Quartz-2027'},format='json')
+        response=self.client.post('/api/v2/auth/register',{'email':'PENDING@example.com','name':'Replacement','password':'Different!Quartz-2027','passwordConfirm':'Different!Quartz-2027'},format='json')
         self.assertEqual(response.status_code,409)
         self.assertEqual(response.json()['nextAction'],'verify')
         u.refresh_from_db();self.assertEqual(u.password,old_password);self.assertEqual(u.display_name,'Original')
@@ -89,7 +89,7 @@ class AccountTests(TestCase):
 
     def test_registration_smtp_failure_keeps_account_and_is_not_success(self):
         with patch('core.services.send_mail',return_value=0):
-            response=self.client.post('/api/v2/auth/register',{'email':'new-failed@example.com','name':'Test','password':PASSWORD},format='json')
+            response=self.client.post('/api/v2/auth/register',{'email':'new-failed@example.com','name':'Test','password':PASSWORD,'passwordConfirm':PASSWORD},format='json')
         self.assertEqual(response.status_code,503);self.assertTrue(response.json()['accountCreated'])
         self.assertTrue(User.objects.filter(email='new-failed@example.com').exists())
         self.assertIsNone(Outbox.objects.get().sent_at)
@@ -101,6 +101,26 @@ class AccountTests(TestCase):
         response=self.client.post('/api/v2/auth/resend',{'email':u.email},format='json')
         self.assertEqual(response.status_code,200);self.assertEqual(response.json()['code'],'email_sent')
         other.refresh_from_db();self.assertIsNone(other.sent_at);self.assertEqual(other.attempts,0)
+
+    def test_registration_requires_matching_confirmation_without_creating_account(self):
+        for extra in [{},{'passwordConfirm':'wrong-confirmation'}]:
+            response=self.client.post('/api/v2/auth/register',{'email':'mismatch@example.com','name':'Test','password':PASSWORD,**extra},format='json')
+            self.assertEqual(response.status_code,400);self.assertIn('passwordConfirm',response.json())
+        self.assertFalse(User.objects.filter(email='mismatch@example.com').exists())
+        self.assertEqual(Outbox.objects.count(),0)
+
+    @override_settings(PUBLIC_URL="https://mine.example.com")
+    def test_html_verification_and_reset_mail_have_same_link_as_text_and_escape_names(self):
+        from core.services import send_token
+        u=User.objects.create_user('template@example.com',PASSWORD,display_name='<script>unsafe</script>')
+        for kind,ttl in [('verify','24 giờ'),('reset','1 giờ')]:
+            token=send_token(u,kind);self.assertEqual(deliver_mail_once(outbox_id=token.outbox_id),1)
+            email=mail.outbox[-1];self.assertEqual(email.alternatives[0][1],'text/html')
+            html=email.alternatives[0][0]
+            self.assertIn(ttl,html);self.assertIn('BeeSky',html)
+            self.assertNotIn('<script>unsafe</script>',html);self.assertIn('&lt;script&gt;',html)
+            link=re.search(r'https?://[^\s]+token=[\w-]+',email.body)[0]
+            self.assertIn(link,html)
 
     def test_onboarding_creates_organization_site_and_owner_atomically(self):
         u=user('new@example.com');self.client.force_login(u)
