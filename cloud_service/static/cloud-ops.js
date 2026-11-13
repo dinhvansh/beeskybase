@@ -2,14 +2,14 @@
 let liveScene=null,sceneGeneration=0,sceneMode='inspect',sceneFloor='',sceneAllFloors=false,sceneSelected='',scenePending='',sceneEffects=true,scene3d=false,layoutQuery='',showWorker=true,showCustomer=true,openTicket=null;
 const opsRoutes=['racks','energy','maintenance','repairs','customers','workflows','events'];
 function disposeScene(){sceneGeneration++;liveScene?.dispose();liveScene=null}
-async function loadOps(route,prefix){if(!opsRoutes.includes(route)||!cloud.site)return null;const d={};
- if(route==='racks'){d.layout=await api(prefix+'/layout');d.racks={results:d.layout.racks};d.placementMiners={results:d.layout.miners};}
- if(route==='energy'){[d.plan,d.power,d.racks]=await Promise.all([api(prefix+'/plan'),api(prefix+'/power'),api(prefix+'/racks?limit=200')]);}
- if(route==='maintenance'){[d.schedules,d.tickets]=await Promise.all([api(prefix+'/maintenance/schedules?limit=200'),api(prefix+'/maintenance/tickets?limit=200')]);const id=new URLSearchParams(location.hash.split('?')[1]||'').get('ticket');if(id)d.ticket=await api(prefix+'/maintenance/tickets/'+id);}
- if(route==='customers'){[d.customers,d.groups]=await Promise.all([api('/customers?limit=200'),api(prefix+'/groups?limit=200')]);}
- if(route==='repairs')d.repairs=await api(prefix+'/repairs?limit=200');
- if(route==='workflows')[d.rules,d.alerts]=await Promise.all([api(prefix+'/rules?limit=200'),api(prefix+'/alerts?limit=200')]);
- if(route==='events')d.events=await api(prefix+'/events?limit=200');return d;
+async function loadOps(route,prefix,signal){if(!opsRoutes.includes(route)||!cloud.site)return null;const d={},read=path=>api(path,undefined,undefined,signal);
+ if(route==='racks'){d.layout=await read(prefix+'/layout');d.racks={results:d.layout.racks};d.placementMiners={results:d.layout.miners};}
+ if(route==='energy'){[d.plan,d.power,d.racks]=await Promise.all([read(prefix+'/plan'),read(prefix+'/power'),read(prefix+'/racks?limit=200')]);}
+ if(route==='maintenance'){[d.schedules,d.tickets]=await Promise.all([read(prefix+'/maintenance/schedules?limit=200'),read(prefix+'/maintenance/tickets?limit=200')]);const id=new URLSearchParams(location.hash.split('?')[1]||'').get('ticket');if(id)d.ticket=await read(prefix+'/maintenance/tickets/'+id);}
+ if(route==='customers'){[d.customers,d.groups]=await Promise.all([read('/customers?limit=200'),read(prefix+'/groups?limit=200')]);}
+ if(route==='repairs')d.repairs=await read(prefix+'/repairs?limit=200');
+ if(route==='workflows')[d.rules,d.alerts]=await Promise.all([read(prefix+'/rules?limit=200'),read(prefix+'/alerts?limit=200')]);
+ if(route==='events')d.events=await read(prefix+'/events?limit=200');return d;
 }
 const opButton=(label,actionName,extra='')=>`<button class="btn" data-op="${actionName}" ${extra}>${label}</button>`;
 const writable=(label,name,extra='')=>canWrite()?opButton(label,name,extra):'';
