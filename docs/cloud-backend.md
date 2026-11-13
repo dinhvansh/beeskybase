@@ -58,3 +58,17 @@ Site `/maintenance/schedules`, `/maintenance/tickets`, ticket `/photos` and `/ma
 Site `/rules`, `/alerts`, alert `/acknowledge` and `/events` expose server-evaluated alerts and agent events. Rules support temperature, measured power and stale minutes; no physical commands or arbitrary workflow nodes. The worker runs independently of the browser, every 30 seconds for alerts and current-month tickets.
 
 Production Compose/HTTPS, setup and agent checks: see [cloud-deployment.md](cloud-deployment.md). Public service is deployed at `https://mine.beeskybase.com`; hardware agent testing and SMTP account/domain verification remain. No implicit old-SQLite import, MFA or remote command dispatcher is enabled. Existing preview remains separate.
+
+## Platform administration
+
+`/control/` is the separate Super Admin console. It lists registered users with verification/activity status, registration and login times, organization counts, paginated organization summaries and platform audit entries. A verified, active Django superuser is required for every `/api/v2/platform/*` endpoint. Organization owner/admin roles and `is_staff` alone do not grant access. The console does not impersonate users or bypass tenant-scoped operational APIs.
+
+Actions require a reason, CSRF and rate limits: disable/enable a user, revoke sessions, resend verification through the existing mail outbox. Disabling revokes all browser sessions and outstanding email tokens. Re-enabling requires a fresh login; organization and xưởng data remain. Super Admin accounts cannot be changed through the console.
+
+Create the first administrator on the server:
+
+```
+python manage.py bootstrap_superadmin --email vanqn95@gmail.com --name "BeeSky Admin"
+```
+
+The command prompts privately for a validated password. To let the operator set it in the browser, add `--setup-link-file /tmp/beesky-admin-setup.txt`: it creates a new account with an unusable password and writes a one-use, 15-minute password setup link into an exclusive mode-0600 file. Deliver that link privately and remove the file after use. It never prints the token/password. Existing verified active users can be promoted explicitly with `--promote-existing`; their password is preserved. Public signup cannot set administrator flags. No default administrator password is shipped.

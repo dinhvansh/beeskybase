@@ -26,7 +26,7 @@ def email_input(data):
 def me_data(request):
     if not request.user or not request.user.is_authenticated:return {'authenticated':False}
     memberships=Membership.objects.select_related('organization').filter(user=request.user,active=True).order_by("id")
-    return {'authenticated':True,'user':{'id':request.user.id,'email':request.user.email,'name':request.user.display_name,'verified':bool(request.user.email_verified_at)},'organizations':[{'id':m.organization_id,'name':m.organization.name,'role':m.role} for m in memberships],'selectedOrganization':request.session.get('organization_id')}
+    return {'authenticated':True,'user':{'id':request.user.id,'email':request.user.email,'name':request.user.display_name,'verified':bool(request.user.email_verified_at),'superadmin':request.user.is_superuser},'organizations':[{'id':m.organization_id,'name':m.organization.name,'role':m.role} for m in memberships],'selectedOrganization':request.session.get('organization_id')}
 
 @api_view(['GET'])
 @permission_classes([AllowAny])

@@ -5,7 +5,7 @@ from django.db import connection
 from django.shortcuts import render
 from django.urls import path
 from django.views.generic import RedirectView
-from core import accounts,operations,ingest,facility,upkeep
+from core import accounts,operations,ingest,facility,upkeep,platform_admin
 
 def index(request):
     response=render(request,'app.html',{'mailbox_url':os.getenv('BEESKY_LOCAL_MAILBOX','') if settings.DEBUG else ''})
@@ -20,7 +20,18 @@ def health(request):
     except Exception:return JsonResponse({'status':'unavailable'},status=503)
     return JsonResponse({'status':'ok','database':connection.vendor,'service':'beesky-cloud'})
 
+def control(request):
+    response=render(request,'platform.html')
+    response['Cache-Control']='no-store'
+    return response
+
 urlpatterns=[
+    path('control/',control),
+    path('api/v2/platform/overview',platform_admin.overview),
+    path('api/v2/platform/users',platform_admin.users),
+    path('api/v2/platform/users/<uuid:user_id>/action',platform_admin.user_action),
+    path('api/v2/platform/organizations',platform_admin.organizations),
+    path('api/v2/platform/audit',platform_admin.logs),
     path('assets/models/s21-hydro.glb',RedirectView.as_view(url='/static/assets/models/s21-hydro.glb')),
     path('assets/models/s19-pro-air.glb',RedirectView.as_view(url='/static/assets/models/s19-pro-air.glb')),
     path('',index),path('health/ready',health),
