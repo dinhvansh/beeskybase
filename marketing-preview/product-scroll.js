@@ -1,0 +1,9 @@
+(()=>{
+document.querySelectorAll('.product-feature').forEach((card,i)=>{const old=card.querySelector('.product-display');old.className='product-artwork';old.innerHTML=`<div class="product-artwork-image artwork-${i}" aria-hidden="true"></div><small>Giao diện & số liệu minh họa</small>`;card.classList.add('parallax-card');card.dataset.parallaxDirection=String(i%2?-1:1)});
+const media=matchMedia('(prefers-reduced-motion:reduce)'),cards=[...document.querySelectorAll('.parallax-card')],solutions=[...document.querySelectorAll('.solution-illustration')],service=document.querySelector('.service-emblem'),elements=[...cards,...solutions];let visible=new Set(),queued=false;
+const observer=new IntersectionObserver(es=>{es.forEach(e=>e.isIntersecting?visible.add(e.target):visible.delete(e.target));schedule()},{rootMargin:'100px'});elements.forEach(e=>observer.observe(e));
+function update(){queued=false;const disabled=document.body.classList.contains('still')||media.matches;for(const element of elements){if(!visible.has(element)&&!disabled)continue;const r=element.getBoundingClientRect(),progress=Math.max(-1,Math.min(1,(r.top+r.height/2-innerHeight/2)/innerHeight));element.style.setProperty('--scroll-drift',disabled?'0px':`${progress*(innerWidth<701?55:185)}px`);element.style.setProperty('--scroll-tilt',disabled?'0deg':`${progress*5}deg`)}const currentService=document.querySelector('.service-emblem');if(currentService){const r=currentService.closest('.service-panel').getBoundingClientRect(),p=Math.max(-1,Math.min(1,(r.top-innerHeight/2)/innerHeight));currentService.style.setProperty('--service-drift',disabled?'0px':`${p*65}px`)}}
+function schedule(){if(!queued){queued=true;requestAnimationFrame(update)}}addEventListener('scroll',schedule,{passive:true});addEventListener('resize',schedule);new MutationObserver(schedule).observe(document.body,{attributes:true,attributeFilter:['class']});media.addEventListener('change',schedule);schedule();
+
+})();
+
