@@ -1,5 +1,6 @@
 import * as T from '../cloud-preview/rack3d/node_modules/three/build/three.module.js';
 import './warehouse-source.js';
+import './mine-hero-source.js';
 import {GLTFLoader} from '../cloud-preview/rack3d/node_modules/three/examples/jsm/loaders/GLTFLoader.js';
 const host=document.querySelector('#hardware'),scene=new T.Scene(),camera=new T.PerspectiveCamera(30,1,.1,100),renderer=new T.WebGLRenderer({alpha:true,antialias:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=1.5;host.append(renderer.domElement);camera.position.set(0,1.5,9);camera.lookAt(0,0,0);scene.add(new T.HemisphereLight(0xffffff,0x727a83,3));const light=new T.DirectionalLight(0xffffff,5);light.position.set(2,5,5);scene.add(light);const rim=new T.DirectionalLight(0xd2e1ff,3);rim.position.set(-4,2,-2);scene.add(rim);
