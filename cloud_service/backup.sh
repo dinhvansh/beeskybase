@@ -7,8 +7,8 @@ out=${1:?Provide an existing private backup directory}
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 file="$out/beesky-$(date -u +%Y%m%dT%H%M%SZ).dump"
 [ ! -e "$file" ] || { echo 'Backup file already exists.' >&2; exit 1; }
-docker compose --env-file "$repo/cloud_service/.env.production" -f "$repo/cloud_service/compose.production.yaml" exec -T db pg_dump -U beesky -d beesky -Fc > "$file.partial"
+docker compose -p "${BEESKY_COMPOSE_PROJECT:-beesky-cloud-production}" --env-file "$repo/cloud_service/.env.production" -f "$repo/cloud_service/compose.production.yaml" exec -T db pg_dump -U beesky -d beesky -Fc > "$file.partial"
 # Verify archive readability before publishing its final name.
-docker compose --env-file "$repo/cloud_service/.env.production" -f "$repo/cloud_service/compose.production.yaml" exec -T db pg_restore --list < "$file.partial" > /dev/null
+docker compose -p "${BEESKY_COMPOSE_PROJECT:-beesky-cloud-production}" --env-file "$repo/cloud_service/.env.production" -f "$repo/cloud_service/compose.production.yaml" exec -T db pg_restore --list < "$file.partial" > /dev/null
 mv "$file.partial" "$file"
 printf 'Created backup: %s\n' "$file"

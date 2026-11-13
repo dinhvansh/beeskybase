@@ -57,4 +57,4 @@ Site `/maintenance/schedules`, `/maintenance/tickets`, ticket `/photos` and `/ma
 
 Site `/rules`, `/alerts`, alert `/acknowledge` and `/events` expose server-evaluated alerts and agent events. Rules support temperature, measured power and stale minutes; no physical commands or arbitrary workflow nodes. The worker runs independently of the browser, every 30 seconds for alerts and current-month tickets.
 
-Production Compose/HTTPS, setup and agent checks: see [cloud-deployment.md](cloud-deployment.md). No public deployment performed; hardware agent testing and SMTP/domain setup remain for the selected server. No implicit old-SQLite import, MFA or remote command dispatcher is enabled. Existing preview remains separate.
+Production Compose/HTTPS, setup and agent checks: see [cloud-deployment.md](cloud-deployment.md). Public service is deployed at `https://mine.beeskybase.com`; hardware agent testing and SMTP account/domain verification remain. No implicit old-SQLite import, MFA or remote command dispatcher is enabled. Existing preview remains separate.

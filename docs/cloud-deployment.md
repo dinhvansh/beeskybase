@@ -1,6 +1,6 @@
 # Deploy BeeSky real backend
 
-This deploys `cloud_service`, not the legacy preview or the old deploy-cloud workflow. No public deployment has been performed. The current release supports account isolation, telemetry, 2D/3D layout, power planning, customer/groups, maintenance evidence/approval, repairs and server-evaluated alert rules. Rules create in-app alerts only; they do not dispatch physical commands or external webhooks.
+This deploys `cloud_service`, not the legacy preview or the old deploy-cloud workflow. Public deployment target: `https://mine.beeskybase.com` (existing proxy setup below). The current release supports account isolation, telemetry, 2D/3D layout, power planning, customer/groups, maintenance evidence/approval, repairs and server-evaluated alert rules. Rules create in-app alerts only; they do not dispatch physical commands or external webhooks.
 
 ## VPS preparation
 
@@ -68,3 +68,21 @@ Upgrade: create/verify backup, `git pull --ff-only`, then repeat `up -d --build`
 - Power calculations are capacity planning, not metered kWh. Only placed machines count. Fresh measured watts and explicit/catalog ratings are distinguished; unknown variants are flagged. ABC divides load equally and requires actual 3-phase hardware. Phase currents/imbalance need physical measurement confirmation.
 - Alerts run every 30 seconds server-side. Surges compare fresh measured power (>20% and at least 100 W increase), remain for 10 minutes. Rules support temperature, watts and stale minutes. No arbitrary workflow execution, remote control or external notifications are enabled.
 - Snapshot history retains 100 snapshots per agent. This is not long-term energy/time-series billing storage. MFA, fleet-scale indexing/partitioning and external alarm delivery are future work.
+
+## Existing Nginx Proxy Manager deployment
+
+For `mine.beeskybase.com`, the VPS already owns ports 80/443 through Nginx Proxy Manager. Apply `cloud_service/compose.npm.yaml` after the production file and use project `beesky-mine`. It disables the standalone Caddy service and exposes the web container only on the existing external proxy network (default `eoffice_proxy`), as `beesky-mine-web:8000`. The new database and worker stay on their own network.
+
+```sh
+docker compose -p beesky-mine --env-file /opt/beesky-mine/shared/.env.production -f cloud_service/compose.production.yaml -f /opt/beesky-mine/shared/compose.npm.yaml up -d --build db web worker
+```
+
+The proxy template is `cloud_service/nginx-mine.conf.example`. Install it through the existing proxy's supported custom HTTP include, validate with `nginx -t`, then reload. It replaces forwarded IP/protocol headers and uses Docker DNS to survive web container replacement. TLS uses a dedicated certificate for this domain; keep its ACME webroot reachable on port 80 and schedule renewal with a validated reload hook.
+
+Release source: `/opt/beesky-mine/releases/2715077`. Private configuration: `/opt/beesky-mine/shared/.env.production`, linked into the release; no production secret belongs in Git. The archive deployment records its source commit; it does not depend on private GitHub credentials on the VPS. SMTP must be configured before users can receive verification/password reset emails; a DNS placeholder is not a mail service.
+
+When using the backup script for this project, set `BEESKY_COMPOSE_PROJECT=beesky-mine`; otherwise its default project is the standalone installation. Preserve database backups and the private encryption keys independently of release source.
+
+Operational certificate renewal on this VPS is installed as `beesky-mine-certificate.timer` (twice daily with jitter). It renews only the dedicated `beesky-mine` certificate and validates Nginx before reload. Proxy configuration backups and deployment logs are retained in `/opt/beesky-mine/shared`. SMTP is pending account/domain verification; the placeholder `smtp.invalid` intentionally cannot deliver mail.
+
+Deployment verified on 2026-11-13: public HTTPS readiness, secure cookies/CSRF, isolated test login/onboarding, actual agent transport with snapshot retry deduplication and events, persisted rack placement/power, 3D static assets and revoked-key rejection. Temporary test user/site/agent data was removed. An initial PostgreSQL dump was created and its archive list validated under `/opt/beesky-mine/backups`. This does not verify physical miner adapters or mail delivery; SMTP account/domain setup remains pending.

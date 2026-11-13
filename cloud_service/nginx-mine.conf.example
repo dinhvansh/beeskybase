@@ -1,0 +1,31 @@
+# BeeSky mine managed deployment
+server {
+    listen 80;
+    listen [::]:80;
+    server_name mine.beeskybase.com;
+    location ^~ /.well-known/acme-challenge/ {
+        root /data/beesky-acme;
+        default_type text/plain;
+    }
+    location / { return 301 https://$host$request_uri; }
+}
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name mine.beeskybase.com;
+    ssl_certificate /etc/letsencrypt/live/beesky-mine/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/beesky-mine/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    client_max_body_size 16m;
+    resolver 127.0.0.11 valid=30s ipv6=off;
+    location / {
+        set $beesky_upstream beesky-mine-web:8000;
+        proxy_pass http://$beesky_upstream;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+        proxy_connect_timeout 5s;
+    }
+}

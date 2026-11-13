@@ -1,0 +1,13 @@
+# Deploy behind an existing Nginx Proxy Manager; no host ports are claimed.
+services:
+  proxy:
+    profiles: [standalone-proxy]
+  web:
+    networks:
+      default: {}
+      proxy-edge:
+        aliases: [beesky-mine-web]
+networks:
+  proxy-edge:
+    external: true
+    name: ${BEESKY_PROXY_NETWORK:-eoffice_proxy}
