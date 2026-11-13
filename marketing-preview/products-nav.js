@@ -1,4 +1,6 @@
 (()=>{
+ const aiArt=document.querySelector('.api-product-art');
+ if(aiArt)aiArt.outerHTML='<figure class="product-artwork ai-real-art"><img src="assets/beesky-ai-studio-v1.png" alt="Minh họa 3D từ giao diện thực tế của BeeSkyBase AI" width="1672" height="941" loading="lazy"><small>Giao diện minh họa từ sản phẩm BeeSkyBase AI</small></figure>';
  const flowHero=document.querySelector('body[data-page="flow"] .document-visual');
  if(flowHero)flowHero.outerHTML='<figure class="flow-real-hero"><img src="assets/flowdocker-dashboard-studio-v1.png" alt="Minh họa 3D FlowDocker từ giao diện tổng quan thực tế" width="1672" height="941"><figcaption>Giao diện minh họa từ sản phẩm FlowDocker</figcaption></figure>';
  const nav=document.querySelector('header nav');if(!nav)return;
