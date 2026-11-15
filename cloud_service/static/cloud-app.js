@@ -37,6 +37,8 @@ function renderAuthView(route){
 const navigation=[['overview','Tổng quan'],['sites','Xưởng'],['agents','Agent'],['miners','Máy đào'],['racks','Xưởng 2D / 3D'],['energy','Điện & nguồn cấp'],['maintenance','Bảo trì'],['repairs','Sửa máy'],['customers','Khách & nhóm máy'],['workflows','Quy trình cảnh báo'],['events','Sự kiện agent'],['members','Thành viên'],['security','Bảo mật'],['audit','Nhật ký']];
 function visibleNavigation(){return cloud.me?.user?.superadmin?[navigation[0],['user-admin','Người dùng đăng ký'],...navigation.slice(1)]:navigation}
 const navPaths={
+ down:'<path d="m6 9 6 6 6-6"/>',
+ check:'<path d="m5 12 4 4L19 6"/>',
  overview:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
  sites:'<path d="m3 10 9-6 9 6v11H3Z"/><path d="M7 21v-7h10v7M7 10h10M10 17h4"/>',
  agents:'<rect x="4" y="4" width="16" height="12" rx="2"/><path d="M8 20h8m-4-4v4m-4-10 2 2 4-4"/>',
@@ -54,6 +56,8 @@ const navPaths={
  menu:'<path d="M4 6h16M4 12h16M4 18h16"/>'
 };
 function navIcon(id){return `<svg class="icon nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${navPaths[id==='user-admin'?'customers':id]||navPaths.overview}</svg>`}
+// Adapter for the shared BeeSky ComboBox component.
+const icon=navIcon;
 function shellContext(){return cloud.me.user.id+':'+membership()?.id}
 function shell(body){const org=membership(),route=location.hash.split('?')[0].replace('#/','')||'overview';return `<div class="shell ${cloud.menu?'menu-open':''} ${cloud.navCollapsed?'nav-collapsed':''}" data-context="${esc(shellContext())}"><button class="mobile-overlay" data-menu aria-label="Đóng menu"></button><aside class="sidebar">${brand()}<div class="workspace"><div><strong>${esc(org?.name||'Tổ chức của bạn')}</strong><small>${{owner:'Chủ sở hữu',admin:'Quản trị viên',viewer:'Chỉ xem'}[org?.role]||''} · Dữ liệu riêng</small></div></div><nav class="side-nav" aria-label="Điều hướng chính">${visibleNavigation().map(([id,name])=>`<a class="nav-item ${route===id?'active':''}" href="#/${id}" title="${name}" ${route===id?'aria-current="page"':''}>${navIcon(id)}<span class="nav-text">${name}</span></a>`).join('')}</nav><div class="side-bottom"><div class="cloud-profile"><strong>${esc(cloud.me.user.name)}</strong><small>${esc(cloud.me.user.email)}</small></div><button class="btn full" data-logout title="Đăng xuất">Đăng xuất</button></div></aside><div class="main-col"><header class="topbar"><div class="top-context"><button class="icon-btn" data-menu aria-label="Thu gọn hoặc mở menu">${navIcon('menu')}</button><span class="breadcrumb">${esc(org?.name||'BeeSky Cloud')}</span></div><div class="top-actions">${cloud.me.organizations.length>1?`<select id="org-select" aria-label="Tổ chức">${cloud.me.organizations.map(o=>`<option value="${o.id}" ${o.id===org?.id?'selected':''}>${esc(o.name)}</option>`).join('')}</select>`:''}${themeToggle()}</div></header><main class="content" id="main">${body}</main></div></div>`}
 function renderMain(body,route){
