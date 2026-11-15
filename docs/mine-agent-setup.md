@@ -24,3 +24,12 @@ Thu hồi token trên Cloud sẽ chặn cả kiểm tra kết nối và các l�
 `python cloud_service/manage.py test core.tests.test_ingest_placement.IngestTests` kiểm tra giới hạn token theo xưởng, thu hồi token, ingest và các đường dẫn tải.
 
 Flutter kiểm tra giao diện bằng `flutter analyze` và `flutter test` trong từng thư mục `app_flutter` và `app_agent_flutter`. Các bài kiểm tra dùng dữ liệu tổng hợp, không quét thiết bị thật.
+
+## Kết quả kiểm tra bản 0.40.2 — 15/11/2026
+
+- 6 kiểm tra Python về kết nối, khóa chạy trùng và đường dẫn engine cho tác vụ tự khởi động: đạt.
+- 11 kiểm tra backend về ingest, quyền theo token/xưởng và tải công cụ: đạt. CI PostgreSQL, hai ứng dụng Flutter và bộ cài Windows đều thành công tại tag `v0.40.2`.
+- Luồng web với backend local thật: tạo/sao chép token, lấy đúng xưởng mà không tạo heartbeat, nhận bản quét, hiển thị máy và thu hồi token: đạt. Tài khoản/xưởng kiểm thử đã được xóa.
+- Engine Agent thật quét một miner giả lập chỉ tại loopback `127.0.0.1`, rồi gửi thiết bị lên đúng xưởng trong Cloud local: đạt. Không dùng miner vật lý.
+- Cửa sổ Tk vừa màn hình 1280×800, nút bắt đầu/lưu luôn hiện; trang tải và trang Agent đã kiểm tra ở desktop/mobile.
+- Hai đường tải trên domain Mine trả đúng bộ cài 0.40.2, file tải trả HTTP 200; trang giới thiệu hiển thị bản mới và Cloud sẵn sàng.
