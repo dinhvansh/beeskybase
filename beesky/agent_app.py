@@ -514,6 +514,13 @@ def _task_command_parts(config_path: str | Path | None = None,
         else Path(sys.executable)
     args: list[str] = []
     if getattr(sys, "frozen", False):
+        if exe.stem.lower() not in ('beesky-agent','beesky-agentw'):
+            # Agent mode can be opened inside the scanner's Tk process.
+            # Its executable is a GUI entry point, so tasks must use the
+            # installed agent engine rather than the hosting scanner.
+            name='beesky-agentw.exe' if windowed else 'beesky-agent.exe'
+            candidates=[exe.parent/name,exe.parent/'agent'/name]
+            exe=next((path for path in candidates if path.is_file()),candidates[-1])
         if windowed and exe.stem.lower() == "beesky-agent":
             exe = exe.with_name(exe.stem + "w" + exe.suffix)
         command = str(exe)

@@ -54,5 +54,15 @@ class ConnectionTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 with agent_run_lock(path):pass
         with agent_run_lock(path):pass
+    def test_scanner_host_registers_the_agent_engine_for_autostart(self):
+        from unittest.mock import patch
+        from beesky.agent_app import _task_command_parts
+        base=Path(self.temp.name);folder=base/'agent';folder.mkdir()
+        engine=folder/'beesky-agentw.exe';engine.write_bytes(b'test engine')
+        config=base/'agent.json'
+        with patch.object(sys,'frozen',True,create=True):
+            command,args=_task_command_parts(config,windowed=True,exe_path=base/'beesky-gui.exe')
+        self.assertEqual(command,str(engine));self.assertIn('run',args)
+        self.assertIn(str(config),args)
 
 if __name__=='__main__':unittest.main()

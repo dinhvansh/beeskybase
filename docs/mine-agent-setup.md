@@ -15,7 +15,7 @@ Thu hồi token trên Cloud sẽ chặn cả kiểm tra kết nối và các l�
 
 - `/downloads/scanner` trên domain Mine chuyển đến bộ cài đầy đủ chính thức trên GitHub Releases.
 - `/downloads/agent` chuyển đến bộ cài Agent riêng.
-- Bản 0.40.1 bổ sung Chế độ Agent trong Scanner và kiểm tra token với Cloud. ZIP Flutter Scanner cũng kèm cả engine Scanner và engine Agent.
+- Bản 0.40.2 bổ sung Chế độ Agent trong Scanner và kiểm tra token với Cloud. ZIP Flutter Scanner cũng kèm cả engine Scanner và engine Agent.
 
 ## Kiểm tra
 

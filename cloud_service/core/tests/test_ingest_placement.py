@@ -35,7 +35,7 @@ class IngestTests(TestCase):
         for tool,filename in [('scanner','BeeSkySetup'),('agent','BeeSkyAgentSetup')]:
             response=anonymous.get('/downloads/'+tool)
             self.assertEqual(response.status_code,302)
-            self.assertEqual(response['Location'],f'https://github.com/dinhvansh/beeskybase/releases/download/v0.40.1/{filename}-0.40.1.exe')
+            self.assertEqual(response['Location'],f'https://github.com/dinhvansh/beeskybase/releases/download/v0.40.2/{filename}-0.40.2.exe')
         self.assertEqual(anonymous.get('/downloads/unknown').status_code,404)
     def test_agent_bound_site_retry_dedup_and_real_power_contract(self):
         self.assertEqual(self.push().status_code,200);self.assertTrue(self.push().json()['duplicate'])
