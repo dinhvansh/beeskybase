@@ -87,6 +87,10 @@ jobs:
         run: |
           Copy-Item dist\beesky.exe `
             app_flutter\build\windows\x64\runner\Release\beesky.exe
+          Copy-Item dist\beesky-agent.exe `
+            app_flutter\build\windows\x64\runner\Release\beesky-agent.exe
+          Copy-Item dist\beesky-agentw.exe `
+            app_flutter\build\windows\x64\runner\Release\beesky-agentw.exe
           if (-not (Test-Path `
             app_flutter\build\windows\x64\runner\Release\beesky.exe)) {
             exit 1

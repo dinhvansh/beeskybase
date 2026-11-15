@@ -26,6 +26,17 @@ class AgentAuthentication(BaseAuthentication):
         if not agent:raise AuthenticationFailed('Mã agent không hợp lệ hoặc đã thu hồi.')
         return AgentPrincipal(),agent
 
+@api_view(['GET'])
+@authentication_classes([AgentAuthentication])
+def connection(request):
+    """Resolve a token's fixed destination without scanning or sending a heartbeat."""
+    agent=request.auth
+    response=Response({'agentId':str(agent.id),'agentName':agent.name,
+        'siteId':str(agent.site_id),'siteName':agent.site.name,
+        'organizationName':agent.site.organization.name,'mode':'monitor'})
+    response['Cache-Control']='no-store'
+    return response
+
 def timestamp(raw,default=None):
     value=default if raw is None else raw
     if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value):raise ValidationError('Timestamp không hợp lệ.')

@@ -8,11 +8,8 @@ import 'agent_config.dart';
 import 'theme.dart';
 
 const String _keyNote =
-    'Agent key do cloud cấp và chỉ hiện MỘT lần lúc tạo agent '
-    '(trang Cài đặt của cloud) — dán vào đây rồi Lưu cấu hình. '
-    'Key chỉ nằm trong file cấu hình này (trên Windows được '
-    'Windows mã hoá DPAPI ngay trong file); mất key thì thu hồi '
-    'agent cũ trên cloud và tạo agent mới.';
+    'Tạo token trong mục Agent trên Mine, dán vào đây rồi kiểm tra kết nối. '
+    'Token đã gắn với xưởng trên web; dữ liệu luôn gửi về đúng xưởng đó.';
 
 const String _protectedKeyHint =
     'Key đang lưu dạng mã hoá DPAPI — để trống để giữ nguyên, '
@@ -32,7 +29,8 @@ String _stamp() {
 class AgentConfigPage extends StatefulWidget {
   final AgentBridge bridge;
   final AgentConfigStore store;
-  const AgentConfigPage({super.key, required this.bridge, required this.store});
+  final bool embedded;
+  const AgentConfigPage({super.key, required this.bridge, required this.store, this.embedded=false});
 
   @override
   State<AgentConfigPage> createState() => _AgentConfigPageState();
@@ -48,6 +46,8 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
   bool _showKey = false;
   bool _keyProtected = false;
   bool _testing = false;
+  bool _checking = false, _filling = true, _displayRunning = false;
+  AgentConnection? _connection;
   String _statusLine = '';
   String _testPillTone = 'dim';
   String _testPillText = 'Chưa chạy thử';
@@ -65,14 +65,15 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
   void initState() {
     super.initState();
     _statusLine = 'File cấu hình: ${store.path}';
-    _cloudCtrl.addListener(() => setState(() {}));
+    _cloudCtrl.addListener(_connectionChanged);
+    _keyCtrl.addListener(_connectionChanged);
     _init();
     // The Tk window polls the status file's mtime every 100 ms;
     // 2 s here (divergence D7 — status changes once per cycle).
     _timer = Timer.periodic(const Duration(seconds: 2), (_) {
       final mtime = store.statusModified();
-      if (mtime != _statusMtime && mounted) {
-        setState(_refreshStatusCard);
+      if ((mtime != _statusMtime || _displayRunning != bridge.running) && mounted) {
+        setState(() { _displayRunning=bridge.running; _refreshStatusCard(); });
       }
     });
   }
@@ -88,6 +89,7 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
 
   Future<void> _init() async {
     if (!store.exists()) {
+      _cloudCtrl.text='https://mine.beeskybase.com';
       // First run: pre-fill the scan target with this machine's
       // own subnet, via the sidecar's sysinfo (D5).
       final target = await bridge.sysinfoDefaultTarget();
@@ -106,6 +108,7 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
       if (mounted) setState(() {});
     }
     _refreshStatusCard();
+    _filling=false;
     await _refreshAutostart();
     if (mounted) setState(() {});
   }
@@ -159,34 +162,74 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
     return (base, null);
   }
 
-  void _saveConfig() {
+  void _connectionChanged() {
+    if(_filling || !mounted) return;
+    setState(() { _connection=null; _siteCtrl.clear(); });
+  }
+
+  Future<bool> _checkConnection() async {
+    if(_checking) return false;
+    final (cfg,error)=_currentConfig();
+    if(error != null) { setState(()=>_statusLine='Chưa kiểm tra được: $error');return false; }
+    final cloud=_cloudCtrl.text, token=_keyCtrl.text;
+    setState(() { _checking=true; _statusLine='Đang kiểm tra token với Mine…'; });
+    try {
+      final connection=await bridge.connectionInfo(configPath:store.path,
+        cloudUrl:cfg!.cloudUrl,key:cfg.hasProtectedKey?null:cfg.key);
+      if(!mounted || cloud != _cloudCtrl.text || token != _keyCtrl.text) return false;
+      setState(() { _connection=connection; _siteCtrl.text=connection.siteName;
+        _statusLine='Đã xác nhận: ${connection.agentName} · ${connection.siteName} · ${connection.organizationName}'; });
+      return true;
+    } on FormatException catch(e) {
+      if(mounted) setState(() { _connection=null;_siteCtrl.clear();_statusLine=e.message.toString(); });
+      return false;
+    } catch(_) {
+      if(mounted) setState(()=>_statusLine='Không kiểm tra được token. Kiểm tra kết nối rồi thử lại.');
+      return false;
+    } finally { if(mounted) setState(()=>_checking=false); }
+  }
+
+  Future<void> _toggleAgent() async {
+    if(bridge.running) {
+      final outcome=await bridge.stopAgent();
+      if(mounted) setState(() { _displayRunning=bridge.running;_statusLine=outcome.message; });
+      return;
+    }
+    if(!await _checkConnection() || !mounted || !_saveConfig()) return;
+    final outcome=await bridge.startAgent(store.path);
+    if(mounted) setState(() { _displayRunning=bridge.running;_statusLine=outcome.message; });
+  }
+
+  bool _saveConfig() {
     final (cfg, error) = _currentConfig();
     if (error != null) {
       setState(() => _statusLine = 'Chưa lưu được: $error');
-      return;
+      return false;
     }
     final missing = cfg!.missingFields();
     if (missing.isNotEmpty) {
       setState(() =>
           _statusLine = 'Chưa lưu được — còn thiếu: ${missing.join(', ')}');
-      return;
+      return false;
     }
     try {
       store.save(cfg);
     } catch (e) {
       setState(() => _statusLine = 'Chưa lưu được: $e');
-      return;
+      return false;
     }
     setState(() {
       _keyProtected = cfg.hasProtectedKey;
       _statusLine = 'Đã lưu cấu hình vào ${store.path} (${_stamp()}). '
           'Agent chạy bằng: beesky-agent run';
     });
+    return true;
   }
 
   // -- test cycle -----------------------------------------------------
 
   Future<void> _startTest() async {
+    if(!await _checkConnection() || !mounted) return;
     if (_testing) return;
     final (cfg, error) = _currentConfig();
     if (error != null) {
@@ -257,6 +300,7 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
 
   Future<void> _toggleAutostart() async {
     final installed = await bridge.taskInstalled();
+    if(!installed && (!await _checkConnection() || !mounted || !_saveConfig())) return;
     final outcome = installed
         ? await bridge.removeTask()
         : await bridge.installTask(store.path);
@@ -357,7 +401,7 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // Header: logo + titles + version pill.
-            Row(
+            if(!widget.embedded) Row(
               children: [
                 Image.asset('assets/beesky-logo.png', width: 40, height: 40),
                 const SizedBox(width: 10),
@@ -367,7 +411,7 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
                     Text('BeeSky Agent',
                         style: TextStyle(
                             fontSize: 20, fontWeight: FontWeight.w800)),
-                    Text('Cấu hình agent tại trại',
+                      Text('Cấu hình agent tại xưởng',
                         style: TextStyle(color: BeeSkyColors.muted)),
                   ],
                 ),
@@ -388,7 +432,7 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _fieldLabel('Agent key:'),
+                    _fieldLabel('Token Agent:'),
                     Row(
                       children: [
                         Expanded(
@@ -402,7 +446,7 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
                           onChanged: (v) =>
                               setState(() => _showKey = v ?? false),
                         ),
-                        const Text('Hiện key'),
+                        const Text('Hiện token'),
                       ],
                     ),
                     if (_keyProtected)
@@ -416,16 +460,23 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
                 ),
               ),
               _labeledField(
-                'Tên trại:',
-                TextField(controller: _siteCtrl),
-                hint: 'vd Xưởng 1',
+                'Xưởng được cấp quyền:',
+                TextField(controller: _siteCtrl, readOnly: true,
+                  decoration: const InputDecoration(hintText:'Tự nhận sau khi kiểm tra token')),
+                hint: _connection == null ? 'Xưởng được quyết định bởi token trên Mine.'
+                  : '${_connection!.organizationName} · ${_connection!.agentName}',
               ),
+              Align(alignment: Alignment.centerLeft,child:OutlinedButton.icon(
+                onPressed:_checking || _testing ? null : _checkConnection,
+                icon:_checking ? const SizedBox(width:16,height:16,child:CircularProgressIndicator(strokeWidth:2)) : const Icon(Icons.verified_user_outlined,size:18),
+                label:Text(_checking?'Đang kiểm tra…':'Kiểm tra token'))),
+              const SizedBox(height:10),
               const Text(_keyNote,
                   style: TextStyle(color: BeeSkyColors.muted, fontSize: 12.5)),
             ]),
 
             // Card 2: farm scan.
-            _card('Quét tại trại', [
+            _card('Quét tại xưởng', [
               _labeledField(
                 'Dải IP quét:',
                 TextField(controller: _targetCtrl),
@@ -481,11 +532,15 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
                       runSpacing: 8,
                       children: [
                         FilledButton(
+                          onPressed: _checking || _testing ? null : _toggleAgent,
+                          child: Text(bridge.running ? 'Dừng Agent' : 'Bắt đầu Agent'),
+                        ),
+                        OutlinedButton(
                           onPressed: _saveConfig,
                           child: const Text('Lưu cấu hình'),
                         ),
                         OutlinedButton(
-                          onPressed: _testing ? null : _startTest,
+                          onPressed: _testing || _checking ? null : _startTest,
                           child: const Text('Chạy thử'),
                         ),
                         OutlinedButton(

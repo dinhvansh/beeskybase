@@ -16,6 +16,27 @@ class IngestTests(TestCase):
     def push(self,miners=None,**updates):
         data={'site':'forged-other-site','ts':self.ts,'miners':miners if miners is not None else [{'ip':'10.0.0.1','model':'S21 Hydro','mac_or_serial':'SERIAL-1','power_w':5360,'max_temp_c':65}]};data.update(updates)
         return self.client.post('/api/ingest',data,format='json')
+    def test_connection_reports_only_bound_workshop_without_heartbeat_or_secrets(self):
+        response=self.client.get('/api/agent/connection?site=forged-other-site')
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(response.json(),{'agentId':str(self.agent.id),'agentName':'Scanner','siteId':str(self.site.id),'siteName':'Site','organizationName':'Scan Org','mode':'monitor'})
+        self.assertEqual(response['Cache-Control'],'no-store')
+        self.assertNotIn(KEY,response.content.decode())
+        self.assertNotIn(self.agent.key_hash,response.content.decode())
+        self.agent.refresh_from_db();self.assertIsNone(self.agent.last_heartbeat_at)
+        self.assertEqual(Snapshot.objects.count(),0)
+        self.agent.revoked_at=timezone.now();self.agent.save()
+        self.assertEqual(self.client.get('/api/agent/connection').status_code,401)
+        self.client.credentials()
+        self.assertEqual(self.client.get('/api/agent/connection').status_code,401)
+
+    def test_downloads_are_public_and_select_only_known_products(self):
+        anonymous=APIClient()
+        for tool,filename in [('scanner','BeeSkySetup'),('agent','BeeSkyAgentSetup')]:
+            response=anonymous.get('/downloads/'+tool)
+            self.assertEqual(response.status_code,302)
+            self.assertEqual(response['Location'],f'https://github.com/dinhvansh/beeskybase/releases/download/v0.40.0/{filename}-0.40.0.exe')
+        self.assertEqual(anonymous.get('/downloads/unknown').status_code,404)
     def test_agent_bound_site_retry_dedup_and_real_power_contract(self):
         self.assertEqual(self.push().status_code,200);self.assertTrue(self.push().json()['duplicate'])
         self.assertEqual(Snapshot.objects.count(),1);self.assertEqual(Observation.objects.count(),1);miner=Miner.objects.get();self.assertEqual(miner.site_id,self.site.id)

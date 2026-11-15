@@ -42,6 +42,7 @@ from .agent_app import insecure_cloud_warning, install_task, \
     log_file_path, read_status, remove_task, status_file_path, \
     task_installed, test_ingest, _is_windows
 from .agent_config import AgentConfig, default_config_path
+from .agent_connection import connection_info
 from .core.discover import default_scan_target
 
 BG = ui_theme.BG
@@ -50,12 +51,8 @@ FG = ui_theme.TEXT
 ACCENT = ui_theme.ACCENT
 DIM = ui_theme.MUTED
 
-_KEY_NOTE = (
-    "Agent key do cloud cấp và chỉ hiện MỘT lần lúc tạo agent "
-    "(trang Cài đặt của cloud) — dán vào đây rồi Lưu cấu hình. "
-    "Key chỉ nằm trong file cấu hình này (trên Windows được "
-    "Windows mã hoá DPAPI ngay trong file); mất key thì thu hồi "
-    "agent cũ trên cloud và tạo agent mới.")
+_KEY_NOTE = ("Tạo token trong mục Agent trên Mine, dán vào đây rồi kiểm tra kết nối. "
+             "Token đã gắn với xưởng trên web; dữ liệu luôn gửi về đúng xưởng đó.")
 
 
 class AgentConfigApp:
@@ -68,15 +65,20 @@ class AgentConfigApp:
             else default_config_path()
         self._queue: queue.Queue = queue.Queue()
         self._testing = False
+        self._agent_process = None
+        self._confirmed_connection = None
+        self._loading_fields = True
         self._logo_image: tk.PhotoImage | None = None
         self._logo_image_small: tk.PhotoImage | None = None
 
-        root.title(f"BeeSky Agent {__version__} — Cấu hình agent trại")
+        root.title(f"BeeSky Agent {__version__} — Kết nối xưởng")
         ui_theme.setup_theme(root)
         self._load_logo_image()
         self._set_window_icon()
         self._build_widgets()
         self._load_into_fields()
+        self._loading_fields = False
+        if not self.cloud_var.get():self.cloud_var.set("https://mine.beeskybase.com")
         self.root.after(100, self._poll_queue)
 
     # -- brand icon (same pattern as beesky.gui) --------------------------
@@ -120,7 +122,7 @@ class AgentConfigApp:
         titles.pack(side="left")
         ttk.Label(titles, text="BeeSky Agent",
                   style="Title.TLabel").pack(anchor="w")
-        ttk.Label(titles, text="Cấu hình agent tại trại",
+        ttk.Label(titles, text="Cấu hình agent tại xưởng",
                   style="Sub.TLabel").pack(anchor="w")
         RoundedPill(header, text=f"v{__version__}",
                     tone="dim").pack(side="right")
@@ -161,12 +163,15 @@ class AgentConfigApp:
                         style="Card.TCheckbutton",
                         command=self._toggle_key_visibility).pack(
                             side="left", padx=(8, 0))
-        ui_theme.labeled_field(body, 1, "Agent key:", key_box)
+        ui_theme.labeled_field(body, 1, "Token Agent:", key_box)
 
-        site_entry = RoundedEntry(body, textvariable=self.site_var,
-                                  backdrop=ui_theme.PANEL_GLASS)
-        ui_theme.labeled_field(body, 2, "Tên trại:", site_entry,
-                               hint="vd Xưởng 1")
+        site_entry = ttk.Entry(body, textvariable=self.site_var,state='readonly')
+        ui_theme.labeled_field(body, 2, "Xưởng được cấp quyền:", site_entry,
+                               hint="Tự nhận từ token trên Mine")
+        self.connection_button=RoundedButton(connect,text='Kiểm tra token',variant='ghost',command=self.check_connection)
+        self.connection_button.pack(anchor='w',pady=(8,0))
+        for variable in (self.cloud_var,self.key_var):
+            variable.trace_add('write',self._invalidate_connection)
 
         ttk.Label(connect, text=_KEY_NOTE, style="Card.Hint.TLabel",
                   wraplength=600, justify="left").pack(
@@ -176,7 +181,7 @@ class AgentConfigApp:
         self.target_var = tk.StringVar()
         self.interval_var = tk.StringVar(value="30")
 
-        scan = ui_theme.card(main, title="Quét tại trại")
+        scan = ui_theme.card(main, title="Quét tại xưởng")
         scan.pack(fill="x", pady=(12, 0))
         sbody = ttk.Frame(scan, style="Card.TFrame")
         sbody.pack(fill="x")
@@ -222,6 +227,8 @@ class AgentConfigApp:
         # -- actions + status pill ---------------------------------------
         actions = ttk.Frame(main)
         actions.pack(fill="x", pady=(14, 0))
+        self.run_button=RoundedButton(actions,text='Bắt đầu Agent',variant='accent',command=self.toggle_agent)
+        self.run_button.pack(side='left',padx=(0,8))
         self.save_button = RoundedButton(
             actions, text="Lưu cấu hình", variant="accent",
             command=self.save_config)
@@ -254,6 +261,46 @@ class AgentConfigApp:
     def _toggle_key_visibility(self) -> None:
         self.key_entry.configure(show="" if self.show_key_var.get()
                                  else "*")
+
+    def _invalidate_connection(self,*_args):
+        if not self._loading_fields:
+            self._confirmed_connection=None
+            self.site_var.set('')
+
+    def check_connection(self):
+        cloud,key=self.cloud_var.get().strip(),self.key_var.get().strip()
+        self.connection_button.configure(state='disabled')
+        self.status_var.set('Đang kiểm tra token với Mine…')
+        def worker():
+            try:self._queue.put(('connection',(cloud,key,connection_info(cloud,key),None)))
+            except ValueError as error:self._queue.put(('connection',(cloud,key,None,str(error))))
+        threading.Thread(target=worker,daemon=True).start()
+
+    def toggle_agent(self):
+        if self._agent_process and self._agent_process.poll() is None:
+            self._agent_process.terminate()
+            self.run_button.configure(text='Bắt đầu Agent')
+            self.status_var.set('Đã dừng phiên Agent do phần mềm này mở.')
+            return
+        if self._confirmed_connection != (self.cloud_var.get().strip(),self.key_var.get().strip()):
+            self.status_var.set('Bấm Kiểm tra token trước khi bắt đầu Agent.')
+            return
+        if not self.save_config():return
+        if getattr(sys,'frozen',False):
+            base=Path(sys.executable).parent
+            exe=next((p for p in (base/'beesky-agentw.exe',base/'agent'/'beesky-agentw.exe') if p.is_file()),None)
+            if exe is None:
+                self.status_var.set('Cài bộ BeeSky đầy đủ để có engine Agent.');return
+            command=[str(exe)]
+        else:command=[sys.executable,'-m','beesky.agent_app']
+        try:
+            self._agent_process=subprocess.Popen(command+['run','--background','--config',str(self.config_path)],
+                stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform.startswith('win') else 0)
+            self.run_button.configure(text='Dừng Agent')
+            self.status_var.set('Agent đang khởi chạy. Xem kết quả gửi dữ liệu trong trạng thái bên dưới.')
+        except OSError:
+            self.status_var.set('Không mở được engine Agent. Kiểm tra bộ cài rồi thử lại.')
 
     def _refresh_cloud_hint(self) -> None:
         probe = AgentConfig(cloud_url=self.cloud_var.get().strip())
@@ -414,6 +461,15 @@ class AgentConfigApp:
         try:
             while True:
                 kind, payload = self._queue.get_nowait()
+                if kind == 'connection':
+                    self.connection_button.configure(state='normal')
+                    cloud,key,data,error=payload
+                    if (cloud,key)!=(self.cloud_var.get().strip(),self.key_var.get().strip()):continue
+                    if error:self.status_var.set(error);self.site_var.set('')
+                    else:
+                        self._confirmed_connection=(cloud,key)
+                        self.site_var.set(data['siteName'])
+                        self.status_var.set('Đã xác nhận: '+data['agentName']+' · '+data['siteName']+' · '+data['organizationName'])
                 if kind == "test":
                     self._testing = False
                     self.test_button.configure(state="normal")
@@ -426,6 +482,10 @@ class AgentConfigApp:
                                           "Chạy thử: FAIL")
         except queue.Empty:
             pass
+        if self._agent_process and self._agent_process.poll() is not None:
+            self._agent_process=None
+            self.run_button.configure(text='Bắt đầu Agent')
+            self.status_var.set('Phiên Agent đã dừng. Xem log để kiểm tra kết quả.')
         self.root.after(100, self._poll_queue)
 
     # -- auto-start --------------------------------------------------------

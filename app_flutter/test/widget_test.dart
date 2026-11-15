@@ -5,6 +5,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('scanner includes Agent mode with a fixed token destination', (tester) async {
+    tester.view.physicalSize=const Size(1440,1100);
+    tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(BeeSkyApp(bridge:MockBridge()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Chế độ Agent'));
+    await tester.pump();await tester.pump(const Duration(milliseconds:50));
+    expect(find.text('Token Agent:'),findsOneWidget);
+    expect(find.text('Xưởng được cấp quyền:'),findsOneWidget);
+    expect(find.text('Bắt đầu Agent'),findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets(
     'sidebar + chips layout: empty state first, scan fills the table, '
     'detail panel opens on the first row',

@@ -4,6 +4,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:beesky_agent_app/agent_bridge.dart' as agent;
+import 'package:beesky_agent_app/config_page.dart' as agent_ui;
 
 import 'creds.dart';
 import 'detail.dart';
@@ -23,7 +25,7 @@ import 'views.dart';
 /// per-group / ad-hoc scan view behind it; v0.32 landed the five
 /// remaining sidebar views (heat map, energy, repairs, events,
 /// settings — docs/views-mapping.md).
-enum _View { groups, miners, heat, energy, repairs, events, settings }
+enum _View { groups, miners, heat, energy, repairs, events, agent, settings }
 
 /// Grid hotkey intents (v0.25) — the Flutter mirror of HashCore's
 /// `package:toolkit/hot_keys/intents_and_actions/` layer.
@@ -165,6 +167,9 @@ final _demoCreds = [
 ];
 
 class _HomePageState extends State<HomePage> {
+  late final _agentRuntime = widget.bridge.isMock
+      ? (agent.MockAgentBridge(), agent.MockConfigStore.demo())
+      : agent.createAgentRuntime();
   final _targetCtrl = TextEditingController();
 
   SysInfo? _sysinfo;
@@ -1692,6 +1697,11 @@ class _HomePageState extends State<HomePage> {
               'quá nhiệt, mất chip, board ngắt.',
           EventsView(events: _eventLog),
         ),
+      _View.agent => (
+          'Chế độ Agent',
+          'Dán token từ Mine để gửi bản quét về xưởng được cấp quyền.',
+          agent_ui.AgentConfigPage(bridge: _agentRuntime.$1, store: _agentRuntime.$2, embedded: true),
+        ),
       _View.settings => (
           'Cài đặt',
           'Chỉ những cài đặt thật sự lưu lại và có tác dụng.',
@@ -2574,6 +2584,12 @@ class _HomePageState extends State<HomePage> {
           ),
           const SizedBox(height: 14),
           _navSection('HỆ THỐNG'),
+          _navItem(
+            Icons.cloud_upload_outlined,
+            'Chế độ Agent',
+            active: _view == _View.agent,
+            onTap: () => _goView(_View.agent),
+          ),
           _navItem(
             Icons.settings,
             'Cài đặt',

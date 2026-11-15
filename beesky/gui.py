@@ -267,6 +267,9 @@ class BeeSkyApp:
             target_row, text="Quét ngay", variant="accent",
             command=self.start_scan, backdrop=ui_theme.PANEL_GLASS)
         self.scan_button.pack(side="left", padx=(10, 0))
+        RoundedButton(target_row, text="Chế độ Agent", variant="ghost",
+                      command=self.open_agent_mode,
+                      backdrop=ui_theme.PANEL_GLASS).pack(side="left", padx=(10,0))
         RoundedButton(target_row, text="Xuất phiếu sửa",
                       variant="ghost", command=self.export_tickets,
                       backdrop=ui_theme.PANEL_GLASS).pack(
@@ -593,6 +596,12 @@ class BeeSkyApp:
         self.status_var.set(
             f"Đã mở web tại chỗ: http://127.0.0.1:{WEB_PORT}/ "
             f"(quét {target} mỗi 30 giây)")
+
+
+    def open_agent_mode(self) -> None:
+        from .agent_gui import AgentConfigApp
+        window=tk.Toplevel(self.root)
+        AgentConfigApp(window)
 
 
 def run_gui(default_target: str | None = None) -> int:

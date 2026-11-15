@@ -36,11 +36,22 @@ class TaskOutcome {
   const TaskOutcome(this.ok, this.message);
 }
 
+class AgentConnection {
+  final String agentName, siteName, organizationName;
+  const AgentConnection(this.agentName, this.siteName, this.organizationName);
+}
+
 abstract class AgentBridge {
   bool get isMock;
 
   /// Resolved beesky-agent executable (for display/diagnostics).
   String get agentExePath;
+
+  Future<AgentConnection> connectionInfo({required String configPath,
+    required String cloudUrl, required String? key});
+  bool get running;
+  Future<TaskOutcome> startAgent(String configPath);
+  Future<TaskOutcome> stopAgent();
 
   /// The core's own-subnet pre-fill for a first run, or null when
   /// no `beesky` sidecar is resolvable (agent-only install, D5).
@@ -73,6 +84,58 @@ abstract class AgentBridge {
 class ProcessAgentBridge implements AgentBridge {
   final String _agentExe;
   final String? _beeskyExe;
+  Process? _runningAgent;
+
+  @override
+  bool get running => _runningAgent != null;
+
+  @override
+  Future<AgentConnection> connectionInfo({required String configPath,
+    required String cloudUrl, required String? key}) async {
+    Process? process;
+    try {
+      process = await Process.start(_agentExe, ['connection', '--config', configPath]);
+      final output = process.stdout.transform(utf8.decoder).join();
+      final errorDrain = process.stderr.drain<void>();
+      process.stdin.write(jsonEncode({'cloud_url': cloudUrl, if(key != null) 'key': key}));
+      await process.stdin.close();
+      await process.exitCode.timeout(const Duration(seconds: 20));
+      final data = jsonDecode((await output).trim()) as Map<String, dynamic>;
+      await errorDrain;
+      if(data['ok'] != true) throw FormatException(data['message'] as String? ?? 'Không xác nhận được token.');
+      return AgentConnection(data['agentName'] as String, data['siteName'] as String, data['organizationName'] as String);
+    } on FormatException { rethrow; }
+    catch (_) { throw const FormatException('Không kết nối được Cloud. Kiểm tra mạng và cập nhật tool nếu đang dùng bản cũ.'); }
+    finally { process?.kill(); }
+  }
+
+  @override
+  Future<TaskOutcome> startAgent(String configPath) async {
+    if(running) return const TaskOutcome(false, 'Agent đang chạy trong phần mềm này.');
+    final sibling = File(_agentExe).parent;
+    final windowless = File('${sibling.path}${Platform.pathSeparator}${_exeName('beesky-agentw')}');
+    try {
+      final process = await Process.start(windowless.existsSync() ? windowless.path : _agentExe,
+        ['run', '--background', '--config', configPath]);
+      _runningAgent = process;
+      unawaited(process.stdout.drain<void>());
+      unawaited(process.stderr.drain<void>());
+      unawaited(process.exitCode.then((_) { if(identical(_runningAgent,process)) _runningAgent = null; }));
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      return running ? const TaskOutcome(true, 'Agent đã bắt đầu. Xem kết quả gửi dữ liệu trong trạng thái bên dưới.')
+        : const TaskOutcome(false, 'Agent chưa chạy được hoặc đã có phiên đang chạy. Xem log để biết chi tiết.');
+    } catch (_) { return const TaskOutcome(false, 'Không mở được engine Agent. Cài bộ BeeSky đầy đủ rồi thử lại.'); }
+  }
+
+  @override
+  Future<TaskOutcome> stopAgent() async {
+    final process = _runningAgent;
+    if(process == null) return const TaskOutcome(false, 'Phần mềm này chưa mở phiên Agent nào.');
+    process.kill();
+    await process.exitCode;
+    _runningAgent = null;
+    return const TaskOutcome(true, 'Đã dừng phiên Agent do phần mềm này mở.');
+  }
 
   ProcessAgentBridge({String? agentExe, String? beeskyExe})
       : _agentExe = agentExe ?? resolveAgentExe(),
@@ -92,7 +155,7 @@ class ProcessAgentBridge implements AgentBridge {
   /// `{app}\agent\` layout — D6 in the mapping).
   static List<String> candidateDirs() {
     final exeDir = File(Platform.resolvedExecutable).parent;
-    return [exeDir.path, exeDir.parent.path];
+    return [exeDir.path, '${exeDir.path}${Platform.pathSeparator}agent', exeDir.parent.path];
   }
 
   static String? _findSibling(String fileName) {
@@ -270,6 +333,22 @@ class MockAgentBridge implements AgentBridge {
   int testCalls = 0;
   Map<String, Object?>? lastTestCall;
   String? lastOpenedFile;
+  AgentConnection connection = const AgentConnection('Agent kiểm thử', 'Trại Demo', 'Tổ chức kiểm thử');
+  String? connectionError;
+  int connectionCalls = 0;
+  @override
+  bool running = false;
+  @override
+  Future<AgentConnection> connectionInfo({required String configPath,
+    required String cloudUrl, required String? key}) async {
+    connectionCalls++;
+    if(connectionError != null) throw FormatException(connectionError!);
+    return connection;
+  }
+  @override
+  Future<TaskOutcome> startAgent(String configPath) async { running=true;return const TaskOutcome(true,'Agent đã bắt đầu.'); }
+  @override
+  Future<TaskOutcome> stopAgent() async { running=false;return const TaskOutcome(true,'Đã dừng Agent.'); }
 
   @override
   bool get isMock => true;

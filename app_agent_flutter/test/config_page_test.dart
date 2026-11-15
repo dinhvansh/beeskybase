@@ -31,6 +31,28 @@ TextField _field(WidgetTester tester, int index) =>
 // Field order in the tree: 0 cloud, 1 key, 2 site, 3 target, 4 interval.
 
 void main() {
+  testWidgets('fixed destination is readonly; invalid token cannot start a scan', (tester) async {
+    final bridge=MockAgentBridge()..connectionError='Token đã thu hồi.';
+    final store=MockConfigStore.demo();
+    await _pumpPage(tester,bridge:bridge,store:store);
+    expect(_field(tester,2).readOnly,isTrue);
+    await tester.tap(find.widgetWithText(OutlinedButton,'Chạy thử'));
+    await tester.pump();await tester.pump(const Duration(milliseconds:50));
+    expect(bridge.testCalls,0);
+    expect(find.text('Token đã thu hồi.'),findsOneWidget);
+  });
+
+  testWidgets('Agent mode confirms token then starts and stops the real bridge contract', (tester) async {
+    final bridge=MockAgentBridge()..connection=const AgentConnection('Agent A','Xưởng server','Tổ chức A');
+    final store=MockConfigStore.demo();
+    await _pumpPage(tester,bridge:bridge,store:store);
+    await tester.tap(find.widgetWithText(FilledButton,'Bắt đầu Agent'));
+    await tester.pump();await tester.pump(const Duration(milliseconds:50));
+    expect(bridge.connectionCalls,1);expect(bridge.running,isTrue);
+    expect(AgentConfig.decode(store.savedRaw!).site,'Xưởng server');
+    await tester.tap(find.widgetWithText(FilledButton,'Dừng Agent'));
+    await tester.pump();expect(bridge.running,isFalse);
+  });
   testWidgets('renders the Tk window: header, cards, fixture values',
       (tester) async {
     final bridge = MockAgentBridge();
@@ -38,10 +60,10 @@ void main() {
     await _pumpPage(tester, bridge: bridge, store: store);
 
     expect(find.text('BeeSky Agent'), findsOneWidget);
-    expect(find.text('Cấu hình agent tại trại'), findsOneWidget);
+    expect(find.text('Cấu hình agent tại xưởng'), findsOneWidget);
     expect(find.text('v$agentAppVersion'), findsOneWidget);
     expect(find.text('Kết nối cloud'), findsOneWidget);
-    expect(find.text('Quét tại trại'), findsOneWidget);
+    expect(find.text('Quét tại xưởng'), findsOneWidget);
     expect(find.text('Trạng thái chạy ngầm'), findsOneWidget);
 
     expect(_field(tester, 0).controller!.text, 'https://cloud.beeskybase.com');
@@ -65,8 +87,10 @@ void main() {
     final store = MockConfigStore.demo();
     await _pumpPage(tester, bridge: bridge, store: store);
 
-    await tester.enterText(find.byType(TextField).at(2), 'Xưởng 9');
-    await tester.tap(find.widgetWithText(FilledButton, 'Lưu cấu hình'));
+    bridge.connection = const AgentConnection('Agent test', 'Xưởng 9', 'Tổ chức test');
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Kiểm tra token'));
+    await tester.pump();
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Lưu cấu hình'));
     await tester.pump();
 
     expect(find.textContaining('Đã lưu cấu hình vào mock/agent-config.json'),
@@ -83,11 +107,11 @@ void main() {
     final store = MockConfigStore.demo();
     await _pumpPage(tester, bridge: bridge, store: store);
 
-    await tester.enterText(find.byType(TextField).at(2), '');
-    await tester.tap(find.widgetWithText(FilledButton, 'Lưu cấu hình'));
+    await tester.enterText(find.byType(TextField).at(1), '');
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Lưu cấu hình'));
     await tester.pump();
 
-    expect(find.text('Chưa lưu được — còn thiếu: site'), findsOneWidget);
+    expect(find.text('Chưa lưu được — còn thiếu: key, site'), findsOneWidget);
   });
 
   testWidgets('save refuses a bad interval with the Tk text', (tester) async {
@@ -96,7 +120,7 @@ void main() {
     await _pumpPage(tester, bridge: bridge, store: store);
 
     await tester.enterText(find.byType(TextField).at(4), 'abc');
-    await tester.tap(find.widgetWithText(FilledButton, 'Lưu cấu hình'));
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Lưu cấu hình'));
     await tester.pump();
 
     expect(find.text("Chưa lưu được: chu kỳ quét 'abc' không phải số giây hợp lệ"),
@@ -137,12 +161,13 @@ void main() {
 
     // Saving after an unrelated edit keeps the blob AND passes
     // validation (the blob counts as the key being present).
-    await tester.enterText(find.byType(TextField).at(2), 'Trại Mới');
-    await tester.tap(find.widgetWithText(FilledButton, 'Lưu cấu hình'));
+    await tester.enterText(find.byType(TextField).at(3), '192.168.3.0/24');
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Lưu cấu hình'));
     await tester.pump();
     final saved = AgentConfig.decode(store.savedRaw!);
     expect(saved.keyProtected, 'QUJDREVGRw==');
-    expect(saved.site, 'Trại Mới');
+    expect(saved.site, 'Trại Demo');
+    expect(saved.target, '192.168.3.0/24');
   });
 
   testWidgets('auto-start toggles through the bridge verbs', (tester) async {
@@ -169,7 +194,7 @@ void main() {
     await _pumpPage(tester, bridge: bridge, store: store);
 
     expect(_field(tester, 3).controller!.text, '192.168.1.0/24');
-    expect(_field(tester, 0).controller!.text, '');
+    expect(_field(tester, 0).controller!.text, 'https://mine.beeskybase.com');
     expect(find.text('File cấu hình: mock/agent-config.json'), findsOneWidget);
     expect(find.text('Chưa có dữ liệu'), findsOneWidget);
   });

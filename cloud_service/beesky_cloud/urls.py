@@ -5,7 +5,7 @@ from django.db import connection
 from django.shortcuts import render
 from django.urls import path
 from django.views.generic import RedirectView
-from core import accounts,operations,ingest,facility,upkeep,platform_admin
+from core import accounts,operations,ingest,facility,upkeep,platform_admin,downloads
 
 def index(request):
     response=render(request,'app.html',{'mailbox_url':os.getenv('BEESKY_LOCAL_MAILBOX','') if settings.DEBUG else ''})
@@ -26,6 +26,7 @@ def control(request):
     return response
 
 urlpatterns=[
+    path('downloads/<str:tool>',downloads.download_tool),
     path('control/',control),
     path('api/v2/platform/overview',platform_admin.overview),
     path('api/v2/platform/users',platform_admin.users),
@@ -48,6 +49,7 @@ urlpatterns=[
     path('api/v2/sites/<uuid:site_id>/miners/<uuid:miner_id>/placement',operations.place),
     path('api/v2/sites/<uuid:site_id>/racks',operations.racks),path('api/v2/sites/<uuid:site_id>/racks/<uuid:rack_id>',operations.rack_detail),
     path('api/v2/audit',operations.audit_logs),
+    path('api/agent/connection',ingest.connection),
     path('api/ingest',ingest.ingest),path('api/ingest/events',ingest.ingest_events),path('api/agent/commands',ingest.commands),
     path('api/v2/customers',facility.customers),
     path('api/v2/sites/<uuid:site_id>/plan',facility.plan),

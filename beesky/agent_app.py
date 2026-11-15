@@ -470,7 +470,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
               flush=True)
     service = build_service(
         cfg, status_hook=make_status_hook(cfg, cfg_path))
-    service.run(once=args.once)
+    from .agent_lock import agent_run_lock
+    try:
+        with agent_run_lock(cfg_path):
+            service.run(once=args.once)
+    except RuntimeError as error:
+        print(str(error),file=sys.stderr)
+        return 3
     return 0
 
 
@@ -718,6 +724,24 @@ def main(argv: list[str] | None = None) -> int:
         return run_config_gui()
     mode, rest = argv[0], argv[1:]
     try:
+        if mode == 'connection':
+            parser=argparse.ArgumentParser(prog='beesky-agent connection')
+            parser.add_argument('--config')
+            args=parser.parse_args(rest)
+            from .agent_connection import connection_info,ConnectionError
+            try:
+                payload=json.loads(sys.stdin.read(8193))
+                if not isinstance(payload,dict):raise ValueError()
+                cfg=_load_config(args.config)
+                data=connection_info(str(payload.get('cloud_url') or cfg.cloud_url),str(payload.get('key') or cfg.key))
+                print(json.dumps({'ok':True,**data},ensure_ascii=False))
+                return 0
+            except (ConnectionError,ValueError,OSError):
+                # No exception trace or echoed request: stdin can carry the token.
+                error=sys.exc_info()[1]
+                message=str(error) if isinstance(error,ConnectionError) else 'Không đọc được cấu hình kết nối agent.'
+                print(json.dumps({'ok':False,'message':message},ensure_ascii=False))
+                return 1
         if mode == "run":
             return _cmd_run(_run_parser("run").parse_args(rest))
         if mode == "test":
