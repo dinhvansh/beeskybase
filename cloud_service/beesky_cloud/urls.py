@@ -1,6 +1,6 @@
 import os
 from django.conf import settings
-from django.http import JsonResponse
+from django.http import JsonResponse,HttpResponseRedirect
 from django.db import connection
 from django.shortcuts import render
 from django.urls import path
@@ -21,7 +21,7 @@ def health(request):
     return JsonResponse({'status':'ok','database':connection.vendor,'service':'beesky-cloud'})
 
 def control(request):
-    response=render(request,'platform.html')
+    response=HttpResponseRedirect('/#/user-admin')
     response['Cache-Control']='no-store'
     return response
 

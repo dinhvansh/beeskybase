@@ -1,5 +1,5 @@
 import * as T from '../cloud-preview/rack3d/node_modules/three/build/three.module.js';
-import {GLTFLoader} from '../cloud-preview/rack3d/node_modules/three/examples/jsm/loaders/GLTFLoader.js';
+import {minerTemplate} from '../cloud-preview/rack3d/optimized-models.js';
 const host=document.querySelector('.mine-live-stage');
 if(host){
  const scene=new T.Scene(),camera=new T.PerspectiveCamera(32,1,.1,60),renderer=new T.WebGLRenderer({alpha:true,antialias:true});
@@ -12,11 +12,11 @@ if(host){
  const plinth=new T.Mesh(new T.CylinderGeometry(2.5,2.6,.18,80),new T.MeshStandardMaterial({color:0xf0f5f2,roughness:.4,metalness:.2}));plinth.position.y=-.14;plinth.receiveShadow=true;root.add(plinth);
  for(const x of [-1.16,1.16])for(const z of [-.5,.5])block(x,1.28,z,.055,2.56,.055,silver);
  for(let row=0;row<4;row++)block(0,.1+row*.8,0,2.4,.055,1.15,shelf);
- const loader=new GLTFLoader();let disposed=false;
- Promise.all(['s19-pro-air.glb','s21-hydro.glb'].map(file=>loader.loadAsync('../cloud-preview/assets/models/'+file))).then(models=>{
+ let disposed=false;
+ Promise.all(['air','hydro'].map(kind=>minerTemplate(kind,'../cloud-preview/assets/models/'))).then(models=>{
   if(disposed)return;
   for(let row=0;row<3;row++)for(let col=0;col<2;col++){
-   const model=models[col].scene.clone(true),box=new T.Box3().setFromObject(model),size=box.getSize(new T.Vector3()),center=box.getCenter(new T.Vector3()),scale=Math.min(.92/size.x,.67/size.y,.92/size.z);
+   const model=models[col].clone(true),box=new T.Box3().setFromObject(model),size=box.getSize(new T.Vector3()),center=box.getCenter(new T.Vector3()),scale=Math.min(.92/size.x,.67/size.y,.92/size.z);
    model.scale.setScalar(scale);model.position.copy(center.multiplyScalar(-scale));const holder=new T.Group();holder.add(model);holder.position.set((col-.5)*1.13,.48+row*.8,0);root.add(holder);model.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;}});
    const led=block((col-.5)*1.13+.32,.24+row*.8,.54,.075,.025,.02,new T.MeshBasicMaterial({color:0x8ed5ae}));
   }

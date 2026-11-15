@@ -69,7 +69,7 @@ render=function(){
     if(panel){const overlay=warehouseOverlay();overlay.replaceChildren(panel)}else warehouseCloseFullscreen(false);
   }
   const host=document.getElementById('rack-world-canvas');if(!host)return;
-  import('./rack-scene.js?v=54dd61c80a').then(module=>{
+  import('./rack-scene.js?v=05ae42ae39').then(module=>{
     if(version!==rackSceneVersion||!host.isConnected)return;
     const style=getComputedStyle(document.documentElement),token=(name,fallback)=>style.getPropertyValue(name).trim()||fallback;
     const dark=document.documentElement.dataset.theme==='dark';

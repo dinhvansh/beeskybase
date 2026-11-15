@@ -1,5 +1,5 @@
 import * as T from '../cloud-preview/rack3d/node_modules/three/build/three.module.js';
-import {GLTFLoader} from '../cloud-preview/rack3d/node_modules/three/examples/jsm/loaders/GLTFLoader.js';
+import {minerTemplate} from '../cloud-preview/rack3d/optimized-models.js';
 import {RoomEnvironment} from '../cloud-preview/rack3d/node_modules/three/examples/jsm/environments/RoomEnvironment.js';
 import {RoundedBoxGeometry} from '../cloud-preview/rack3d/node_modules/three/examples/jsm/geometries/RoundedBoxGeometry.js';
 let cleanup=()=>{};
@@ -12,10 +12,11 @@ function mount(){
  const scene=new T.Scene(),camera=new T.PerspectiveCamera(32,1,.1,80);
  let renderer;
  try{renderer=new T.WebGLRenderer({alpha:true,antialias:true})}catch{return}
- renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));
+ renderer.setPixelRatio(Math.min(devicePixelRatio,1.25));
  renderer.toneMapping=T.ACESFilmicToneMapping;
  renderer.toneMappingExposure=.95;
  renderer.shadowMap.enabled=true;
+ renderer.shadowMap.autoUpdate=false;renderer.shadowMap.needsUpdate=true;
  renderer.shadowMap.type=T.PCFSoftShadowMap;
  renderer.domElement.className='auth-webgl';
  renderer.domElement.setAttribute('aria-hidden','true');host.append(renderer.domElement);
@@ -54,11 +55,10 @@ function mount(){
   if(disposed){texture.dispose();return}texture.colorSpace=T.SRGBColorSpace;
   const face=new T.Mesh(new T.CircleGeometry(.48,80),new T.MeshBasicMaterial({map:texture}));face.position.z=.071;badge.add(face);dirty=true;
  });
- const loader=new GLTFLoader();
- Promise.all(['s19-pro-air.glb','s21-hydro.glb'].map(file=>loader.loadAsync('/static/assets/models/'+file))).then(models=>{
+ Promise.all(['air','hydro'].map(kind=>minerTemplate(kind,'/static/assets/models/'))).then(async models=>{
   if(disposed)return;
   for(let row=0;row<2;row++)for(let col=0;col<2;col++){
-   const model=models[col].scene.clone(true);
+   const model=models[col].clone(true);
    // Match material response to the studio lighting without losing the supplied textures.
    model.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;o.material=Array.isArray(o.material)?o.material.map(m=>m.clone()):o.material.clone();for(const m of Array.isArray(o.material)?o.material:[o.material]){if('envMapIntensity' in m)m.envMapIntensity=.6;}}});
    const bounds=new T.Box3().setFromObject(model),size=bounds.getSize(new T.Vector3()),center=bounds.getCenter(new T.Vector3());
@@ -66,14 +66,17 @@ function mount(){
    model.scale.setScalar(scale);model.position.copy(center.multiplyScalar(-scale));
    const holder=new T.Group();holder.add(model);holder.position.set((col-.5)*1.4,.14+row*.93+size.y*scale/2,.03);root.add(holder);
   }
-  host.classList.add('webgl-ready');dirty=true;
- }).catch(()=>{});
+  renderer.shadowMap.needsUpdate=true;
+  if(renderer.compileAsync)await renderer.compileAsync(scene,camera);
+  if(disposed)return;
+  renderer.render(scene,camera);host.classList.add('webgl-ready');host.dataset.models='ready';dirty=true;
+ }).catch(()=>{if(!disposed)host.dataset.models='error'});
  const floor=new T.Mesh(new T.PlaneGeometry(20,20),new T.ShadowMaterial({opacity:.23}));floor.rotation.x=-Math.PI/2;floor.position.y=-.2;floor.receiveShadow=true;scene.add(floor);
  // Fit the whole composition, including every corner of the plaque, with safe margins.
  const target=new T.Vector3(0,1.48,0),direction=new T.Vector3(4.8,2.5,8.6).normalize();
  function resize(){
   const w=host.clientWidth,h=host.clientHeight;if(!w||!h)return;
-  renderer.setSize(w,h);camera.aspect=w/h;
+  renderer.setSize(w,h);camera.aspect=w/h;renderer.shadowMap.needsUpdate=true;
   const half=Math.min(T.MathUtils.degToRad(camera.fov/2),Math.atan(Math.tan(T.MathUtils.degToRad(camera.fov/2))*camera.aspect));
   camera.position.copy(target).addScaledVector(direction,2.45/Math.sin(half));camera.lookAt(target);camera.updateProjectionMatrix();dirty=true;
  }
@@ -85,7 +88,7 @@ function mount(){
  let paused=false;pause.onclick=()=>{paused=!paused;pause.textContent=paused?'Bật chuyển động':'Dừng chuyển động';pause.setAttribute('aria-pressed',String(paused));dirty=true};
  function draw(t){
   if(disposed)return;frame=requestAnimationFrame(draw);
-  if(!visible||document.hidden){last=0;return}if(t-last<40)return;
+  if(!visible||document.hidden){last=0;return}if(t-last<33)return;
   const still=reduced.matches||paused;
   if(!still)elapsed+=last?Math.min((t-last)/1000,.1):0;last=t;
   if(still&&!dirty)return;
@@ -95,7 +98,7 @@ function mount(){
   renderer.render(scene,camera);dirty=false;
  }
  frame=requestAnimationFrame(draw);
- cleanup=()=>{disposed=true;cancelAnimationFrame(frame);ro.disconnect();io.disconnect();removeEventListener('pointermove',move);const geometries=new Set(),materials=new Set(),textures=new Set();scene.traverse(o=>{if(o.geometry)geometries.add(o.geometry);for(const m of o.material?(Array.isArray(o.material)?o.material:[o.material]):[]){materials.add(m);for(const value of Object.values(m))if(value?.isTexture)textures.add(value)}});geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());textures.forEach(t=>t.dispose());environment.dispose();renderer.dispose();renderer.domElement.remove();pause.remove();};
+ cleanup=()=>{if(disposed)return;disposed=true;cancelAnimationFrame(frame);ro.disconnect();io.disconnect();removeEventListener('pointermove',move);const geometries=new Set(),materials=new Set(),textures=new Set();scene.traverse(o=>{if(o.geometry&&!o.geometry.userData.minerShared)geometries.add(o.geometry);for(const m of o.material?(Array.isArray(o.material)?o.material:[o.material]):[]){materials.add(m);for(const value of Object.values(m))if(value?.isTexture&&!value.userData.minerShared)textures.add(value)}});geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());textures.forEach(t=>t.dispose());environment.dispose();renderer.dispose();renderer.forceContextLoss();renderer.domElement.remove();pause.remove();};
 }
 new MutationObserver(()=>{const host=document.querySelector('.auth-scene');if(host&&!host.dataset.threeMounted)mount();else if(!host)cleanup()}).observe(document.querySelector('#cloud-app'),{childList:true});
 mount();

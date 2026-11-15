@@ -30,6 +30,22 @@ class PlatformAdminTests(TestCase):
         return self.client.post(f'/api/v2/platform/users/{target.pk}/action',
             {'action': action, 'reason': reason}, format='json')
 
+    def test_legacy_admin_page_redirects_into_the_shared_mine_app(self):
+        response=self.client.get('/control/')
+        self.assertEqual(response.status_code,302)
+        self.assertEqual(response['Location'],'/#/user-admin')
+
+    def test_superadmin_creates_and_uses_a_workspace_like_an_ordinary_account(self):
+        response=self.client.post('/api/v2/organizations',{'name':'Admin own workspace','siteName':'Admin workshop','location':''},format='json')
+        self.assertEqual(response.status_code,201)
+        me=self.client.get('/api/v2/auth/me').json()
+        self.assertTrue(me['user']['superadmin'])
+        self.assertEqual(len(me['organizations']),1)
+        sites=self.client.get('/api/v2/sites').json()['results']
+        self.assertEqual([site['name'] for site in sites],['Admin workshop'])
+        self.assertNotIn('Private Site',str(sites))
+        self.assertEqual(self.client.get('/api/v2/overview').status_code,200)
+
     def test_only_verified_active_superuser_can_access_every_endpoint(self):
         endpoints = ['overview', 'users', 'organizations', 'audit']
         for role in ('owner', 'admin', 'viewer'):

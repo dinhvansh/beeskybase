@@ -12,3 +12,22 @@ The archives did not include license metadata. No ownership or redistribution li
 Both generated GLBs pass Khronos glTF Validator with zero errors and warnings. See `model-stats.json` for sizes and triangle counts.
 
 The hydro studio backdrop is excluded, the front is oriented toward the rack aisle, and mesh normals/triangulation are repaired. Geometry budgets were increased to preserve fan grilles and chassis silhouettes.
+# Optimized web models
+
+The `*-fast.glb` files are generated from the original GLBs, which are retained.
+They use Meshopt geometry compression, simplified geometry and WebP textures.
+Three.js consumers must configure `MeshoptDecoder`; the shared loader is
+`cloud-preview/rack3d/optimized-models.js`.
+
+Rebuild from the repository root:
+
+```powershell
+npm ci --prefix cloud-preview/rack3d
+npm run optimize:models --prefix cloud-preview/rack3d
+```
+
+`optimized-stats.json` records the actual output sizes and triangle counts.
+The combined download is 1,402,916 bytes, compared with 10,733,092 bytes for
+the originals. Authentication keeps a small rendered poster visible until
+the actual scene and shaders are ready, and keeps the same scene between forms.
+

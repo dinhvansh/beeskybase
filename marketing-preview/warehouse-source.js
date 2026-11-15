@@ -1,6 +1,9 @@
 import {mount} from '../cloud-preview/rack3d/scene.js';
 const body=document.querySelector('#screen-body');let cleanup=()=>{},mode='3d';
+let nearViewport=false;
+new IntersectionObserver(([entry])=>{if(entry.isIntersecting){nearViewport=true;enhance()}},{rootMargin:'240px'}).observe(body);
 function enhance(){
+ if(!nearViewport)return;
  const warehouse=body.querySelector('.warehouse');if(!warehouse||body.querySelector('.view-switch'))return;cleanup();
  const toolbar=document.createElement('div');toolbar.className='view-switch';toolbar.innerHTML='<span>XƯỞNG MẪU · S19 PRO / S21 HYDRO</span><div role="group" aria-label="Góc nhìn xưởng"><button data-mode="2d" aria-pressed="false">2D</button><button data-mode="3d" aria-pressed="true">3D</button></div>';body.prepend(toolbar);
  const host=document.createElement('div');host.className='warehouse-3d';warehouse.after(host);
