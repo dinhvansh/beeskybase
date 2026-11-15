@@ -1,7 +1,7 @@
 ; BeeSky Scanner installer: scanner UI, diagnostics engine and Tk fallback.
 ; Agent is a separate installation. Saved scanner data lives in user AppData.
 #define MyAppName "BeeSky"
-#define MyAppVersion "0.42.0"
+#define MyAppVersion "0.43.0"
 #define MyAppPublisher "BeeSkyBase"
 #define MyAppExeName "beesky_app.exe"
 

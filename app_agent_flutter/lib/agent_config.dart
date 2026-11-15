@@ -4,7 +4,7 @@ import 'dart:io';
 /// The product version this app reports (header pill — the Tk
 /// window takes it from the Python package; here it mirrors the
 /// package version, pinned by the release process).
-const String agentAppVersion = '0.42.0';
+const String agentAppVersion = '0.43.0';
 
 /// The agent config file — a Dart mirror of the Python core's
 /// `beesky/agent_config.py`, which stays the spec and the owner of
@@ -183,6 +183,57 @@ class AgentConfig {
 String formatInterval(double value) =>
     value == value.truncateToDouble() ? value.toInt().toString() : '$value';
 
+/// Validate without expanding thousands of addresses on the UI thread.
+/// Merge intervals so overlapping ranges obey the engine's 4096-host limit.
+String? validateScanTarget(String text) {
+  int? ipv4(String raw) {
+    final address = InternetAddress.tryParse(raw.trim());
+    if (address == null || address.type != InternetAddressType.IPv4)
+      return null;
+    return address.rawAddress.fold<int>(0, (value, byte) => value * 256 + byte);
+  }
+
+  final ranges = <(int, int)>[];
+  for (final item
+      in text.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty)) {
+    int? start, end;
+    if (item.contains('/')) {
+      final parts = item.split('/');
+      final ip = ipv4(parts.first);
+      final prefix = parts.length == 2 ? int.tryParse(parts.last) : null;
+      if (ip != null && prefix != null && prefix >= 0 && prefix <= 32) {
+        final size = 1 << (32 - prefix);
+        final base = (ip ~/ size) * size;
+        start = base + (size > 2 ? 1 : 0);
+        end = base + size - (size > 2 ? 2 : 1);
+      }
+    } else if (item.contains('-')) {
+      final parts = item.split('-');
+      if (parts.length == 2) {
+        start = ipv4(parts.first);
+        end = ipv4(parts.last);
+      }
+    } else {
+      start = end = ipv4(item);
+    }
+    if (start == null || end == null || end < start) {
+      return 'Dải IP chưa hợp lệ. Dùng IPv4, CIDR hoặc IP đầu–IP cuối.';
+    }
+    ranges.add((start, end));
+  }
+  if (ranges.isEmpty) return 'Nhập dải IP của máy đào tại xưởng.';
+  ranges.sort((a, b) => a.$1.compareTo(b.$1));
+  var count = 0, previousEnd = -1;
+  for (final range in ranges) {
+    final start = range.$1 > previousEnd ? range.$1 : previousEnd + 1;
+    if (range.$2 >= start) count += range.$2 - start + 1;
+    if (range.$2 > previousEnd) previousEnd = range.$2;
+  }
+  return count > 4096
+      ? 'Mỗi Agent quét tối đa 4.096 địa chỉ. Thu hẹp dải IP.'
+      : null;
+}
+
 /// The core's `default_config_path`, mirrored:
 /// `$BEESKY_AGENT_CONFIG` → `%APPDATA%\BeeSky\agent-config.json`
 /// (Windows) → `~/.beesky/agent-config.json`. Injectable for tests.
@@ -301,6 +352,7 @@ class AgentStatus {
   final String? error;
   final String cloudUrl;
   final String site;
+  final double? timestamp;
 
   const AgentStatus({
     required this.time,
@@ -309,6 +361,7 @@ class AgentStatus {
     required this.error,
     required this.cloudUrl,
     required this.site,
+    this.timestamp,
   });
 
   factory AgentStatus.fromJson(Map<String, dynamic> data) => AgentStatus(
@@ -318,6 +371,7 @@ class AgentStatus {
         error: data['error'] as String?,
         cloudUrl: (data['cloud_url'] as String?) ?? '',
         site: (data['site'] as String?) ?? '',
+        timestamp: (data['ts'] as num?)?.toDouble(),
       );
 }
 
@@ -331,14 +385,25 @@ class StatusView {
   const StatusView(this.tone, this.pillText, this.bodyText);
 }
 
-StatusView deriveStatusView(AgentStatus? status, {bool? running}) {
+StatusView deriveStatusView(AgentStatus? status,
+    {bool? running, DateTime? now, DateTime? startedAt, double interval = 30}) {
   if (running == false)
     return StatusView(
         'dim',
         'Đã dừng',
         status == null
             ? 'Agent chưa chạy. Kiểm tra token và bấm Bắt đầu Agent.'
-            : 'Agent đã dừng. Lần gửi gần nhất: ${status.time}.');
+            : 'Agent đã dừng. Vòng quét gần nhất: ${status.time}.');
+  final timestamp = status?.timestamp;
+  final lastCycle = timestamp != null && timestamp.isFinite
+      ? DateTime.fromMillisecondsSinceEpoch((timestamp * 1000).round())
+      : DateTime.tryParse(status?.time ?? '');
+  if (running == true &&
+      startedAt != null &&
+      (lastCycle == null || lastCycle.isBefore(startedAt))) {
+    return const StatusView('warn', 'Đang quét',
+        'Đang thực hiện vòng quét đầu tiên của phiên này. Dữ liệu cũ chưa xác nhận kết nối hiện tại.');
+  }
   if (running == true && status == null)
     return const StatusView('warn', 'Đang quét',
         'Tiến trình chạy ngầm đã khởi động. Chờ bản quét đầu tiên gửi về Mine.');
@@ -346,9 +411,21 @@ StatusView deriveStatusView(AgentStatus? status, {bool? running}) {
     return const StatusView('dim', 'Chưa có dữ liệu',
         'Agent chưa chạy vòng nào — trạng thái sẽ hiện ở đây sau vòng quét đầu tiên.');
   }
+  if (running == true &&
+      now != null &&
+      (lastCycle == null ||
+          now.difference(lastCycle).inSeconds >
+              (interval * 3).clamp(120, double.infinity))) {
+    return const StatusView('warn', 'Chưa có dữ liệu mới',
+        'Agent còn chạy nhưng chưa hoàn tất vòng quét mới. Kiểm tra dải IP, mạng hoặc mở nhật ký.');
+  }
+  if (running == true && status.ok && status.miners == 0) {
+    return const StatusView('warn', 'Chưa tìm thấy máy',
+        'Mine đã nhận vòng quét nhưng chưa có máy phản hồi. Kiểm tra dải IP và kết nối mạng tại xưởng.');
+  }
   if (status.ok) {
     return StatusView('ok', 'Đang chạy tốt',
-        'Vòng gần nhất OK lúc ${status.time} — ${status.miners} máy · trại ${status.site} · cloud ${status.cloudUrl}');
+        'Vòng gần nhất OK lúc ${status.time} — ${status.miners} máy · xưởng ${status.site} · cloud ${status.cloudUrl}');
   }
   return StatusView('bad', 'Lỗi gần nhất',
       'Lỗi lúc ${status.time}: ${status.error ?? 'không rõ nguyên nhân'}');

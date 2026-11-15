@@ -13,8 +13,8 @@ class BeeSkyColors {
   static const surface = Color(0xFFFFFFFF); // Surface
   static const border = Color(0xFFDCE1E8); // Border
   static const activeNav = Color(0xFFE8EBF0); // Active Navigation
-  static const ok = Color(0xFF16A34A); // Success
-  static const warn = Color(0xFFB77908); // Warning
+  static const ok = Color(0xFF15803D); // Success text on light surfaces (AA)
+  static const warn = Color(0xFF92620A); // Warning text on light surfaces (AA)
   static const bad = Color(0xFFDC2626); // Error
   static const info = Color(0xFF2563EB); // Info
 
@@ -205,12 +205,11 @@ class GlassCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: BeeSkyColors.panelGlass,
-        borderRadius: BorderRadius.circular(radiusCard),
-        border: Border.all(color: BeeSkyColors.glassBorder),
-      ),
+    return Material(
+      color: BeeSkyColors.panelGlass,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(radiusCard),
+          side: const BorderSide(color: BeeSkyColors.glassBorder)),
       child: Padding(padding: padding, child: child),
     );
   }

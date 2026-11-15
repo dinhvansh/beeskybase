@@ -111,6 +111,8 @@ def _post_json(url: str, payload: dict, key: str, timeout: float =
                 if isinstance(text,str):message += ': '+text[:300]
         except (ValueError,OSError):
             pass
+        finally:
+            error.close()
         raise ValueError(redact(message,key)) from None
 
 
@@ -122,8 +124,12 @@ def _get_json(url: str, key: str, timeout: float = POST_TIMEOUT_S) -> dict:
                  "User-Agent": "BeeSky-Agent/0.6",
                  "Authorization": f"Bearer {key}"})
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    with opener.open(request, timeout=timeout) as response:
-        body = response.read()
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            body = response.read()
+    except urllib.error.HTTPError as error:
+        error.close()
+        raise
     data = json.loads(body.decode("utf-8", errors="replace"))
     if not isinstance(data, dict):
         raise ValueError("cloud reply is not a JSON object")
@@ -443,7 +449,7 @@ class AgentService:
         self._run_commands(records)
         self._maybe_update_check()
         self._emit_status(
-            delivered, len(records),
+            delivered, len(present),
             None if delivered else
             self._last_delivery_error or "Không gửi được bản quét; Agent sẽ thử lại ở vòng kế tiếp.")
         return events

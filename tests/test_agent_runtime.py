@@ -33,6 +33,7 @@ class RuntimeTests(unittest.TestCase):
     def test_detached_worker_survives_launcher_and_reopens_then_stops(self):
         key = secrets.token_urlsafe(32)
         snapshots = []
+        failed_uploads = []
 
         class Cloud(BaseHTTPRequestHandler):
             def log_message(self, *_):
@@ -63,6 +64,9 @@ class RuntimeTests(unittest.TestCase):
                 if not self.authorized():
                     return self.answer({'detail': 'invalid'}, 401)
                 if self.path == '/api/ingest':
+                    if not failed_uploads:
+                        failed_uploads.append(body)
+                        return self.answer({'detail': 'fixture temporary outage'}, 503)
                     snapshots.append(body)
                 self.answer({'ok': True})
 
@@ -104,7 +108,18 @@ class RuntimeTests(unittest.TestCase):
                 while time.monotonic() < until and not any(s['miners'] for s in snapshots):
                     time.sleep(.1)
                 self.assertTrue(any(s['miners'] for s in snapshots), 'Worker must actually scan and POST a miner')
+                self.assertEqual(len(failed_uploads), 1, 'A temporary Cloud outage must recover automatically')
                 self.assertEqual(snapshots[0]['site'], 'Xưởng máy thử')
+                info = json.loads(runtime_path(cfg_path).read_text(encoding='utf-8'))
+                self.assertGreater(info['startedAt'], 0)
+                until = time.monotonic() + 5
+                while time.monotonic() < until:
+                    status = agent_app.read_status(cfg_path)
+                    if status and status['ok']:
+                        break
+                    time.sleep(.1)
+                self.assertTrue(status['ok'])
+                self.assertGreaterEqual(status['ts'], info['startedAt'])
                 self.assertNotIn(key, (Path(temp) / 'agent.log').read_text(encoding='utf-8'))
                 code, stopped = command('stop')
                 self.assertEqual(code, 0)

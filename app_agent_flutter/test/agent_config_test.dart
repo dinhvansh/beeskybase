@@ -134,7 +134,7 @@ void main() {
       expect(
           view.bodyText,
           'Vòng gần nhất OK lúc 2026-11-11 07:45:00 — 63 máy · '
-          'trại Xưởng 1 · cloud https://cloud.example.com');
+          'xưởng Xưởng 1 · cloud https://cloud.example.com');
     });
 
     test('failed cycle -> red pill with the error verbatim', () {
@@ -153,7 +153,12 @@ void main() {
 
     test('failed cycle without an error -> không rõ nguyên nhân', () {
       final view = deriveStatusView(const AgentStatus(
-          time: 'T', ok: false, miners: 0, error: null, cloudUrl: '', site: ''));
+          time: 'T',
+          ok: false,
+          miners: 0,
+          error: null,
+          cloudUrl: '',
+          site: ''));
       expect(view.bodyText, 'Lỗi lúc T: không rõ nguyên nhân');
     });
   });
@@ -179,8 +184,7 @@ void main() {
     test('env override wins', () {
       expect(
           defaultConfigPath(
-              env: {'BEESKY_AGENT_CONFIG': '/tmp/x.json'},
-              isWindows: false),
+              env: {'BEESKY_AGENT_CONFIG': '/tmp/x.json'}, isWindows: false),
           '/tmp/x.json');
     });
 

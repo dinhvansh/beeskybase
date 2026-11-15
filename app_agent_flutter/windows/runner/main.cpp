@@ -32,8 +32,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // auto-sizes to roughly this. (The version the Tk title carries
   // lives in the in-app header pill instead — see
   // docs/agent-app-mapping.md, divergence D8.)
-  Win32Window::Size size(780, 840);
-  if (!window.Create(L"BeeSky Agent — Cấu hình agent trại", origin, size)) {
+  Win32Window::Size size(1120, 760);
+  if (!window.Create(L"BeeSky Agent — Kết nối xưởng", origin, size)) {
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);

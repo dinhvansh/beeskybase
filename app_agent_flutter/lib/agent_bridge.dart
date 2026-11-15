@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'agent_config.dart';
+import 'agent_process.dart';
 
 /// The bridge between the Flutter agent app and the BeeSky Python
 /// core. The core is the ONLY engine — this app never reimplements
@@ -52,6 +53,7 @@ abstract class AgentBridge {
       required String cloudUrl,
       required String? key});
   bool get running;
+  DateTime? get startedAt;
   Future<bool> refreshRunning(String configPath);
   Future<TaskOutcome> startAgent(String configPath);
   Future<TaskOutcome> stopAgent();
@@ -89,6 +91,10 @@ class ProcessAgentBridge implements AgentBridge {
   final String? _beeskyExe;
   bool _running = false;
   String? _configPath;
+  DateTime? _startedAt;
+
+  @override
+  DateTime? get startedAt => _startedAt;
 
   @override
   bool get running => _running;
@@ -122,8 +128,13 @@ class ProcessAgentBridge implements AgentBridge {
       _running = response.statusCode == 200 &&
           data['pid'] == pid &&
           data['instance'] == token;
+      final started = data['startedAt'];
+      _startedAt = _running && started is num && started.isFinite
+          ? DateTime.fromMillisecondsSinceEpoch((started * 1000).round())
+          : null;
     } catch (_) {
       _running = false;
+      _startedAt = null;
     } finally {
       client.close(force: true);
     }
@@ -254,11 +265,20 @@ class ProcessAgentBridge implements AgentBridge {
 
   @override
   Future<String?> sysinfoDefaultTarget() async {
+    // Agent-only installs do not ship the Scanner's beesky.exe sidecar.
+    try {
+      final result = await runAgentProcess(_agentExe, ['network'],
+          timeout: const Duration(seconds: 5));
+      final data = jsonDecode(result.stdout as String);
+      if (result.exitCode == 0 && data['target'] is String) {
+        return data['target'] as String;
+      }
+    } catch (_) {/* Older cores can still use the Scanner fallback below. */}
     final exe = _beeskyExe;
     if (exe == null) return null;
     try {
-      final result = await Process.run(exe, ['sysinfo', '--json'])
-          .timeout(const Duration(seconds: 20));
+      final result = await runAgentProcess(exe, ['sysinfo', '--json'],
+          timeout: const Duration(seconds: 5));
       if (result.exitCode != 0) return null;
       final data = jsonDecode(result.stdout as String);
       if (data is Map<String, dynamic>) {
@@ -276,8 +296,9 @@ class ProcessAgentBridge implements AgentBridge {
     // The core gates on Windows before probing (agent_app._is_windows).
     if (!Platform.isWindows) return false;
     try {
-      final result =
-          await Process.run('schtasks', ['/Query', '/TN', 'BeeSky Agent']);
+      final result = await runAgentProcess(
+          'schtasks', ['/Query', '/TN', 'BeeSky Agent'],
+          timeout: const Duration(seconds: 5));
       return result.exitCode == 0;
     } catch (_) {
       return false;
@@ -326,8 +347,8 @@ class ProcessAgentBridge implements AgentBridge {
       intervalRaw: intervalRaw,
     );
     try {
-      final result = await Process.run(_agentExe, args)
-          .timeout(const Duration(minutes: 10));
+      final result = await runAgentProcess(_agentExe, args,
+          timeout: const Duration(minutes: 10));
       final stdout = (result.stdout as String).trim();
       for (final line in stdout.split('\n')) {
         final trimmed = line.trim();
@@ -343,9 +364,17 @@ class ProcessAgentBridge implements AgentBridge {
       final detail = stderr.isNotEmpty
           ? stderr
           : (stdout.isNotEmpty ? stdout : 'exit ${result.exitCode}');
-      return TestOutcome(false, detail);
-    } catch (e) {
-      return TestOutcome(false, '$e');
+      return TestOutcome(
+          false,
+          key == null || key.isEmpty
+              ? detail
+              : detail.replaceAll(key, '[token]'));
+    } on TimeoutException {
+      return const TestOutcome(false,
+          'Vòng chạy thử vượt quá 10 phút và đã dừng. Thu hẹp dải IP rồi thử lại.');
+    } catch (_) {
+      return const TestOutcome(false,
+          'Không chạy được bộ quét. Kiểm tra cài đặt BeeSky Agent và nhật ký.');
     }
   }
 
@@ -356,14 +385,18 @@ class ProcessAgentBridge implements AgentBridge {
 
   Future<TaskOutcome> _runTaskVerb(List<String> args) async {
     try {
-      final result = await Process.run(_agentExe, args)
-          .timeout(const Duration(minutes: 2));
+      final result = await runAgentProcess(_agentExe, args,
+          timeout: const Duration(minutes: 2));
       final stdout = (result.stdout as String).trim();
       final stderr = (result.stderr as String).trim();
       final message = stdout.isNotEmpty ? stdout : stderr;
       return TaskOutcome(result.exitCode == 0, message);
-    } catch (e) {
-      return TaskOutcome(false, '$e');
+    } on TimeoutException {
+      return const TaskOutcome(false,
+          'Windows phản hồi quá lâu. Kiểm tra tự khởi động rồi thử lại.');
+    } catch (_) {
+      return const TaskOutcome(false,
+          'Không cập nhật được tự khởi động. Kiểm tra cài đặt và quyền Windows.');
     }
   }
 
@@ -409,6 +442,8 @@ class MockAgentBridge implements AgentBridge {
 
   @override
   bool running = false;
+  @override
+  DateTime? startedAt;
   @override
   Future<AgentConnection> connectionInfo(
       {required String configPath,

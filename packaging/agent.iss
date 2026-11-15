@@ -1,6 +1,6 @@
 ; Standalone Agent: persistent background runtime and native configuration UI.
 #define MyAppName "BeeSky Agent"
-#define MyAppVersion "0.42.0"
+#define MyAppVersion "0.43.0"
 #define MyAppPublisher "BeeSkyBase"
 #define MyAppExeName "beesky-agent.exe"
 

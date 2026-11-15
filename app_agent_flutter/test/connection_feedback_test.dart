@@ -66,7 +66,7 @@ void main() {
     await bridge.startAgent('mock/agent-config.json');
     await pump(t, bridge);
     expect(find.text('Dừng Agent'), findsOneWidget);
-    expect(find.text('Đang chạy tốt'), findsOneWidget);
+    expect(find.text('Chưa có dữ liệu mới'), findsOneWidget);
     await t.tap(find.text('Dừng Agent'));
     await t.pump();
     await t.pump(const Duration(milliseconds: 100));

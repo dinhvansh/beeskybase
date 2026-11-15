@@ -127,7 +127,7 @@ def build_service(cfg: AgentConfig, status_hook=None):
                         status_hook=status_hook)
 
 
-def test_ingest(cfg: AgentConfig) -> tuple[bool, str]:
+def test_ingest(cfg: AgentConfig, status_hook=None) -> tuple[bool, str]:
     """One real ingest cycle: scan once, push the snapshot.
 
     Returns (ok, human-readable verdict). This is the `test`
@@ -138,15 +138,21 @@ def test_ingest(cfg: AgentConfig) -> tuple[bool, str]:
     if missing:
         return False, ("chưa đủ cấu hình — còn thiếu: "
                        + ", ".join(missing))
-    service = build_service(cfg)
+    service = build_service(cfg, status_hook=status_hook)
     try:
         records = service._scan_fn()
     except Exception as exc:  # noqa: BLE001 — verdict, not a crash
+        service._emit_status(False, 0, f'Quét thất bại: {exc}')
         return False, f"quét thất bại: {exc}"
-    if service._deliver_snapshot(records):
-        return True, (f"đã đẩy snapshot {len(records)} máy "
+    from .agent import _is_error_record
+    miners = len({record['ip'] for record in records if not _is_error_record(record)})
+    delivered = service._deliver_snapshot(records)
+    error = None if delivered else service._last_delivery_error or 'Cloud chưa nhận bản quét. Kiểm tra mạng rồi thử lại.'
+    service._emit_status(delivered, miners, error)
+    if delivered:
+        return True, (f"đã đẩy snapshot {miners} máy "
                       f"lên {cfg.cloud_url} (site {cfg.site!r})")
-    return False, service._last_delivery_error or "Cloud chưa nhận bản quét. Kiểm tra mạng rồi thử lại."
+    return False, error
 
 
 # ---------------------------------------------------------------------------
@@ -486,7 +492,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
 def _cmd_test(args: argparse.Namespace) -> int:
     cfg = _resolve(args)
-    ok, verdict = test_ingest(cfg)
+    ok, verdict = test_ingest(cfg, status_hook=make_status_hook(cfg, _config_path_for(args)))
     stamp = time.strftime("%H:%M:%S")
     print(f"TEST {'OK' if ok else 'FAIL'} [{stamp}]: {verdict}")
     return 0 if ok else 1
@@ -745,6 +751,11 @@ def main(argv: list[str] | None = None) -> int:
         return run_config_gui()
     mode, rest = argv[0], argv[1:]
     try:
+        if mode == 'network':
+            argparse.ArgumentParser(prog='beesky-agent network').parse_args(rest)
+            from .core.discover import default_scan_target
+            print(json.dumps({'target': default_scan_target()}))
+            return 0
         if mode in ('start', 'stop', 'status'):
             parser = argparse.ArgumentParser(prog='beesky-agent ' + mode)
             parser.add_argument('--config')

@@ -57,6 +57,7 @@ def control_server(config_path):
     stopped = threading.Event()
     token = secrets.token_hex(32)
     pid = os.getpid()
+    started_at = time.time()
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -77,7 +78,8 @@ def control_server(config_path):
                 return
             if stop:
                 stopped.set()
-            body = json.dumps({'pid': pid, 'instance': token}).encode()
+            body = json.dumps({'pid': pid, 'instance': token,
+                               'startedAt': started_at}).encode()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(body)))
@@ -94,7 +96,8 @@ def control_server(config_path):
         # Open exclusively to owner before writing the control credential.
         descriptor = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(descriptor, 'w', encoding='utf-8') as file:
-            json.dump({'pid': pid, 'port': server.server_port, 'token': token}, file)
+            json.dump({'pid': pid, 'port': server.server_port, 'token': token,
+                       'startedAt': started_at}, file)
         try:
             os.chmod(path, 0o600)
         except OSError:
