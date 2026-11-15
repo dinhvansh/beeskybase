@@ -639,7 +639,7 @@ abstract class _JsonStore {
       ? Directory('$appData${Platform.pathSeparator}BeeSky')
       : Directory(
           '${Directory.systemTemp.path}${Platform.pathSeparator}BeeSky');
-  return (exeDir, fallback);
+  return (fallback, exeDir);
 }
 
 class HistoryStore extends _JsonStore {

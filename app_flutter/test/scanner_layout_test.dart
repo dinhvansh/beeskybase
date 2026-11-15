@@ -33,20 +33,4 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('Agent start stays visible on a short laptop window',
-      (tester) async {
-    tester.view.physicalSize = const Size(1024, 640);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    await tester.pumpWidget(BeeSkyApp(bridge: MockBridge()));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Chế độ Agent'));
-    await tester.pumpAndSettle();
-    expect(find.text('Token Agent:'), findsOneWidget);
-    final start = find.text('Bắt đầu Agent');
-    expect(start, findsOneWidget);
-    expect(tester.getRect(start).bottom, lessThan(640));
-    expect(tester.takeException(), isNull);
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
 }

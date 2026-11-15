@@ -49,15 +49,16 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
   final _intervalCtrl = TextEditingController(text: '30');
 
   bool _showKey = false;
+  String? _connectionError;
+  bool _refreshing = false, _changingRun = false;
   bool _keyProtected = false;
   bool _testing = false;
-  bool _checking = false, _filling = true, _displayRunning = false;
+  bool _checking = false, _filling = true;
   AgentConnection? _connection;
   String _statusLine = '';
   String _testPillTone = 'dim';
   String _testPillText = 'Chưa chạy thử';
   StatusView _statusView = deriveStatusView(null);
-  DateTime? _statusMtime;
   bool _autostartAvailable = true;
   bool _autostartInstalled = false;
   String _autostartHint = '';
@@ -75,14 +76,17 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
     _init();
     // The Tk window polls the status file's mtime every 100 ms;
     // 2 s here (divergence D7 — status changes once per cycle).
-    _timer = Timer.periodic(const Duration(seconds: 2), (_) {
-      final mtime = store.statusModified();
-      if ((mtime != _statusMtime || _displayRunning != bridge.running) &&
-          mounted) {
-        setState(() {
-          _displayRunning = bridge.running;
-          _refreshStatusCard();
-        });
+    _timer = Timer.periodic(const Duration(seconds: 2), (_) async {
+      if (_refreshing) return;
+      _refreshing = true;
+      try {
+        await bridge.refreshRunning(store.path);
+        if (mounted)
+          setState(() {
+            _refreshStatusCard();
+          });
+      } finally {
+        _refreshing = false;
       }
     });
   }
@@ -117,11 +121,15 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
         _fillFields(cfg);
         _statusLine =
             'Đã nạp cấu hình từ ${store.path} — sửa rồi Lưu, hoặc Chạy thử ngay.';
-      } on FormatException catch (e) {
-        _statusLine = 'Không đọc được cấu hình: ${e.message}';
+      } catch (_) {
+        _statusLine =
+            'Không đọc được cấu hình đã lưu. Kiểm tra quyền truy cập rồi nhập lại token.';
+        _connectionError = _statusLine;
       }
       if (mounted) setState(() {});
     }
+    await bridge.refreshRunning(store.path);
+    if (!mounted) return;
     _refreshStatusCard();
     _filling = false;
     await _refreshAutostart();
@@ -129,7 +137,9 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
   }
 
   void _fillFields(AgentConfig cfg) {
-    _cloudCtrl.text = cfg.cloudUrl;
+    _cloudCtrl.text = cfg.cloudUrl == 'https://cloud.beeskybase.com'
+        ? 'https://mine.beeskybase.com'
+        : cfg.cloudUrl;
     _keyCtrl.text = cfg.key;
     _siteCtrl.text = cfg.site;
     _targetCtrl.text = cfg.target;
@@ -181,6 +191,7 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
     if (_filling || !mounted) return;
     setState(() {
       _connection = null;
+      _connectionError = null;
       _siteCtrl.clear();
     });
   }
@@ -189,22 +200,30 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
     if (_checking) return false;
     final (cfg, error) = _currentConfig();
     if (error != null) {
-      setState(() => _statusLine = 'Chưa kiểm tra được: $error');
+      setState(
+          () => _connectionError = _statusLine = 'Chưa kiểm tra được: $error');
       return false;
     }
     final cloud = _cloudCtrl.text, token = _keyCtrl.text;
     setState(() {
       _checking = true;
+      _connectionError = null;
       _statusLine = 'Đang kiểm tra token với Mine…';
     });
     try {
-      final connection = await bridge.connectionInfo(
-        configPath: store.path,
-        cloudUrl: cfg!.cloudUrl,
-        key: cfg.hasProtectedKey ? null : cfg.key,
-      );
-      if (!mounted || cloud != _cloudCtrl.text || token != _keyCtrl.text)
+      final connection = await bridge
+          .connectionInfo(
+            configPath: store.path,
+            cloudUrl: cfg!.cloudUrl,
+            key: cfg.hasProtectedKey ? null : cfg.key,
+          )
+          .timeout(const Duration(seconds: 25));
+      if (!mounted) return false;
+      if (cloud != _cloudCtrl.text || token != _keyCtrl.text) {
+        setState(() => _connectionError =
+            'Token hoặc địa chỉ đã thay đổi. Bấm kiểm tra lại.');
         return false;
+      }
       setState(() {
         _connection = connection;
         _siteCtrl.text = connection.siteName;
@@ -217,13 +236,18 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
         setState(() {
           _connection = null;
           _siteCtrl.clear();
-          _statusLine = e.message.toString();
+          _connectionError = _statusLine = e.message.toString();
         });
+      return false;
+    } on TimeoutException {
+      if (mounted)
+        setState(() => _connectionError = _statusLine =
+            'Cloud chưa phản hồi sau 25 giây. Kiểm tra mạng rồi thử lại.');
       return false;
     } catch (_) {
       if (mounted)
         setState(
-          () => _statusLine =
+          () => _connectionError = _statusLine =
               'Không kiểm tra được token. Kiểm tra kết nối rồi thử lại.',
         );
       return false;
@@ -233,22 +257,26 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
   }
 
   Future<void> _toggleAgent() async {
-    if (bridge.running) {
-      final outcome = await bridge.stopAgent();
+    if (_changingRun) return;
+    setState(() => _changingRun = true);
+    try {
+      await bridge.refreshRunning(store.path);
+      TaskOutcome outcome;
+      if (bridge.running) {
+        outcome = await bridge.stopAgent();
+      } else {
+        if (!await _checkConnection() || !mounted || !_saveConfig()) return;
+        outcome = await bridge.startAgent(store.path);
+      }
+      if (mounted) setState(() => _statusLine = outcome.message);
+      await bridge.refreshRunning(store.path);
       if (mounted)
         setState(() {
-          _displayRunning = bridge.running;
-          _statusLine = outcome.message;
+          _refreshStatusCard();
         });
-      return;
+    } finally {
+      if (mounted) setState(() => _changingRun = false);
     }
-    if (!await _checkConnection() || !mounted || !_saveConfig()) return;
-    final outcome = await bridge.startAgent(store.path);
-    if (mounted)
-      setState(() {
-        _displayRunning = bridge.running;
-        _statusLine = outcome.message;
-      });
   }
 
   bool _saveConfig() {
@@ -321,8 +349,7 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
   // -- background status ----------------------------------------------
 
   void _refreshStatusCard() {
-    _statusMtime = store.statusModified();
-    _statusView = deriveStatusView(store.readStatus());
+    _statusView = deriveStatusView(store.readStatus(), running: bridge.running);
   }
 
   Future<void> _openLog() async {
@@ -521,6 +548,25 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
         ),
       ),
       const SizedBox(height: 10),
+      Semantics(
+          key: const ValueKey('agent-connection-feedback'),
+          liveRegion: true,
+          child: Text(
+              _checking
+                  ? 'Đang kiểm tra token với Mine…'
+                  : _connectionError ??
+                      (_connection == null
+                          ? 'Chưa kiểm tra token.'
+                          : 'Đã kết nối: ${_connection!.siteName} · ${_connection!.organizationName}'),
+              style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: _connectionError != null
+                      ? BeeSkyColors.bad
+                      : _connection != null
+                          ? BeeSkyColors.ok
+                          : BeeSkyColors.muted))),
+      const SizedBox(height: 10),
       const Text(
         _keyNote,
         style: TextStyle(color: BeeSkyColors.muted, fontSize: 12.5),
@@ -631,6 +677,13 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
                                       CrossAxisAlignment.stretch,
                                   children: [
                                     status,
+                                    const Padding(
+                                        padding: EdgeInsets.only(top: 12),
+                                        child: Text(
+                                            'Đóng cửa sổ vẫn chạy ngầm. Bật tự khởi động để chạy lại khi đăng nhập Windows.',
+                                            style: TextStyle(
+                                                fontSize: 12,
+                                                color: BeeSkyColors.muted))),
                                     _card('Kết nối đúng xưởng', [
                                       const Text(
                                         '01  Tạo token trong mục Agent trên Mine.\n\n02  Dán token và kiểm tra xưởng được cấp quyền.\n\n03  Chọn dải IP rồi bắt đầu Agent.',
@@ -659,22 +712,21 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
                             ),
                           ),
                         ),
-                      Padding(
-                        padding: const EdgeInsets.only(top: 12),
-                        child: Text(
-                          _statusLine,
-                          style: const TextStyle(
-                            color: BeeSkyColors.muted,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ),
                     ],
                   ),
                 ),
               ),
             ),
           ),
+          Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+              child: Semantics(
+                  liveRegion: true,
+                  child: Text(_statusLine,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 12, color: BeeSkyColors.text)))),
           Container(
             decoration: const BoxDecoration(
               color: BeeSkyColors.surface,
@@ -691,10 +743,15 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
                       runSpacing: 8,
                       children: [
                         FilledButton(
-                          onPressed:
-                              _checking || _testing ? null : _toggleAgent,
+                          onPressed: _checking || _testing || _changingRun
+                              ? null
+                              : _toggleAgent,
                           child: Text(
-                            bridge.running ? 'Dừng Agent' : 'Bắt đầu Agent',
+                            _changingRun
+                                ? 'Đang xử lý…'
+                                : bridge.running
+                                    ? 'Dừng Agent'
+                                    : 'Bắt đầu Agent',
                           ),
                         ),
                         OutlinedButton(

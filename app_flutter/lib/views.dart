@@ -287,7 +287,7 @@ class StoreFileInfo {
       ? Directory('$local${Platform.pathSeparator}BeeSky')
       : Directory(
           '${Directory.systemTemp.path}${Platform.pathSeparator}BeeSky');
-  return (exe.parent, fallback);
+  return (fallback, exe.parent);
 }
 
 class SettingsStore {

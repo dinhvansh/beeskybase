@@ -33,7 +33,7 @@ def connection(request):
     agent=request.auth
     response=Response({'agentId':str(agent.id),'agentName':agent.name,
         'siteId':str(agent.site_id),'siteName':agent.site.name,
-        'organizationName':agent.site.organization.name,'mode':'monitor'})
+        'organizationName':agent.site.organization.name,'mode':'monitor','serverTime':timezone.now().timestamp()})
     response['Cache-Control']='no-store'
     return response
 

@@ -39,6 +39,8 @@ def connection_info(cloud_url: str, key: str) -> dict:
             if len(raw)>65536:raise ConnectionError('Phản hồi Cloud không hợp lệ.')
             data=json.loads(raw)
     except urllib.error.HTTPError as error:
+        if error.headers.get('cf-mitigated')=='challenge' or (error.code==403 and 'json' not in error.headers.get('Content-Type','')):
+            raise ConnectionError('Cổng bảo vệ Cloud đang chặn phần mềm Agent. Cần cho phép đường dẫn /api/agent và /api/ingest trên domain; token chưa được kiểm tra.') from None
         if error.code in (401,403):
             raise ConnectionError('Token không hợp lệ hoặc đã bị thu hồi. Tạo token mới trên Mine.') from None
         if error.code==404:

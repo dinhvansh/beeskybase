@@ -318,7 +318,7 @@ class OpsFiles {
         ? Directory('$appData${Platform.pathSeparator}BeeSky')
         : Directory(
             '${Directory.systemTemp.path}${Platform.pathSeparator}BeeSky');
-    return OpsFiles(primaryDir: exeDir, fallbackDir: fallback);
+    return OpsFiles(primaryDir: fallback, fallbackDir: exeDir);
   }
 
   static const jobFileName = 'beesky-ops-job.json';

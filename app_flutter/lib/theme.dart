@@ -58,6 +58,7 @@ const _tabular = FontFeature.tabularFigures();
 
 TextStyle numStyle({double fontSize = 13, FontWeight? weight, Color? color}) {
   return TextStyle(
+    fontFamily: 'BeeSkySans',
     fontSize: fontSize,
     fontWeight: weight,
     color: color,
@@ -67,6 +68,7 @@ TextStyle numStyle({double fontSize = 13, FontWeight? weight, Color? color}) {
 
 TextStyle monoStyle({double fontSize = 13, FontWeight? weight, Color? color}) {
   return TextStyle(
+    fontFamily: 'BeeSkySans',
     fontSize: fontSize,
     fontWeight: weight,
     color: color,
@@ -92,7 +94,7 @@ ThemeData buildBeeSkyTheme() {
     textTheme: base.textTheme.apply(
       bodyColor: BeeSkyColors.text,
       displayColor: BeeSkyColors.text,
-      fontFamily: 'Segoe UI',
+      fontFamily: 'BeeSkySans',
       fontFamilyFallback: fontFallback,
     ),
     appBarTheme: const AppBarTheme(
@@ -130,7 +132,7 @@ ThemeData buildBeeSkyTheme() {
         ),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         textStyle: const TextStyle(
-            fontFamily: 'Segoe UI', fontWeight: FontWeight.w700),
+            fontFamily: 'BeeSkySans', fontWeight: FontWeight.w700),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(

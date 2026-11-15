@@ -47,9 +47,12 @@ abstract class AgentBridge {
   /// Resolved beesky-agent executable (for display/diagnostics).
   String get agentExePath;
 
-  Future<AgentConnection> connectionInfo({required String configPath,
-    required String cloudUrl, required String? key});
+  Future<AgentConnection> connectionInfo(
+      {required String configPath,
+      required String cloudUrl,
+      required String? key});
   bool get running;
+  Future<bool> refreshRunning(String configPath);
   Future<TaskOutcome> startAgent(String configPath);
   Future<TaskOutcome> stopAgent();
 
@@ -84,57 +87,117 @@ abstract class AgentBridge {
 class ProcessAgentBridge implements AgentBridge {
   final String _agentExe;
   final String? _beeskyExe;
-  Process? _runningAgent;
+  bool _running = false;
+  String? _configPath;
 
   @override
-  bool get running => _runningAgent != null;
+  bool get running => _running;
 
   @override
-  Future<AgentConnection> connectionInfo({required String configPath,
-    required String cloudUrl, required String? key}) async {
+  Future<bool> refreshRunning(String configPath) async {
+    _configPath = configPath;
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+    try {
+      final file = File(configPath).absolute;
+      final name =
+          file.path.replaceFirst(RegExp(r'\.[^\\/]*$'), '.runtime.json');
+      final info =
+          jsonDecode(await File(name).readAsString()) as Map<String, dynamic>;
+      final port = info['port'], token = info['token'], pid = info['pid'];
+      if (port is! int ||
+          port < 1 ||
+          port > 65535 ||
+          token is! String ||
+          token.length != 64 ||
+          pid is! int) throw const FormatException();
+      final request =
+          await client.getUrl(Uri.parse('http://127.0.0.1:$port/status'));
+      request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+      final response =
+          await request.close().timeout(const Duration(seconds: 2));
+      final data = jsonDecode(await utf8.decoder
+          .bind(response)
+          .join()
+          .timeout(const Duration(seconds: 2)));
+      _running = response.statusCode == 200 &&
+          data['pid'] == pid &&
+          data['instance'] == token;
+    } catch (_) {
+      _running = false;
+    } finally {
+      client.close(force: true);
+    }
+    return _running;
+  }
+
+  @override
+  Future<AgentConnection> connectionInfo(
+      {required String configPath,
+      required String cloudUrl,
+      required String? key}) async {
     Process? process;
     try {
-      process = await Process.start(_agentExe, ['connection', '--config', configPath]);
+      process = await Process.start(
+          _agentExe, ['connection', '--config', configPath]);
       final output = process.stdout.transform(utf8.decoder).join();
       final errorDrain = process.stderr.drain<void>();
-      process.stdin.write(jsonEncode({'cloud_url': cloudUrl, if(key != null) 'key': key}));
+      process.stdin.write(
+          jsonEncode({'cloud_url': cloudUrl, if (key != null) 'key': key}));
       await process.stdin.close();
       await process.exitCode.timeout(const Duration(seconds: 20));
       final data = jsonDecode((await output).trim()) as Map<String, dynamic>;
       await errorDrain;
-      if(data['ok'] != true) throw FormatException(data['message'] as String? ?? 'Không xác nhận được token.');
-      return AgentConnection(data['agentName'] as String, data['siteName'] as String, data['organizationName'] as String);
-    } on FormatException { rethrow; }
-    catch (_) { throw const FormatException('Không kết nối được Cloud. Kiểm tra mạng và cập nhật tool nếu đang dùng bản cũ.'); }
-    finally { process?.kill(); }
+      if (data['ok'] != true)
+        throw FormatException(
+            data['message'] as String? ?? 'Không xác nhận được token.');
+      return AgentConnection(data['agentName'] as String,
+          data['siteName'] as String, data['organizationName'] as String);
+    } on FormatException {
+      rethrow;
+    } catch (_) {
+      throw const FormatException(
+          'Không kết nối được Cloud. Kiểm tra mạng và cập nhật tool nếu đang dùng bản cũ.');
+    } finally {
+      process?.kill();
+    }
+  }
+
+  Future<TaskOutcome> _runtimeCommand(String mode, String configPath) async {
+    _configPath = configPath;
+    Process? process;
+    try {
+      process = await Process.start(_agentExe, [mode, '--config', configPath]);
+      final output = process.stdout.transform(utf8.decoder).join();
+      final errors = process.stderr.drain<void>();
+      await process.stdin.close();
+      await process.exitCode.timeout(const Duration(seconds: 40));
+      final result = jsonDecode((await output).trim()) as Map<String, dynamic>;
+      await errors;
+      await refreshRunning(configPath);
+      return TaskOutcome(result['ok'] == true,
+          result['message'] as String? ?? 'Agent đã cập nhật trạng thái.');
+    } on TimeoutException {
+      return const TaskOutcome(
+          false, 'Agent phản hồi quá lâu. Kiểm tra trạng thái rồi thử lại.');
+    } catch (_) {
+      return const TaskOutcome(false,
+          'Không mở được bộ chạy Agent. Cài lại BeeSky Agent bản mới và kiểm tra nhật ký.');
+    } finally {
+      process?.kill();
+    }
   }
 
   @override
-  Future<TaskOutcome> startAgent(String configPath) async {
-    if(running) return const TaskOutcome(false, 'Agent đang chạy trong phần mềm này.');
-    final sibling = File(_agentExe).parent;
-    final windowless = File('${sibling.path}${Platform.pathSeparator}${_exeName('beesky-agentw')}');
-    try {
-      final process = await Process.start(windowless.existsSync() ? windowless.path : _agentExe,
-        ['run', '--background', '--config', configPath]);
-      _runningAgent = process;
-      unawaited(process.stdout.drain<void>());
-      unawaited(process.stderr.drain<void>());
-      unawaited(process.exitCode.then((_) { if(identical(_runningAgent,process)) _runningAgent = null; }));
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-      return running ? const TaskOutcome(true, 'Agent đã bắt đầu. Xem kết quả gửi dữ liệu trong trạng thái bên dưới.')
-        : const TaskOutcome(false, 'Agent chưa chạy được hoặc đã có phiên đang chạy. Xem log để biết chi tiết.');
-    } catch (_) { return const TaskOutcome(false, 'Không mở được engine Agent. Cài bộ BeeSky đầy đủ rồi thử lại.'); }
-  }
+  Future<TaskOutcome> startAgent(String configPath) =>
+      _runtimeCommand('start', configPath);
 
   @override
   Future<TaskOutcome> stopAgent() async {
-    final process = _runningAgent;
-    if(process == null) return const TaskOutcome(false, 'Phần mềm này chưa mở phiên Agent nào.');
-    process.kill();
-    await process.exitCode;
-    _runningAgent = null;
-    return const TaskOutcome(true, 'Đã dừng phiên Agent do phần mềm này mở.');
+    final path = _configPath;
+    if (path == null)
+      return const TaskOutcome(
+          false, 'Chưa xác định được cấu hình Agent. Mở lại phần mềm rồi thử.');
+    return _runtimeCommand('stop', path);
   }
 
   ProcessAgentBridge({String? agentExe, String? beeskyExe})
@@ -155,7 +218,11 @@ class ProcessAgentBridge implements AgentBridge {
   /// `{app}\agent\` layout — D6 in the mapping).
   static List<String> candidateDirs() {
     final exeDir = File(Platform.resolvedExecutable).parent;
-    return [exeDir.path, '${exeDir.path}${Platform.pathSeparator}agent', exeDir.parent.path];
+    return [
+      exeDir.path,
+      '${exeDir.path}${Platform.pathSeparator}agent',
+      exeDir.parent.path
+    ];
   }
 
   static String? _findSibling(String fileName) {
@@ -209,8 +276,8 @@ class ProcessAgentBridge implements AgentBridge {
     // The core gates on Windows before probing (agent_app._is_windows).
     if (!Platform.isWindows) return false;
     try {
-      final result = await Process.run(
-          'schtasks', ['/Query', '/TN', 'BeeSky Agent']);
+      final result =
+          await Process.run('schtasks', ['/Query', '/TN', 'BeeSky Agent']);
       return result.exitCode == 0;
     } catch (_) {
       return false;
@@ -333,22 +400,36 @@ class MockAgentBridge implements AgentBridge {
   int testCalls = 0;
   Map<String, Object?>? lastTestCall;
   String? lastOpenedFile;
-  AgentConnection connection = const AgentConnection('Agent kiểm thử', 'Trại Demo', 'Tổ chức kiểm thử');
+  AgentConnection connection =
+      const AgentConnection('Agent kiểm thử', 'Trại Demo', 'Tổ chức kiểm thử');
   String? connectionError;
   int connectionCalls = 0;
   @override
+  Future<bool> refreshRunning(String configPath) async => running;
+
+  @override
   bool running = false;
   @override
-  Future<AgentConnection> connectionInfo({required String configPath,
-    required String cloudUrl, required String? key}) async {
+  Future<AgentConnection> connectionInfo(
+      {required String configPath,
+      required String cloudUrl,
+      required String? key}) async {
     connectionCalls++;
-    if(connectionError != null) throw FormatException(connectionError!);
+    if (connectionError != null) throw FormatException(connectionError!);
     return connection;
   }
+
   @override
-  Future<TaskOutcome> startAgent(String configPath) async { running=true;return const TaskOutcome(true,'Agent đã bắt đầu.'); }
+  Future<TaskOutcome> startAgent(String configPath) async {
+    running = true;
+    return const TaskOutcome(true, 'Agent đã bắt đầu.');
+  }
+
   @override
-  Future<TaskOutcome> stopAgent() async { running=false;return const TaskOutcome(true,'Đã dừng Agent.'); }
+  Future<TaskOutcome> stopAgent() async {
+    running = false;
+    return const TaskOutcome(true, 'Đã dừng Agent.');
+  }
 
   @override
   bool get isMock => true;

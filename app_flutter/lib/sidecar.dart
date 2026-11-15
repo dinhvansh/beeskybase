@@ -164,8 +164,7 @@ class SidecarBridge implements BeeSkyBridge {
 
   @override
   bool get sidecarMissing =>
-      exePath.contains(Platform.pathSeparator) &&
-      !File(exePath).existsSync();
+      exePath.contains(Platform.pathSeparator) && !File(exePath).existsSync();
 
   /// Throws the ONE missing-engine message when the sidecar is a
   /// concrete path that isn't there — called before every spawn so
@@ -175,8 +174,12 @@ class SidecarBridge implements BeeSkyBridge {
   }
 
   @override
-  String get ticketsDirPath =>
-      '${_exeBaseDir(exePath)}${Platform.pathSeparator}tickets';
+  String get ticketsDirPath {
+    final data = Platform.environment['APPDATA'];
+    return data != null && data.isNotEmpty
+        ? '$data${Platform.pathSeparator}BeeSky${Platform.pathSeparator}tickets'
+        : '${_exeBaseDir(exePath)}${Platform.pathSeparator}tickets';
+  }
 
   /// The directory the sidecar exe lives in (or '.' when the exe
   /// is a bare PATH name) — the base every app-managed file that
@@ -378,8 +381,7 @@ class SidecarBridge implements BeeSkyBridge {
     _requireSidecar();
     final Process process;
     try {
-      process =
-          await Process.start(exePath, ipReportArgs(ipreportsFilePath));
+      process = await Process.start(exePath, ipReportArgs(ipreportsFilePath));
     } on ProcessException catch (e) {
       if (sidecarMissing) throw SidecarException(missingSidecarMessage);
       throw SidecarException('Không chạy được beesky ($exePath): ${e.message}');
@@ -520,7 +522,6 @@ class SidecarBridge implements BeeSkyBridge {
         .length;
     return '${dir.path} ($count phiếu)';
   }
-
 }
 
 /// One live `beesky ops` sidecar run: NDJSON lines in, [OpsEvent]s
@@ -621,8 +622,7 @@ class _SidecarOpsRun implements OpsRun {
 /// stray line; every {"report": {...}} line becomes a report.
 class _SidecarIpReportRun implements IpReportRun {
   final Process _process;
-  final StreamController<IpReport> _controller =
-      StreamController<IpReport>();
+  final StreamController<IpReport> _controller = StreamController<IpReport>();
 
   _SidecarIpReportRun(this._process) {
     _process.stdout
@@ -691,8 +691,7 @@ class MockBridge implements BeeSkyBridge {
   /// the sender address identifies.
   static final List<IpReport> _sampleReports = [
     IpReport(
-      receivedAt:
-          DateTime.now().millisecondsSinceEpoch / 1000.0 - 120,
+      receivedAt: DateTime.now().millisecondsSinceEpoch / 1000.0 - 120,
       sender: '192.168.2.101',
       text: '192.168.2.101,AA:BB:CC:DD:EE:01',
       ip: '192.168.2.101',
@@ -700,8 +699,7 @@ class MockBridge implements BeeSkyBridge {
       family: 'antminer',
     ),
     IpReport(
-      receivedAt:
-          DateTime.now().millisecondsSinceEpoch / 1000.0 - 45,
+      receivedAt: DateTime.now().millisecondsSinceEpoch / 1000.0 - 45,
       sender: '192.168.2.105',
       text: '',
       ip: null,
@@ -775,7 +773,7 @@ class MockBridge implements BeeSkyBridge {
 
   @override
   Future<SysInfo> sysinfo() async =>
-      const SysInfo(version: '0.41.0', defaultTarget: '192.168.2.0/24');
+      const SysInfo(version: '0.42.0', defaultTarget: '192.168.2.0/24');
 
   /// The sample fleet's event story (v0.32): the Z15 crossed the
   /// temp limit and the L9 lost chips since the previous pass —
@@ -869,8 +867,7 @@ class MockBridge implements BeeSkyBridge {
       ];
 
   @override
-  Future<OpsRun> startOps(Map<String, dynamic> job) async =>
-      _MockOpsRun(job);
+  Future<OpsRun> startOps(Map<String, dynamic> job) async => _MockOpsRun(job);
 
   /// Inspect fixtures mirroring the sample fleet's families:
   /// the S19 (vnish) gets the grade split + fan mode, the L9/Z15
@@ -1130,8 +1127,7 @@ class MockBridge implements BeeSkyBridge {
 /// Mock IP-Report run (v0.34): emits the canned reports once,
 /// shortly after start, then stays quiet until stopped.
 class _MockIpReportRun implements IpReportRun {
-  final StreamController<IpReport> _controller =
-      StreamController<IpReport>();
+  final StreamController<IpReport> _controller = StreamController<IpReport>();
 
   _MockIpReportRun() {
     Future<void>.delayed(const Duration(milliseconds: 150), () {
@@ -1259,15 +1255,13 @@ class _MockOpsRun implements OpsRun {
       'resume_mining': 'dashd accepted mining resume (mock)',
       'restart_mining': 'dashd accepted mining restart (mock)',
       'find_miner': 'dashd locate-miner is ON (mock)',
-      'throttle':
-          'dashd throttle set to ${payload?['percent'] ?? 100}% (mock)',
+      'throttle': 'dashd throttle set to ${payload?['percent'] ?? 100}% (mock)',
       'reset_autotune_all': 'dashd reset ALL autotune profiles (mock)',
       'reset_autotune_current':
           "dashd reset the current autotune profile 'perf-110' (mock)",
       'configure_api_key': 'dashd saved the API key — '
           "device reports 'inserted' (mock)",
-      'set_preset':
-          "dashd preset set to '${payload?['preset'] ?? ''}' (mock)",
+      'set_preset': "dashd preset set to '${payload?['preset'] ?? ''}' (mock)",
       'change_password': 'dashd accepted the password change (mock)',
     };
     if (tailMessages.containsKey(type)) {

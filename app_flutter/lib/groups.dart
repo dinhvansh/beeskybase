@@ -243,7 +243,7 @@ class GroupStore {
         ? Directory('$appData${Platform.pathSeparator}BeeSky')
         : Directory(
             '${Directory.systemTemp.path}${Platform.pathSeparator}BeeSky');
-    return GroupStore(primaryDir: exeDir, fallbackDir: fallback);
+    return GroupStore(primaryDir: fallback, fallbackDir: exeDir);
   }
 
   static const fileName = 'beesky-groups.json';

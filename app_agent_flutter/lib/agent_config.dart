@@ -4,7 +4,7 @@ import 'dart:io';
 /// The product version this app reports (header pill — the Tk
 /// window takes it from the Python package; here it mirrors the
 /// package version, pinned by the release process).
-const String agentAppVersion = '0.41.0';
+const String agentAppVersion = '0.42.0';
 
 /// The agent config file — a Dart mirror of the Python core's
 /// `beesky/agent_config.py`, which stays the spec and the owner of
@@ -331,7 +331,17 @@ class StatusView {
   const StatusView(this.tone, this.pillText, this.bodyText);
 }
 
-StatusView deriveStatusView(AgentStatus? status) {
+StatusView deriveStatusView(AgentStatus? status, {bool? running}) {
+  if (running == false)
+    return StatusView(
+        'dim',
+        'Đã dừng',
+        status == null
+            ? 'Agent chưa chạy. Kiểm tra token và bấm Bắt đầu Agent.'
+            : 'Agent đã dừng. Lần gửi gần nhất: ${status.time}.');
+  if (running == true && status == null)
+    return const StatusView('warn', 'Đang quét',
+        'Tiến trình chạy ngầm đã khởi động. Chờ bản quét đầu tiên gửi về Mine.');
   if (status == null) {
     return const StatusView('dim', 'Chưa có dữ liệu',
         'Agent chưa chạy vòng nào — trạng thái sẽ hiện ở đây sau vòng quét đầu tiên.');

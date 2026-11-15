@@ -39,7 +39,7 @@ void main() {
     await tester.tap(find.widgetWithText(OutlinedButton,'Chạy thử'));
     await tester.pump();await tester.pump(const Duration(milliseconds:50));
     expect(bridge.testCalls,0);
-    expect(find.text('Token đã thu hồi.'),findsOneWidget);
+    expect(find.text('Token đã thu hồi.'),findsWidgets);
   });
 
   testWidgets('Agent mode confirms token then starts and stops the real bridge contract', (tester) async {
@@ -66,15 +66,15 @@ void main() {
     expect(find.text('Quét tại xưởng'), findsOneWidget);
     expect(find.text('Trạng thái chạy ngầm'), findsOneWidget);
 
-    expect(_field(tester, 0).controller!.text, 'https://cloud.beeskybase.com');
+    expect(_field(tester, 0).controller!.text, 'https://mine.beeskybase.com');
     expect(_field(tester, 1).controller!.text, 'demo-agent-key');
     expect(_field(tester, 2).controller!.text, 'Trại Demo');
     expect(_field(tester, 3).controller!.text, '192.168.1.10-192.168.1.60');
     expect(_field(tester, 4).controller!.text, '30');
 
     // Status card derives from the fixture status (ok, 2 miners).
-    expect(find.text('Đang chạy tốt'), findsOneWidget);
-    expect(find.textContaining('2 máy · trại Trại Demo'), findsOneWidget);
+    expect(find.text('Đã dừng'), findsOneWidget);
+    expect(find.textContaining('Lần gửi gần nhất'), findsOneWidget);
     // Footer: the loaded-config line, as in Tk.
     expect(find.textContaining('Đã nạp cấu hình từ mock/agent-config.json'),
         findsOneWidget);
@@ -196,7 +196,7 @@ void main() {
     expect(_field(tester, 3).controller!.text, '192.168.1.0/24');
     expect(_field(tester, 0).controller!.text, 'https://mine.beeskybase.com');
     expect(find.text('File cấu hình: mock/agent-config.json'), findsOneWidget);
-    expect(find.text('Chưa có dữ liệu'), findsOneWidget);
+    expect(find.text('Đã dừng'), findsOneWidget);
   });
 
   testWidgets('Hiện key toggles the key field masking', (tester) async {

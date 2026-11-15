@@ -18,8 +18,9 @@ class IngestTests(TestCase):
         return self.client.post('/api/ingest',data,format='json')
     def test_connection_reports_only_bound_workshop_without_heartbeat_or_secrets(self):
         response=self.client.get('/api/agent/connection?site=forged-other-site')
+        self.assertAlmostEqual(response.json()['serverTime'],timezone.now().timestamp(),delta=5)
         self.assertEqual(response.status_code,200)
-        self.assertEqual(response.json(),{'agentId':str(self.agent.id),'agentName':'Scanner','siteId':str(self.site.id),'siteName':'Site','organizationName':'Scan Org','mode':'monitor'})
+        self.assertEqual(response.json(),{'agentId':str(self.agent.id),'agentName':'Scanner','siteId':str(self.site.id),'siteName':'Site','organizationName':'Scan Org','mode':'monitor','serverTime':response.json()['serverTime']})
         self.assertEqual(response['Cache-Control'],'no-store')
         self.assertNotIn(KEY,response.content.decode())
         self.assertNotIn(self.agent.key_hash,response.content.decode())

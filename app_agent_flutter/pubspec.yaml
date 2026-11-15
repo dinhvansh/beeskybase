@@ -3,7 +3,7 @@ description: "BeeSky Agent — Cấu hình agent tại trại (bản Flutter, st
 publish_to: "none"
 # Mirror of the Python package version (0.36.0) + seventh Flutter build
 # of the agent app (its own build counter, like the main app's +N).
-version: 0.41.0+11
+version: 0.42.0+12
 
 environment:
   sdk: ">=3.5.0 <4.0.0"
@@ -25,3 +25,16 @@ flutter:
     # The owner's official logo (packaging/assets/beesky-logo-512.png),
     # copied — never redrawn. Same asset as the main app ships.
     - assets/beesky-logo.png
+    - assets/fonts/OFL.txt
+
+  fonts:
+    - family: BeeSkySans
+      fonts:
+        - asset: assets/fonts/NotoSans-400.ttf
+          weight: 400
+        - asset: assets/fonts/NotoSans-500.ttf
+          weight: 500
+        - asset: assets/fonts/NotoSans-600.ttf
+          weight: 600
+        - asset: assets/fonts/NotoSans-700.ttf
+          weight: 700

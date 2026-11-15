@@ -4,8 +4,6 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:beesky_agent_app/agent_bridge.dart' as agent;
-import 'package:beesky_agent_app/config_page.dart' as agent_ui;
 
 import 'creds.dart';
 import 'detail.dart';
@@ -25,7 +23,7 @@ import 'views.dart';
 /// per-group / ad-hoc scan view behind it; v0.32 landed the five
 /// remaining sidebar views (heat map, energy, repairs, events,
 /// settings — docs/views-mapping.md).
-enum _View { groups, miners, heat, energy, repairs, events, agent, settings }
+enum _View { groups, miners, heat, energy, repairs, events, settings }
 
 /// Grid hotkey intents (v0.25) — the Flutter mirror of HashCore's
 /// `package:toolkit/hot_keys/intents_and_actions/` layer.
@@ -167,9 +165,6 @@ final _demoCreds = [
 ];
 
 class _HomePageState extends State<HomePage> {
-  late final _agentRuntime = widget.bridge.isMock
-      ? (agent.MockAgentBridge(), agent.MockConfigStore.demo())
-      : agent.createAgentRuntime();
   final _targetCtrl = TextEditingController();
 
   SysInfo? _sysinfo;
@@ -1726,14 +1721,6 @@ class _HomePageState extends State<HomePage> {
               'quá nhiệt, mất chip, board ngắt.',
           EventsView(events: _eventLog),
         ),
-      _View.agent => (
-          'Chế độ Agent',
-          'Dán token từ Mine để gửi bản quét về xưởng được cấp quyền.',
-          agent_ui.AgentConfigPage(
-              bridge: _agentRuntime.$1,
-              store: _agentRuntime.$2,
-              embedded: true),
-        ),
       _View.settings => (
           'Cài đặt',
           'Chỉ những cài đặt thật sự lưu lại và có tác dụng.',
@@ -2401,7 +2388,7 @@ class _HomePageState extends State<HomePage> {
           borderRadius: BorderRadius.circular(radiusWidget),
         ),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        textStyle: const TextStyle(fontFamily: 'Segoe UI', fontSize: 12),
+        textStyle: const TextStyle(fontFamily: 'BeeSkySans', fontSize: 12),
       ),
       child: Text(label),
     );
@@ -2421,7 +2408,7 @@ class _HomePageState extends State<HomePage> {
           borderRadius: BorderRadius.circular(radiusWidget),
         ),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        textStyle: const TextStyle(fontFamily: 'Segoe UI', fontSize: 12),
+        textStyle: const TextStyle(fontFamily: 'BeeSkySans', fontSize: 12),
       ),
       child: Text(label),
     );
@@ -2541,7 +2528,6 @@ class _HomePageState extends State<HomePage> {
       (Icons.bolt_outlined, 'Điện năng', _View.energy),
       (Icons.build_outlined, 'Lịch sử sửa', _View.repairs),
       (Icons.notifications_none_outlined, 'Sự kiện', _View.events),
-      (Icons.cloud_upload_outlined, 'Chế độ Agent', _View.agent),
       (Icons.settings_outlined, 'Cài đặt', _View.settings),
     ];
     final (dot, label) = _sidecarStatus();
@@ -2619,7 +2605,6 @@ class _HomePageState extends State<HomePage> {
       _View.energy: 'Điện năng',
       _View.repairs: 'Lịch sử sửa',
       _View.events: 'Sự kiện',
-      _View.agent: 'Chế độ Agent',
       _View.settings: 'Cài đặt',
     };
     return Container(
@@ -2886,7 +2871,7 @@ class _HomePageState extends State<HomePage> {
   static final ButtonStyle _scanBtnStyle = FilledButton.styleFrom(
     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
     textStyle: const TextStyle(
-        fontFamily: 'Segoe UI', fontSize: 13, fontWeight: FontWeight.w700),
+        fontFamily: 'BeeSkySans', fontSize: 13, fontWeight: FontWeight.w700),
   );
 
   static final ButtonStyle _ghostBtnStyle = OutlinedButton.styleFrom(
@@ -2897,7 +2882,7 @@ class _HomePageState extends State<HomePage> {
       borderRadius: BorderRadius.circular(radiusWidget),
     ),
     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-    textStyle: const TextStyle(fontFamily: 'Segoe UI', fontSize: 13),
+    textStyle: const TextStyle(fontFamily: 'BeeSkySans', fontSize: 13),
   );
 
   Widget _scanBar() {

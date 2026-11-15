@@ -109,6 +109,7 @@ jobs:
         run: |
           python -m compileall beesky
           python -m beesky --help
+          python -m unittest discover -s tests -p "test_agent_*.py" -v
 
       - name: Mock test suite (Git Bash, non-blocking)
         continue-on-error: true
@@ -131,6 +132,14 @@ jobs:
 
       - name: Smoke check (frozen exe)
         run: .\dist\beesky.exe --help
+
+      - name: Verify frozen Agent survives UI exit and sends real local scans
+        shell: powershell
+        run: |
+          $env:BEESKY_TEST_AGENT_EXE = (Resolve-Path dist\beesky-agent.exe).Path
+          python -m unittest discover -s tests -p test_agent_runtime.py -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item Env:BEESKY_TEST_AGENT_EXE
 
       # `gui --help` is parsed by argparse and exits before any
       # window opens — a safe headless smoke for the windowed build.
@@ -252,6 +261,10 @@ jobs:
 
       # The signer needs one concrete path, but the installer name
       # carries the version (BeeSkySetup-<version>.exe) — resolve it.
+      - name: Verify install and clean uninstall in isolated folders
+        shell: powershell
+        run: tools/verify_windows_installers.ps1
+
       - name: Locate installer for signing
         id: installerpath
         if: steps.signcheck.outputs.has_signing == 'true' && startsWith(github.ref, 'refs/tags/')
