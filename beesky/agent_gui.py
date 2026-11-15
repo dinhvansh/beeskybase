@@ -107,8 +107,20 @@ class AgentConfigApp:
                 pass
 
     def _build_widgets(self) -> None:
-        main = ttk.Frame(self.root, padding=(18, 14, 18, 14))
-        main.pack(fill="both", expand=True)
+        footer=ttk.Frame(self.root,padding=(18,0,18,14))
+        footer.pack(side='bottom',fill='x')
+        viewport=ttk.Frame(self.root)
+        viewport.pack(fill='both',expand=True)
+        canvas=tk.Canvas(viewport,highlightthickness=0,bg=BG)
+        scrollbar=ttk.Scrollbar(viewport,orient='vertical',command=canvas.yview)
+        scrollbar.pack(side='right',fill='y')
+        canvas.pack(side='left',fill='both',expand=True)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        main = ttk.Frame(canvas, padding=(18,14,18,14))
+        content=canvas.create_window((0,0),window=main,anchor='nw')
+        main.bind('<Configure>',lambda _event:canvas.configure(scrollregion=canvas.bbox('all')))
+        canvas.bind('<Configure>',lambda event:canvas.itemconfigure(content,width=event.width))
+        self.root.bind('<MouseWheel>',lambda event:canvas.yview_scroll(-int(event.delta/120),'units'))
 
         # -- header: logo + title + version chip -----------------------
         header = ttk.Frame(main)
@@ -225,7 +237,7 @@ class AgentConfigApp:
         self.refresh_bg_status()
 
         # -- actions + status pill ---------------------------------------
-        actions = ttk.Frame(main)
+        actions = ttk.Frame(footer)
         actions.pack(fill="x", pady=(14, 0))
         self.run_button=RoundedButton(actions,text='Bắt đầu Agent',variant='accent',command=self.toggle_agent)
         self.run_button.pack(side='left',padx=(0,8))
@@ -244,7 +256,7 @@ class AgentConfigApp:
         self.test_pill = ui_theme.status_pill(
             actions, text="Chưa chạy thử", state="dim")
         self.test_pill.pack(side="right")
-        self.autostart_hint = ttk.Label(main, text="",
+        self.autostart_hint = ttk.Label(footer, text="",
                                         style="Hint.TLabel")
         self.autostart_hint.pack(anchor="w", pady=(6, 0))
         self._refresh_autostart()
@@ -252,11 +264,12 @@ class AgentConfigApp:
         # -- footer status line ------------------------------------------
         self.status_var = tk.StringVar(
             value=f"File cấu hình: {self.config_path}")
-        ttk.Label(main, textvariable=self.status_var,
+        ttk.Label(footer, textvariable=self.status_var,
                   style="Hint.TLabel", justify="left",
                   wraplength=620).pack(fill="x", pady=(8, 0))
 
-        ui_theme.center_window(self.root)
+        ui_theme.center_window(self.root,width=min(760,self.root.winfo_screenwidth()-48),
+            height=min(900,self.root.winfo_screenheight()-100),minsize=(620,500))
 
     def _toggle_key_visibility(self) -> None:
         self.key_entry.configure(show="" if self.show_key_var.get()
