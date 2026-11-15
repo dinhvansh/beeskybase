@@ -93,6 +93,18 @@ jobs:
         with:
           python-version: "3.12"
 
+      # The installers embed the two Flutter bundles since v0.31
+      # (unified BeeSkySetup + the agent bundle in BeeSkyAgentSetup),
+      # so this workflow also builds them and stages the runner
+      # folders as dist\flutter-main / dist\flutter-agent for Inno.
+      # (Analyze/test of the apps stays in build-flutter.yml; this
+      # job only needs the compiled bundles for packaging.)
+      - name: Set up Flutter (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
       - name: Smoke checks (source)
         run: |
           python -m compileall beesky
@@ -193,6 +205,30 @@ jobs:
             Copy-Item signed\beesky-gui.exe dist\beesky-gui.exe -Force
           }
           if (-not (Test-Path dist\beesky-gui.exe)) { exit 1 }
+
+      - name: Build main Flutter app
+        working-directory: app_flutter
+        run: |
+          flutter pub get
+          flutter build windows --release
+
+      - name: Build agent Flutter app
+        working-directory: app_agent_flutter
+        run: |
+          flutter pub get
+          flutter build windows --release
+
+      - name: Stage Flutter bundles for the installers
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force dist\flutter-main | Out-Null
+          Copy-Item app_flutter\build\windows\x64\runner\Release\* `
+            dist\flutter-main\ -Recurse -Force
+          if (-not (Test-Path dist\flutter-main\beesky_app.exe)) { exit 1 }
+          New-Item -ItemType Directory -Force dist\flutter-agent | Out-Null
+          Copy-Item app_agent_flutter\build\windows\x64\runner\Release\* `
+            dist\flutter-agent\ -Recurse -Force
+          if (-not (Test-Path dist\flutter-agent\beesky_agent_app.exe)) { exit 1 }
 
       - name: Build installers (Inno Setup)
         shell: powershell

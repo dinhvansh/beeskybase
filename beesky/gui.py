@@ -48,6 +48,14 @@ SOURCE_LABEL = {
     "cgminer": "cgminer RPC",
     "vnish": "VNish",
     "stock": "Bitmain gốc",
+    "whatsminer": "Whatsminer",
+    "avalon": "Avalon (Canaan)",
+    "luxos": "LuxOS",
+    "braiins": "Braiins OS",
+    "iceriver": "IceRiver",
+    "epic": "Epic",
+    "auradine": "Auradine",
+    "sealminer": "Sealminer",
 }
 
 WEB_PORT = 8787

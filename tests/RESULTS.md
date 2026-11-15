@@ -2592,3 +2592,3038 @@ build-flutter.yml):
     runner and the BeeSkyFlutter-<tag>-win64.zip asset.
     The app remains compile-verified only until the
     owner runs it on real Windows (as since v0.21).
+
+---
+
+# v0.24.0 — network groups (HashCore Toolkit home screen, ported per the dissection)
+
+The owner set the parity bar (2026-11-11): "không được 100
+cũng ráng được 99%" vs HashCore Toolkit, and named network
+groups as the first gap to close. Following the standing
+dissect-before-porting rule, the Toolkit's group mechanism
+was dissected FIRST from the shipped materials (translation
+table, AOT string pools, Dart file map) and the behaviour
+mapping written to docs/network-groups-mapping.md BEFORE
+any code — every behaviour graded VERIFIED / INFERRED /
+UNKNOWN, divergences named, unknowns never invented.
+
+PYTHON CORE (beesky/core/groups.py NEW, cli.py):
+
+  * Group = {id, name, targets, creds, autoscan{enabled,
+    interval_min}, last_scan{at, scanned, found, ok, check,
+    error} | null}, persisted as {"version": 1, "groups":
+    [...]} in beesky-groups.json — located with the SAME
+    strategy as the v0.23 creds file (beside the executable,
+    %APPDATA%\BeeSky fallback; --groups-file / env
+    BEESKY_GROUPS_FILE override). Loading fails loud
+    (GroupError -> exit 2): malformed JSON, a nameless entry,
+    invalid targets (validated via parse_targets), a bad
+    creds shape, a zero autoscan interval.
+  * `beesky groups list|add|remove|show` (add takes
+    --name/--targets and mirrors the JSON; duplicate names
+    rejected) and `groups export <file>` / `import <file>`.
+    Import merges BY NAME — a same-name group replaces the
+    stored one in place, others are kept — the stated
+    BeeSky policy (HashCore's own import policy is UNKNOWN,
+    see the mapping). An invalid import file exits 2 and
+    changes nothing.
+  * `beesky scan --group NAME` (the positional target
+    becomes optional): the core resolves the group's
+    targets and merges credentials — group sets BEFORE the
+    --creds-file (global) sets — and ordered_creds' stable
+    tiers then try, per miner: group family -> global family
+    -> group "any" -> global "any" -> the rest. This is
+    the port of HashCore's global -> per-group override
+    layering onto BeeSky's v0.23 list model. Unknown group
+    = clean exit 2 before any scanning. After ANY successful
+    scan with --group (CLI or bridge --json), last_scan is
+    persisted into the store (best-effort: a refused write
+    warns on stderr and never fails the scan). No --group
+    = byte-identical v0.23 behaviour.
+
+FLUTTER APP (app_flutter/):
+
+  * Launch lands on a real NETWORK GROUPS screen (sidebar
+    "Nhóm mạng" active): stat chips (total groups / scanned
+    / total errors), group cards — name (+ MỚI tag while
+    never scanned, mirroring HashCore's "new"), targets
+    summary, last-scan line ("Chưa quét" or time + counts),
+    autoscan state, [Quét nhóm] [Sửa] [Xóa] (delete asks
+    first, naming the group). Empty state mirrors HashCore's
+    (icon + line + [Thêm nhóm]).
+  * "＋ Thêm nhóm" / [Sửa] opens the editor dialog: name,
+    targets, autoscan toggle + interval (minutes), and the
+    group's own credential sets — the v0.23 creds editor
+    widget FACTORED OUT of the creds dialog
+    (CredSetsEditor in creds.dart) and reused, not redrawn.
+    Duplicate group names are refused app-side too.
+  * Quét nhóm switches to the miners view scoped to the
+    group (header chip "Nhóm: <name>") and runs
+    `scan --group <name>` — the core owns resolution; the
+    app passes the global creds file path AND its groups
+    file path, so merging and last_scan persistence happen
+    core-side; the app reloads the store to refresh the
+    card. The miners view keeps its ad-hoc scan bar;
+    editing the target away from the group's ranges leaves
+    the group scope. Mock mode: two demo groups ("Trại
+    chính" with a last_scan, "Kho phụ" never scanned).
+  * Autoscan (DIVERGENCE, pre-approved): app-side only — a
+    timer re-runs the ACTIVE group's scan at its interval
+    while the app is open; state visible on the card. (The
+    mapping notes HashCore's autoscan also runs app-side in
+    the Toolkit; BeeSky's always-on equivalent remains the
+    farm agent.)
+
+MATCH / DIVERGENCE vs HASHCORE (from the mapping doc):
+
+  MATCH: groups as the home screen; named group objects in
+  a farms-style JSON store; card facts (name, ranges, last
+  scan, autoscan state); "new" tag for never-scanned
+  groups; empty state shape; delete confirmation naming
+  the group; per-group credential override layer over the
+  global sets; per-group autoscan flag + interval; JSON
+  export/import.
+
+  DIVERGENCE (pre-approved, in the mapping): targets are
+  one multi-range string (parse_targets), not typed named
+  range objects with per-range enable/DNS/port ranges; no
+  group description field; credential layers MERGE as
+  lists (multiple sets per vendor survive — v0.23's model)
+  instead of HashCore's one-method-per-vendor replacement;
+  autoscan interval in minutes, app-side only, no global
+  master switch (BeeSky has no settings screen yet);
+  last_scan is a counts subset (no hashrate/unlocked totals
+  — native-unit totals would mislead, the v0.20 lesson).
+
+  NOT PORTED (named gaps): group merge, combined view,
+  group search, reset-statistics command, rescan-all /
+  remove-all / multi-select, per-group custom timeout,
+  IP-Report -> group, the editor's "Save and scan" chain.
+
+  UNKNOWN (never invented): farms.json field names;
+  HashCore's import conflict policy; its autoscan interval
+  unit/range/default; the exact persisted shape of its
+  last-scan statistics; whether its autoscan is full
+  discovery or statistics-only.
+
+(a) VERIFIED LOCALLY (this sandbox):
+
+  * mock_groups_test — store CRUD + persistence round-trip
+    (incl. bare-list load + fail-loud validation),
+    merge-order units (the six-tier sequence asserted),
+    CLI groups CRUD/export/import (merge-by-name policy),
+    and subprocess bridge scans against the mock dashd
+    fleet: group set beats global same-family set (the
+    global wrong password is never attempted), global set
+    rescues a failed group set (attempt log order proves
+    it), a cred-less group falls back to the global file,
+    last_scan persisted with the right counts, a groupless
+    scan never touches the store, unknown group exits 2.
+    Full output:
+
+```
+PASS: store: a missing file loads as no groups
+PASS: store: round-trip keeps both groups
+PASS: store: round-trip keeps creds + autoscan + last_scan
+PASS: store: defaults fill in (id minted, autoscan off, no scan)
+PASS: store: the document is versioned
+PASS: store: a bare-list document loads too
+PASS: store: malformed JSON fails loud (GroupError)
+PASS: store: a nameless entry fails loud
+PASS: store: invalid targets fails loud
+PASS: store: a bad creds shape fails loud
+PASS: store: a zero autoscan interval fails loud
+PASS: merge: order = group family, global family, group any, global any, group rest, global rest
+PASS: merge: no sets anywhere -> None (legacy behaviour)
+PASS: merge: one layer only -> that layer, in order
+PASS: import merge: same name replaced in place, new appended
+PASS: cli: empty store lists cleanly
+PASS: cli: add creates a group
+PASS: cli: a duplicate name exits 2
+PASS: cli: invalid targets exit 2
+PASS: cli: list shows both groups with their targets
+PASS: cli: show prints the group as JSON
+PASS: cli: show of an unknown group exits 2
+PASS: cli: remove deletes the group
+PASS: cli: removing an unknown group exits 2
+PASS: cli: scan --group with an unknown name exits 2
+PASS: cli: export writes the versioned document
+PASS: cli: import adds new groups and keeps existing ones
+PASS: cli: import replaces a same-name group, keeps the rest
+PASS: cli: a malformed import file exits 2
+PASS: cli: an invalid import exits 2 and changes nothing
+PASS: live: group scan finds the locked miner via the group
+PASS: live: the GROUP set wins (cred_label)
+PASS: live: the global set was never tried after the group win
+PASS: live: last_scan persisted with the scan's counts
+PASS: live: the other group's last_scan stays null
+PASS: live: the GLOBAL set rescues a failed group set
+PASS: live: group set tried first, global rescue second
+PASS: live: a cred-less group falls back to the global sets
+PASS: live: an unknown group exits 2 with the store named
+
+GROUPS TEST PASSED
+```
+
+  * Regression spot-checks at the v0.24.0 code:
+
+    mock_creds_test: 32 PASS / 0 FAIL (standalone)
+    mock_bridge_test: 24 PASS / 0 FAIL (standalone)
+    mock_units_test: 50 PASS / 0 FAIL (standalone)
+    mock_agent_bg_test: 52 PASS / 0 FAIL (standalone)
+
+  * Flutter (SDK 3.47.9 at ~/workspace/flutter-sdk):
+    flutter analyze: clean; flutter test: 35 PASS / 0 FAIL (local SDK 3.47.9) — NetGroup/GroupStore round-trips,
+    autoscan-due rule, the scanGroup argv contract, the
+    groups home rendering both demo cards, group scan
+    scoping the miners view (+ header chip), editor create
+    with a per-group cred set persisted to the store file,
+    rename, and the confirm-then-delete flow. The two
+    pre-existing suites were adapted only where the flow
+    itself changed (the app now opens on groups: one
+    sidebar tap reaches the miners view).
+
+(b) VERIFIED ONLY BY CI (.github/workflows/
+build-flutter.yml):
+
+  * flutter build windows --release on a real Windows
+    runner and the BeeSkyFlutter-<tag>-win64.zip asset.
+    The app remains compile-verified only until the
+    owner runs it on real Windows (as since v0.21).
+
+---
+
+# v0.25.0 — data-grid miners list (HashCore Toolkit list machinery, ported per the dissection)
+
+The parity push continues (owner's bar: 99% of HashCore
+Toolkit in one month). Following the dissect-before-
+porting rule, the Toolkit's miners-list mechanism was
+dissected FIRST from the shipped materials (the full
+~1,500-key translation table, the AOT string pools, the
+Dart file map) and the behaviour mapping written to
+docs/grid-mapping.md BEFORE any code — every behaviour
+graded VERIFIED / INFERRED / UNKNOWN, every column audited
+against the real BeeSky record schema, data gaps named
+instead of faked.
+
+PYTHON CORE: unchanged. The grid is a Flutter-side port;
+the record fields it needed (elapsed_s, ghs_5s, power_w)
+were already on the wire from _finalise_record — the Dart
+model simply never parsed them. They are parsed now.
+
+FLUTTER APP (app_flutter/):
+
+  * lib/grid.dart (NEW): the column universe (29 columns),
+    GridConfig + GridStore (beesky-grid.json beside the exe,
+    %APPDATA% fallback, corrupt = factory defaults), the
+    GridFilter model (numeric / range / string / bool —
+    HashCore's four MinerFilter variants), FilterPreset,
+    the MinerSelection model + IsolateMode, grouping, and
+    the pure view pipeline (search -> filters AND ->
+    isolate -> sort -> group). lib/grid_dialogs.dart (NEW):
+    the columns dialog (toggle + up/down reorder + CHƯA CÓ
+    DỮ LIỆU tags on gap columns + Đặt lại mặc định) and
+    the filter dialog (builder rows + named presets).
+  * Columns: every column BeeSky records can feed, each
+    toggleable + reorderable, persisted; reset restores
+    the exact v0.24 default set/order. Per-board chip-temp
+    columns BOARD 1–4 join the combined NHIỆT column.
+    Data modes: Số liệu (fixed metric set) / Pools (fixed
+    pool set) / Tùy chỉnh (the user's set; the columns
+    dialog edits it and switches to it).
+  * Densities: Thoải mái / Gọn row heights + TỔNG QUAN
+    heat-grid (cells coloured by Temperature — absolute
+    bands ending in the >=85 °C red rule — or by Hashrate
+    share within the same unit; sizes S/M/L; click a cell
+    selects it and opens the detail panel, double-click
+    opens its web admin, tooltip carries the facts).
+  * Sort by any column header (arrow shows direction);
+    IPs compare octet-numerically; rates compare only
+    inside their native-unit family (the v0.20 lesson);
+    nulls sort last in both directions. Search matches
+    IP / MAC / model / pool / worker. Grouping by Trạng
+    thái / Model / Firmware renders header rows with
+    counts. A filtered-to-empty list shows HashCore's
+    empty-filter state with a clear action.
+  * Selection: a checkbox column + header select-all-
+    visible (tri-state); the selection bar shows the
+    result count (Đang hiển thị X / Y máy), the selected
+    count, Chọn tất cả / Đảo chọn / Cô lập (đã chọn | lỗi)
+    / Xóa lọc-chọn. The selection lives in grid.dart's
+    MinerSelection model — v0.26's Operations bar consumes
+    it from there; the Operations BAR itself is NOT built
+    in v0.25, exactly as scoped.
+  * Hotkeys via Shortcuts/Actions with intent classes
+    (HashCore's own architecture is intents+actions too):
+    Ctrl+A select all visible, Ctrl+F focus search,
+    Ctrl+R / F5 rescan, Esc clear search+filters+isolate
+    +selection. Handlers step aside while a text field
+    owns the keyboard.
+  * All v0.24 behaviours intact: groups home + group scan
+    scoping, double-click row -> miner web, creds dialog,
+    per-board temps red at >=85 °C, header chips.
+
+MATCH / DIVERGENCE vs HASHCORE (from the mapping doc):
+
+  MATCH: the two view axes (type x mode, incl. the enum
+  value sets); Overview structure (cells, colour-metric
+  toggle, S/M/L sizes, per-cell tooltip); user-configurable
+  columns with reorder + reset-to-defaults; sort by field
+  + direction; the search placeholder's field set; the
+  filter model (numeric comparisons More/Less/Equals/Not
+  equals, range variant, string contains/is-any family,
+  bool variant) AND-combined; named filter presets in a
+  presets store shared with the future pool presets;
+  grouping by a field with group headers; select all /
+  invert / isolate (selected | errors); the empty-filter
+  state + clear action; an intents+actions hotkey layer.
+
+  DIVERGENCE (named, in the mapping): BeeSky labels are
+  Vietnamese and its defaults are the v0.24 set; Overview's
+  colour SCALE is BeeSky's (HashCore's is UNKNOWN — not
+  observable in the materials); the columns dialog uses
+  up/down buttons (HashCore's reorder gesture is UNKNOWN);
+  a same-name filter preset replaces silently (HashCore
+  prompts — its edit-preset dialog is Presets-center scope);
+  the full Presets CENTER dialog is not built — presets
+  live in the filter dialog + the shared store (the seed;
+  pool presets arrive v0.28); grouping renders in the two
+  table densities only (the heat-grid is flat) and has no
+  jump-to-group / collapse (UNKNOWN in the original);
+  active filter rows are session-only (their persistence
+  in HashCore is UNKNOWN); hotkey BINDINGS are BeeSky's
+  (the intent set matches; HashCore's keys are UNKNOWN);
+  zoom + command palette are named gaps; BeeSky keeps two
+  columns HashCore has no counterpart for (CHIP, ĐĂNG
+  NHẬP) because they carry core BeeSky data.
+
+  DATA-GAPS (columns offered, values honestly '—' — the
+  core emits no such data; nothing is faked): MAC, S/N,
+  Pool 1–3 URL + worker (scan records carry NO pool data
+  at all today — the columns parse an optional wire
+  'pools' list so they light up when the core grows one).
+  PARTIAL: HASHRATE RT (the wire's ghs_5s is GH/s-family
+  only — shown for TH/s records, '—' for MH/s + ksol/s).
+  DERIVED (arithmetic on real fields, marked in the
+  mapping): HIỆU SUẤT = power_w / ths (J/TH, TH/s + power
+  records only); THUẬT TOÁN from the native rate unit;
+  BOARD LỖI from per-chain chip counts. NOT OFFERED (no
+  data source at all): lock state, Has PICs, stock
+  hashrate, throttling, miner presets, board serials /
+  models / chip BIN, PSU model/serial/PFC/LLC temps,
+  platform, install type, firmware build date/name, PCB
+  temps (BeeSky carries ONE temp per chain), cooling,
+  Hotel Fee, DevFee availability, power limit, per-record
+  range, note (device-detail scope, v0.27).
+
+(a) VERIFIED LOCALLY (this sandbox):
+
+  * Python regression spot-checks at the v0.25.0 pins
+    (core untouched; the pin suite asserts the version):
+
+    mock_agent_bg_test: 52 PASS / 0 FAIL (standalone)
+    mock_bridge_test: 24 PASS / 0 FAIL (standalone)
+    mock_groups_test: 39 PASS / 0 FAIL (standalone)
+    mock_creds_test: 32 PASS / 0 FAIL (standalone)
+    mock_units_test: 50 PASS / 0 FAIL (standalone)
+
+  * Flutter (SDK 3.47.9 at ~/workspace/flutter-sdk):
+    flutter analyze: clean; flutter test: 63 PASS / 0 FAIL (local SDK 3.47.9; 35 pre-existing + 28 new grid tests) — model parsing of the newly-read wire
+    fields + derived getters (uptime, J/TH, TH/s-only RT,
+    algorithm, bad boards); column defaults = the v0.24
+    set/order; pools-mode set; toggle/reorder/reset; JSON
+    round-trip (unknown ids dropped, new columns join the
+    tail); GridStore round-trip + corrupt-file fallback;
+    sorts (IP octets, temps nulls-last both ways, status
+    order, rates family-locked); search (IP/model); the
+    filter operators incl. between + the null-field rule
+    + unparseable-number rule; presets JSON round-trip;
+    grouping counts on a generated 63-miner fleet (status
+    49/13/1); the selection model; isolate modes. Widget
+    level: density switching + heat-grid red rule + cell-
+    click detail; header sort asc/desc; search + count
+    line; checkbox selection + both isolate modes +
+    Ctrl+A / Esc / Ctrl+F hotkeys; the filter dialog end
+    to end (apply -> save preset -> clear -> re-apply ->
+    preset found in beesky-grid.json on disk); the columns
+    dialog (gap tags, enable UPTIME -> header + file,
+    reset -> gone); grouping headers on the 63-fleet. All
+    35 pre-existing tests still pass — the suite was not
+    adapted at all this release.
+
+(b) VERIFIED ONLY BY CI (.github/workflows/
+build-flutter.yml):
+
+  * flutter build windows --release on a real Windows
+    runner and the BeeSkyFlutter-<tag>-win64.zip asset.
+    The app remains compile-verified only until the
+    owner runs it on real Windows (as since v0.21).
+
+---
+
+# v0.26.0 — Operations task system (HashCore Toolkit Operations model, ported per the dissection)
+
+The parity push continues (owner's bar: 99% of HashCore
+Toolkit in one month). Following the dissect-before-
+porting rule, the Toolkit's task mechanism was dissected
+FIRST from the shipped materials (the ~1,500-key
+translation table — the 27-value task_type_action enum,
+the task_status enum, the operations_dialog keys — and
+the Dart file map: miners_task_service + queued_task,
+the task base classes, the per-implementation task
+files) and the behaviour mapping written to
+docs/operations-mapping.md BEFORE any code — including
+a full action inventory in which every HashCore task
+type is graded SHIP / GAP against a BeeSky primitive
+verified in code (file:line). No device action is faked:
+firmware-documented endpoints BeeSky has never
+implemented are gaps, not features.
+
+PYTHON CORE:
+
+  * beesky/core/ops.py (NEW): a stateless task runner.
+    `beesky ops --job FILE` executes ONE task described
+    by a JSON job file (secrets never ride argv; cred
+    sets are referenced by path) and streams NDJSON
+    progress: a start line, one result line per device
+    ({done, total, ip, ok, message} — rescan adds the
+    fresh `record`), and a final summary line (counts
+    + derived task status: success / hasErrors / error /
+    cancelled — HashCore's enum names). Malformed jobs
+    (bad type/targets/payload, unknown group, unreadable
+    creds file) exit 2 BEFORE any device I/O, like scan.
+  * Credential resolution is the v0.23/v0.24 mechanism
+    itself: the job references a group and/or a creds
+    file; the runner merges group -> global
+    (groups.effective_creds), probes each device with
+    the merged sets (discover.probe_host), and translates
+    the winning set into the single creds dict
+    core.actions.execute consumes — the same dict the
+    cloud agent passes. An unanswering device is an
+    honest per-device failure, never a guess.
+  * Concurrency: a bounded thread pool (job `workers`,
+    default 4, hard cap 8) + an optional `stagger_s`
+    gate between device starts (HashCore's batch pause).
+    Cancellation is cooperative: SIGTERM/SIGINT (wired
+    in cmd_ops) stops new devices starting; unstarted
+    devices are counted cancelled in the summary.
+  * Found while building (guarded, disclosed): the
+    probe can raise outside the adapters' error types
+    (http.client.BadStatusLine from a malformed-HTTP
+    device). The runner catches it as THAT device's
+    failure — one sick device can no longer kill a run.
+    discover() itself keeps its existing contract;
+    hardening it is a separate core change, not hidden
+    inside this release.
+
+ACTION INVENTORY (full table: docs/operations-mapping.md §3):
+
+  SHIPPED: rescan "Quét lại" (the scan pipeline;
+  HashCore's discover/refreshStats/updateStats); reboot
+  "Khởi động lại" (core/actions.py: cgminer privileged
+  restart RPC / dashd POST /system/reboot / stock
+  reboot.cgi — refusals surface verbatim); switch_pool
+  "Đổi pool" (actions.py's dashd path: pool_id ->
+  /mining/switch-pool, url/user -> GET+POST /settings
+  with its honest api-key requirement; other families
+  fail honestly); export "Xuất danh sách" (APP-SIDE
+  BeeSky addition: selected records -> JSON file + a
+  history entry; not a HashCore port).
+  MERGED: HashCore's restart (mining restart) folds
+  into reboot — BeeSky has no separate mining-restart
+  primitive and does not fake the distinction.
+  PRIMITIVE-EXISTS / DEFERRED: install/update firmware
+  (core/firmware.py install_dashd/install_stock exist;
+  a bulk run needs a per-task file + minutes-long
+  wait-back — stays with `beesky fw install`).
+  GAP-GATED: unlock (firmware.py behind the CLI's three
+  hard gates — never a bulk action).
+  GAP-UNIMPLEMENTED (dashd api-doc documents the
+  endpoint; BeeSky has no code path): pause, resume,
+  findMiner, resetFirmware, removeFirmware,
+  resetAutotuneProfiles, resetCurrentAutotuneProfile,
+  throttle, configureApiKey, diagnosticReport.
+  GAP-UNVERIFIED: changePassword, configureNetwork
+  (settings-write pieces exist; semantics unverified).
+  GAP: cloneSettings (v0.28 with pool presets),
+  conditionalRestart, updateNote (v0.27),
+  restoreCvFirmware (no Cvitek adapter), multi
+  (composite — the runner runs one type per job).
+
+FLUTTER APP (app_flutter/):
+
+  * lib/ops.dart (NEW): OpsTaskType / OpsStatus /
+    OpsDeviceResult / OpsTask (the history entry AND the
+    live run's state; copyable infoText in HashCore's
+    task_info shape), OpsEvent / OpsSummary, the OpsRun
+    handle (events stream + summary future + Stop),
+    OpsFiles (job file + export dir) and
+    OpsHistoryStore (beesky-ops-history.json beside the
+    exe, %APPDATA% fallback, corrupt = empty, retention
+    100). lib/ops_dialogs.dart (NEW): the Confirm
+    operation dialog (action + count + every target IP),
+    the switch-pool payload form (slot activation or
+    write-new-pool, with the api-key note), and the
+    history dialog (newest first; per-item started/
+    counts/duration; expandable per-device results;
+    isolate-errors / copy-info / delete-entry actions;
+    clear-all behind a confirmation; HashCore's empty
+    state text; a still-running entry renders as "Chưa
+    hoàn tất" — an app closed mid-run is not hidden).
+  * lib/sidecar.dart: BeeSkyBridge.startOps(job) ->
+    OpsRun. The sidecar writes the job file beside the
+    exe (values inside the FILE, argv carries only
+    `ops --job <path>` — the v0.23 rule applied to
+    tasks), streams the NDJSON, and SYNTHESISES the
+    summary when the process dies without one (a
+    Windows kill leaves no summary line) so every
+    device is still accounted; the job file is deleted
+    when the run ends. MockBridge.startOps simulates
+    the same lifecycle against the sample fleet
+    (per-device progress, the unreachable unit failing,
+    switch_pool failing on non-VNish sources, Stop
+    accounting the remainder as cancelled).
+  * home_page.dart: the Operations bar joins the
+    v0.25 selection bar when the selection is non-empty
+    (Thao tác: Quét lại / Khởi động lại / Đổi pool /
+    Xuất danh sách, gated while a task runs); the task
+    progress bar renders under it ("{task}: N/M địa
+    chỉ" + current device + Dừng); rescan results merge
+    their fresh records into the table in place; the
+    miners toolbar gains "Lịch sử tác vụ". In a
+    group's scope the job carries the group (the core
+    resolves its creds layer), off-scope just the
+    global creds file. models.dart gains
+    MinerRecord.toJson (+ Problem/ChainInfo/PoolInfo)
+    for the export. All v0.24/v0.25 behaviours intact.
+
+MATCH / DIVERGENCE vs HASHCORE (from the mapping doc):
+
+  MATCH: selection-raised Operations bar; a Confirm
+  operation dialog before device-mutating tasks; one
+  task = iterations over devices with per-device
+  ok/fail outcomes; the task-status set (success /
+  hasErrors / error / cancelled); streamed progress
+  "{task}: N/M addresses" + Stop; the history dialog's
+  shape (info block, iterations/errors/duration line,
+  expandable per-device results, isolate-errors,
+  copy-info, delete entry, clear-all with confirms,
+  operations count, empty state); app-owned history.
+
+  DIVERGENCE (named, in the mapping): the core runner
+  is stateless per run (sidecar process + NDJSON)
+  where HashCore queues tasks in an in-app service +
+  isolates — one task at a time from the app;
+  compatibility is resolved per device by probing
+  instead of HashCore's pre-run filter, so an
+  unsupported family fails honestly per device rather
+  than excluding the device (an empty selection still
+  never starts); parallel-iterations / stagger /
+  timeout ride the JOB (defaults 4 / 0 / 3 s) instead
+  of global Settings; no one-shot per-task unlock-
+  method override (the group/global cred layers are
+  the method selection); Waiting/Processing collapse
+  into `running`; Stop is a process kill on Windows
+  (POSIX gets the runner's cooperative SIGTERM summary
+  too) with the cancelled remainder accounted from the
+  summary either way; history retention caps at 100
+  entries (HashCore's cap is UNKNOWN); confirm covers
+  reboot + switch_pool only — rescan is read-only and
+  runs immediately, like HashCore's own Rescan button.
+
+(a) VERIFIED LOCALLY (this sandbox):
+
+  * Python suites at the v0.26.0 pins:
+
+    mock_ops_test: 32 PASS / 0 FAIL (standalone)
+    mock_agent_bg_test: 52 PASS / 0 FAIL (standalone)
+    mock_bridge_test: 24 PASS / 0 FAIL (standalone)
+    mock_creds_test: 32 PASS / 0 FAIL (standalone)
+    mock_groups_test: 39 PASS / 0 FAIL (standalone)
+    mock_units_test: 50 PASS / 0 FAIL (standalone)
+
+    mock_ops_test covers: the exit-2 job contract
+    (9 malformed-job cases, stdout empty); reboot per
+    family against the real mocks (dashd password +
+    api-key sets recorded by the mock, wrong password
+    -> verbatim 401 failure and NO reboot recorded,
+    stock reboot.cgi hit, cgminer restart recorded,
+    read-only RPC refusal verbatim, unreachable ->
+    not-answering); switch_pool (slot activation,
+    url/user rewrite via /settings, the password-only
+    api-key failure, stock not-supported); rescan
+    (record rides the event; unreachable fails without
+    one); the group -> global cred resolution (winner
+    label + the mock's unlock-attempt log proving
+    group-first order and global rescue); the stream
+    shape + hasErrors derivation; cooperative
+    cancellation (unstarted counted, status cancelled);
+    the subprocess NDJSON contract end to end.
+
+  * Flutter (SDK 3.47.9 at ~/workspace/flutter-sdk):
+    flutter analyze: clean; flutter test: 78 PASS / 0 FAIL (local SDK 3.47.9; 63 pre-existing + 15 new ops tests) — task/history JSON round-trips
+    (incl. cancelled results + the 100-entry cap),
+    OpsEvent/OpsSummary parsing, MinerRecord.toJson
+    round-trip; the mock lifecycle (event order, the
+    .104 failure, switch_pool honesty, rescan records,
+    stop accounting); the sidecar argv contract.
+    Widget level: selection raises the Operations bar;
+    reboot -> confirm dialog -> progress bar -> history
+    entry with counts + expandable per-device results
+    + the history file on disk; history reloaded by a
+    fresh HomePage (restart round-trip); export writes
+    the records file + its history entry; rescan runs
+    unconfirmed. All 63 pre-existing tests still pass
+    — the only pre-existing test touched is the version
+    pin in widget_test.dart (v0.26.0).
+
+(b) VERIFIED ONLY BY CI (.github/workflows/
+build-flutter.yml):
+
+  * flutter build windows --release on a real Windows
+    runner and the BeeSkyFlutter-<tag>-win64.zip asset.
+    The app remains compile-verified only until the
+    owner runs it on real Windows (as since v0.21).
+
+---
+
+# v0.27.0 — Device detail tabs (HashCore Toolkit device-info dialog, ported per the dissection)
+
+The parity push continues (owner's bar: 99% of HashCore
+Toolkit in one month). Following the dissect-before-
+porting rule, the Toolkit's device-info dialog was
+dissected FIRST from the shipped materials (the
+device_info_dialog.* / device_info_board_info.* /
+device_info_pools_info.* translation keys — Metrics,
+Charts, Boards with CHIPS TOTAL / STABLE / SLOW /
+CRITICAL, Pools, Fans with Mode + Speed, Hotel Fee,
+the editable Device note) and BeeSky's OWN data audited
+against it (the dashd api-doc's AntmMinerStats /
+Cooling / PoolStats schemas; report.py's acs reading;
+each adapter's read-only reach, file:line) — the full
+mapping, with UNKNOWNs and DATA-GAPs named, is in
+docs/device-detail-mapping.md. Nothing renders that
+BeeSky does not actually have.
+
+PYTHON CORE:
+
+  * beesky/core/inspect.py (NEW) + the `inspect` verb:
+    `beesky inspect --json <ip>` deep-fetches ONE device
+    (read-only) through the scan's own machinery —
+    discover.probe_host claims it (family detection +
+    the v0.23 creds-file / v0.24 group credential
+    resolution: --creds-file, --group, --groups-file,
+    --user/--password, --api-key, --token exactly like
+    scan) and the winning set's token/key/login ride
+    the candidate into the section fetches. Output is
+    ONE JSON document: {ip, source, model, cred_label,
+    boards, pools, fans}; every section is
+    {"supported": true, ...} or {"supported": false,
+    "reason"} — an explicit marker, never an empty
+    success; one section's failure never sinks the
+    others. A malformed target (not one IPv4 address)
+    or a malformed creds file/group exits 2 BEFORE any
+    I/O; a device no adapter claims yields an exit-0
+    {"error": ...} document (the app renders the state).
+  * Per family (evidence: mapping §2): VNISH — the
+    /summary the scan already fetches carries pools
+    (PoolStats), cooling (per-fan rpm/status/max_rpm,
+    the fan mode auto/manual/immersion, fan_duty) and
+    per-board chip_statuses counts; /boards adds the
+    per-chip list (pos/hr/grade/temp). The grades ARE
+    HashCore's buckets: grey = STABLE, orange = SLOW
+    (degraded but hashing), red = CRITICAL (dead) —
+    dashd.py's own semantics. The fan mode is parsed
+    from BOTH the api-doc object shape {name, param}
+    and the plain-string shape some builds serve.
+    CGMINER — boards from the STATS acs strings (per
+    chain: raw acs, chips_total, chips_ok, dead
+    positions, the non-'o' character counts, temp) —
+    the SAME reading as report.build_record; pools via
+    the RPC `pools` command (CgminerClient.pools
+    existed unused); fans = STATS speeds, mode null
+    (no source key exists). STOCK — boards/fans from
+    the status CGI the probe already fetched (cgminer-
+    shaped); pools attempted via the bmminer RPC and
+    honestly unsupported when it does not answer (no
+    CGI source). The scan record is UNCHANGED.
+
+FLUTTER APP (app_flutter/):
+
+  * The detail panel becomes TABBED (named layout
+    divergence: BeeSky keeps its v0.22 right-side panel;
+    HashCore's is a modal dialog — tabs + content are
+    the parity target). Order mirrors the dialog:
+    Số liệu (Metrics) · Biểu đồ (Charts) · Board ·
+    Pools · Quạt (Fans) · Ghi chú (Note). The first tab
+    is NOT named 'Tổng quan' — that label already names
+    the grid's Overview density on the same screen (the
+    collision broke a grid widget test during the
+    build; fixed by naming, disclosed here).
+  * lib/detail.dart (NEW): the inspect wire models
+    (sections with supported/reason; boards with the
+    grade buckets OR the acs shape, never both faked);
+    HistorySample + appendHistorySample (keyed MAC-else-
+    IP via deviceKeyFor, rate in the record's OWN native
+    unit, cap 300/device, oldest pruned); the pure
+    chart prep (ratePoints / tempPoints / powerPoints —
+    samples lacking a metric are skipped, never zeroed;
+    rateUnitOf labels the line with the device's unit);
+    MiniChart, a hand-drawn CustomPainter line chart
+    (zero third-party deps kept — HashCore's fl_chart
+    is a library divergence, not a behaviour one; a
+    single point draws as a lone dot); HistoryStore
+    (beesky-history.json) + NoteStore (beesky-notes.json)
+    on the stores' usual beside-the-exe / %APPDATA%
+    strategy, corrupt reads as empty.
+  * Số liệu = the v0.22 panel content VERBATIM
+    (metrics, issues, board summary lines) — a shipped
+    contract; the Board tab carries the deep view (the
+    named duplication). Biểu đồ: LOCAL samples only —
+    every completed scan appends one sample per live
+    device (FETCH_ERROR records are skipped: a failed
+    read is not a sample); hashrate + max-temp + power
+    (when the device reports power) lines, per device,
+    never aggregated across units; the empty state says
+    charts fill in as scans accumulate. Board: record
+    rows immediately; the inspect fetch (lazy, once per
+    device per session) adds the vnish grade split +
+    PCB temp + per-chip grades, or the cgminer/stock
+    acs breakdown + dead positions — matched to boards
+    by POSITION (record and inspect index bases differ
+    between the mock fleet and the real core; position
+    is the convention-free key). Pools: the record's
+    pools when a future core fills them, else inspect
+    on first open — loading state, then rows ('Pool N
+    URL' / 'Pool N worker', HashCore's own labels) or
+    the core's unsupported reason verbatim. Quạt:
+    record speeds immediately; inspect adds mode +
+    duty (vnish) or the plain 'firmware không báo'
+    absence. Ghi chú: HashCore's Device note + Save
+    note — a text field + explicit Lưu ghi chú, keyed
+    like history, persisted across restarts.
+  * lib/sidecar.dart: BeeSkyBridge.inspect(ip, {credsFile,
+    group, groupsFile}) — argv carries the IP + file
+    PATHS + the group NAME only (values never travel,
+    the v0.23 rule); in a group's scope the group rides
+    along so the core resolves its creds layer, exactly
+    like its scans and ops jobs. MockBridge gains
+    inspect fixtures per sample device (vnish with the
+    split + mode, two cgminer with acs boards + pools,
+    the unreachable unit as an error document) and the
+    app seeds demo history for the mock fleet so every
+    tab renders in tests/demos.
+
+PER-TAB MATCH / DIVERGENCE / DATA-GAP vs HASHCORE
+(full table: docs/device-detail-mapping.md §3–§5):
+
+  Metrics -> Số liệu: MATCH (the existing panel).
+  Charts: DIVERGENCE (named) — HashCore's history
+  mechanics are UNKNOWN from the shipped materials;
+  BeeSky charts LOCAL scan samples, persisted, per
+  device in its native unit. Content (hashrate +
+  temperature lines) matches; power is a BeeSky extra
+  the data genuinely carries.
+  Boards: MATCH for vnish (TOTAL/STABLE/SLOW/CRITICAL
+  from the firmware's own grades — the same data
+  HashCore renders). DATA-GAP for cgminer/stock: the
+  acs alphabet's non-'o' characters have no documented
+  grade semantics in BeeSky's evidence, so those boards
+  show ok/total + dead positions + raw character counts
+  and the tab STATES the gap — no invented buckets.
+  Pools: MATCH per family where a source exists
+  (dashd summary, cgminer RPC); stock without an RPC
+  answer is unsupported-with-reason, not empty.
+  Fans: MATCH (mode + per-fan speed) for vnish;
+  speeds-only for cgminer/stock — fan MODE is a
+  DATA-GAP there (no source key exists).
+  Note: MATCH (per-device, placeholder + explicit
+  save), as a tab instead of a dialog field (the
+  container divergence). The v0.25 grid Note COLUMN is
+  NOT wired: cell text is a pure function of the
+  record and notes live outside records — more than a
+  trivial hookup; left for a later pass, named here.
+  Hotel Fee: NOT APPLICABLE — BeeSky has no hotel-fee
+  concept (no data, no settings); not built.
+  Also named: PCB temp rides inspect only (the record
+  still carries chip temp alone); MAC keying is
+  'when present' — no adapter emits a MAC today.
+
+(a) VERIFIED LOCALLY (this sandbox):
+
+  * Python suites at the v0.27.0 pins:
+
+    mock_inspect_test: 33 PASS / 0 FAIL (standalone)
+    mock_agent_bg_test: 52 PASS / 0 FAIL (standalone)
+    mock_bridge_test: 24 PASS / 0 FAIL (standalone)
+    mock_creds_test: 32 PASS / 0 FAIL (standalone)
+    mock_groups_test: 39 PASS / 0 FAIL (standalone)
+    mock_units_test: 50 PASS / 0 FAIL (standalone)
+    mock_ops_test: 32 PASS / 0 FAIL (standalone)
+
+    mock_inspect_test covers: the vnish sections end
+    to end (grade split 112/0/2 on the sick board,
+    dead positions [10, 55] from /boards grades, the
+    114-chip list, chip + pcb temps, PoolStats pools,
+    fan mode auto + duty 62 + per-fan status); the
+    cgminer sections (acs counts 111/114, dead
+    [10, 55, 114], other_chars {x: 3}, NO grade keys
+    in the wire — the gap is structural; RPC pools;
+    fan mode null); the stock sections (CGI boards/
+    fans; pools unsupported with the no-source reason);
+    credential reuse (a locked dashd claimed by the
+    creds-file winner + label, its pools honestly
+    unsupported — that mock's summary carries none;
+    wrong creds -> the vnish candidate with every
+    section unsupported on the 401; --group resolution
+    with the group's set winning; unknown group exits
+    2); the exit-2 contract (5 malformed targets + a
+    malformed creds file, stdout empty throughout);
+    the exit-0 error document for an unclaimed device.
+
+  * Flutter (SDK 3.47.9 at ~/workspace/flutter-sdk):
+    flutter analyze: clean; flutter test: 94 PASS / 0 FAIL (local SDK 3.47.9; 78 pre-existing + 16 new detail tests) — inspect model parsing per family
+    (grades vs acs shapes, unsupported markers, the
+    error document + failure factory); history append
+    (IP/MAC keying, native-unit + legacy-ths rates,
+    the 300-cap prune) + JSON round-trips; chart prep
+    (null-skipping, unit labelling, empty/single
+    shapes); the history/notes stores' round-trips +
+    corrupt-reads-empty; the inspect argv contract;
+    the mock fixtures' family shapes; the painter's
+    single-point + flat-series smoke. Widget level:
+    all six tabs render for the vnish S19 (pool rows,
+    fan mode + duty, the three grade lines, the seeded
+    charts incl. power); the L9's Boards tab states
+    the grade DATA-GAP + the acs breakdown with no
+    bucket line, its Fans tab shows the honest mode
+    absence; the charts empty state for the sample-
+    less device; a note saves and survives a fresh
+    HomePage. All 78 pre-existing tests still pass —
+    the only pre-existing test touched is the version
+    pin in widget_test.dart (v0.27.0); the grid
+    density test's 'Tổng quan' collision was fixed by
+    NAMING the detail tab 'Số liệu', not by editing
+    the grid test.
+
+(b) VERIFIED ONLY BY CI (.github/workflows/
+build-flutter.yml):
+
+  * flutter build windows --release on a real Windows
+    runner and the BeeSkyFlutter-<tag>-win64.zip asset.
+    The app remains compile-verified only until the
+    owner runs it on real Windows (as since v0.21).
+
+---
+
+# v0.28.0 — Pool presets, clone config, scan-record pools, IP-Report (the final parity-sprint leg)
+
+The parity push closes its planned arc (owner's bar:
+99% of HashCore Toolkit in one month). Following the
+dissect-before-porting rule, the Toolkit's presets /
+clone / IP-Report mechanisms were dissected FIRST from
+the shipped materials (the en.json presets_center /
+pools_preset / ip_report keys, the Dart file map, the
+AOT string pools — incl. the change-pool help text that
+carries the worker-pattern list) and the behaviour
+mapping written to docs/presets-ipreport-mapping.md
+BEFORE any code — every behaviour graded VERIFIED /
+INFERRED / UNKNOWN, divergences named D1–D7, gaps
+G1–G2. The headline outcome of the dissection: pool
+presets and the pattern tokens are fully evidenced;
+the IP-Report WIRE FORMAT is not — no port, packet
+shape, or payload field is attributable to the
+Toolkit's listener anywhere in the materials — so
+IP-Report is a documented RESEARCH-GAP (§5 of the
+mapping) and was NOT built. Nothing was invented to
+fill it: no `beesky ipreport`, no app toggle, no fake
+fixture.
+
+PYTHON CORE:
+
+  * beesky/core/patterns.py (NEW): the worker-pattern
+    expander — the dissected token set, verified from
+    TWO sources (the AOT change-pool help text + the
+    enum.change_pool_pattern keys): {account} / {worker}
+    (the current pool-1 user split at its first dot;
+    no dot -> account is the whole string, worker is
+    empty), {ip:<divider>} (generalised divider),
+    {ip1}..{ip4}, {n[:start[:step]]} / {nn} / {nnn},
+    {pool-host} / {port} / {proto-str} (parsed from the
+    current pool URL), {mac} / {host} / {h}. A token
+    whose source data the device does not carry raises
+    PatternError (the device fails honestly) — never a
+    silent empty/guessed expansion (divergence D3;
+    HashCore's own behaviour here is UNKNOWN). {n}
+    counts the device's 1-based position in the job's
+    target list (D5 — HashCore's counting is UNKNOWN).
+    {mac}/{host} have no BeeSky scan-data source (D4).
+  * Scan-record pool enrichment (mapping §4): dashd
+    fetch_record attaches `pools` from the /summary it
+    already downloads (miner.pools, PoolStats) — ZERO
+    extra I/O; the cgminer family's CgminerClient gains
+    pools_normalised() over the previously scan-unused
+    RPC `pools` command (+1 RPC call inside the fetch's
+    existing timeout budget; ANY failure -> the field
+    is omitted, the record is untouched); stock scan
+    records OMIT pools (G2 — no scan-time source: the
+    status CGI carries none, and a stock candidate
+    exists precisely because its RPC did not claim the
+    host; inspect remains the deep path). One record
+    shape for both enriched families:
+    [{url, worker, status}] with worker normalised
+    from dashd `user` / cgminer `User` and status
+    VERBATIM ("alive" / "Alive" — no case folding).
+    Records without data omit the key (the v0.25 parse
+    already tolerated both). This lights up the v0.25
+    Pools columns + Pools view mode + grid search and
+    the v0.27 Pools tab with no app-side fetch.
+  * beesky/core/ops.py: switch_pool jobs accept a
+    `pools` payload — 1–3 slots {url, user, password?},
+    validated BEFORE any I/O (mutually exclusive with
+    the legacy pool_id/url/user payload -> exit 2;
+    legacy jobs stay byte-compatible). Slots execute
+    in order per device through the existing
+    actions.execute (pool_id = slot position),
+    stopping at the first failed slot; worker strings
+    expand per device via patterns.py ({n} index =
+    position in the validated, de-duplicated target
+    list). `clone_from` rides the job as information
+    only. The ops fetch path enriches records exactly
+    like the scan's, so {account}/{worker} expansion
+    reads the device's CURRENT pool.
+
+FLUTTER APP (app_flutter/):
+
+  * lib/presets.dart (NEW): PoolSlot / PoolPreset and
+    the Dart mirror of patterns.py (expandWorkerPattern
+    + PatternContext + PatternException) — pinned to
+    the SAME case table as the Python suite by both
+    test suites. lib/presets_dialogs.dart (NEW): the
+    Presets center ("Trung tâm mẫu" on the miners
+    toolbar) — ONE dialog, HashCore's two tabs: Bộ lọc
+    (the v0.25 filter presets: duplicate / delete with
+    confirm) and Pools (create / edit / duplicate /
+    delete); the pool-preset editor (name, description,
+    3 slot rows, the pattern help — HashCore's "Show
+    available patterns" — and a live worker Preview
+    against the first selected device); saving requires
+    slot 1 filled (the original's rule) and a same-name
+    save replaces after an inline warning.
+  * Storage: GridConfig gains `pool_presets` beside
+    `filter_presets` in beesky-grid.json (D1 — the
+    field SET is the dissected one; HashCore's own
+    storage keys are UNKNOWN).
+  * Apply: the Operations bar gains "Áp mẫu pool" —
+    pick a preset -> ONE switch_pool task (the v0.26
+    runner + confirm dialog + history) whose payload
+    carries the slots with worker patterns RAW
+    (expansion is core-side, per device). "Chép cấu
+    hình pool" — the clone: source = the detailed miner
+    when selected, else the first selected (HashCore's
+    first-device rule); its pools are read through the
+    v0.27 inspect path and applied to the selection
+    MINUS the source as a normal switch_pool task.
+    Clone is pools-only (D6 — HashCore clones the whole
+    settings profile; BeeSky has no write primitive for
+    the rest) and cloned slots carry no password, so a
+    target keeps its own per-slot password (D7).
+    Families without the config-write primitive fail
+    honestly per device (the mock bridge mirrors the
+    core: switch_pool on non-vnish sources fails).
+  * Stretch (mapping §6): the grid gains the `note`
+    column (GHI CHÚ, at the universe tail) fed app-side
+    — records are decorated from the note store
+    (deviceKeyFor keying, exactly like the store) on
+    scan landing, rescan replacement, and note save;
+    the wire never carries it and toJson never emits
+    it. The v0.25 pool columns' dataGap flags come off
+    (data is real for vnish/cgminer now). Group merge
+    ("Gộp nhóm" on the groups screen; mergeGroups —
+    keep's identity/autoscan, target union, cred union
+    by label+user+type+apiKey, newer lastScan wins;
+    HashCore's merge internals are UNKNOWN, its
+    existence/menu are VERIFIED) and "Lưu & quét" in
+    the group editor (save, then enter + scan the
+    group — a named BeeSky UX addition).
+  * Drive-by flake fix (disclosed, NOT a v0.28
+    feature): the row double-click detector measured
+    its 400 ms window with DateTime.now() (real wall
+    clock) while tests advance fake time — under load
+    the two taps landed >400 ms apart in real time and
+    the pre-existing home_actions double-click test
+    failed (opened == []) while passing in isolation
+    and in this release's baseline run. The window is
+    now measured on the pointer events' own monotonic
+    timeStamps; the contract (same row, <400 ms) is
+    unchanged and no test was edited.
+
+PER-ITEM MATCH / DIVERGENCE / GAP vs HASHCORE
+(full register: docs/presets-ipreport-mapping.md §7):
+
+  Pool presets: MATCH on shape (name + optional
+  description, <=3 slots of url+worker+password),
+  the Presets center's two tabs, the apply path
+  (Pool change dialog -> task), the slot-1-required
+  save rule, the first-device preview rule.
+  D1 storage keys (theirs UNKNOWN). D2 no stored
+  per-slot Don't change/Edit/Delete markers (dialog
+  state in the original too). D3 pattern failure =
+  per-device honest failure (theirs UNKNOWN).
+  D4 {mac}/{host}: tokens exist, data does not.
+  D5 {n} semantics: named BeeSky choice.
+  Clone: D6 pools-only scope; D7 target keeps its
+  own password.
+  Enrichment: not a HashCore feature — it removes a
+  BeeSky-side DATA-GAP named since v0.25.
+  IP-Report: G1 RESEARCH-GAP, NOT BUILT (mapping
+  §5.2 lists exactly what evidence is missing: the
+  listener's transport + port, the packet field
+  names, the sender set; the only evidenced DTOs are
+  Auradine's miner-side device API).
+  Stock pools in scans: G2 (inspect covers on
+  demand).
+
+FINAL PARITY CHECKLIST — v0.24–v0.28 vs the
+UI-ANALYSIS copy-list (the sprint's roll-up):
+
+  v0.24 Network groups: groups home screen, farms-
+  style store, cards + MỚI tag, per-group creds over
+  global, per-group autoscan, export/import — SHIPPED.
+  Its named leftovers: group merge — SHIPPED v0.28;
+  "Save and scan" — SHIPPED v0.28 ("Lưu & quét");
+  IP-Report -> group — OPEN (G1, wire evidence);
+  combined view / group search / reset-statistics /
+  rescan-all / per-group timeout — OPEN (not ported).
+  v0.25 Data grid: view axes + Overview heat-grid,
+  29 configurable columns (30 with v0.28's NOTE),
+  sort/search/filter model + presets, grouping,
+  selection + isolate, hotkey intents — SHIPPED.
+  Its named leftovers: Presets center — SHIPPED
+  v0.28; pool columns' data — SHIPPED v0.28 (vnish +
+  cgminer; stock OPEN, G2); Note column — SHIPPED
+  v0.28; zoom / command palette — OPEN (named gaps
+  since v0.25); MAC / S/N columns — OPEN (no core
+  data source).
+  v0.26 Operations: task runner (NDJSON, bounded
+  workers, stagger, cooperative cancel), confirm
+  dialog, progress + Stop, persistent history —
+  SHIPPED for rescan / reboot / switch_pool /
+  export. Its named leftovers: cloneSettings —
+  SHIPPED v0.28 (pools-only, D6); updateNote —
+  SHIPPED v0.27; pause / resume / findMiner /
+  resetFirmware / removeFirmware / resetAutotune* /
+  throttle / configureApiKey / diagnosticReport —
+  OPEN (dashd-documented, no BeeSky code path);
+  bulk firmware — DEFERRED by design to
+  `beesky fw install`; unlock — GAP-GATED by design
+  (the CLI's three hard gates, never a bulk action);
+  conditionalRestart / changePassword /
+  configureNetwork — OPEN (semantics unverified).
+  v0.27 Device detail: six tabs (Số liệu / Biểu đồ /
+  Board / Pools / Quạt / Ghi chú), inspect bridge,
+  vnish grade split, per-family honest unsupported
+  sections — SHIPPED. Its named leftovers: grid Note
+  column — SHIPPED v0.28; Pools from the record —
+  SHIPPED v0.28; Hotel Fee — NOT APPLICABLE (no such
+  concept in BeeSky); PCB temp — inspect-only (the
+  record carries chip temp alone); MAC keying —
+  'when present' (no adapter emits a MAC today).
+  v0.28 (this release): pool presets + Presets
+  center, pattern expansion, clone pool config,
+  scan-record enrichment — SHIPPED; IP-Report —
+  RESEARCH-GAP (G1). Also observed in the Toolkit,
+  noted, not ported: CSV bulk network-config import
+  (8 documented columns).
+
+  What remains between BeeSky and the Toolkit after
+  the sprint is therefore: one feature blocked on
+  evidence (IP-Report), one family blocked on data
+  (stock scan pools), the dashd-documented ops tail
+  (pause/resume/find/reset/throttle family), and
+  polish items (zoom, command palette, group
+  combined view/search). Everything else on the
+  copy-list is shipped and test-covered on both
+  sides (core + app).
+
+(a) VERIFIED LOCALLY (this sandbox):
+
+  * Python suites at the v0.28.0 pins (the release
+    sweep, tests/run_mock_test_v28.sh):
+
+    mock_pools_test: 43 PASS / 0 FAIL (standalone)
+    mock_agent_bg_test: 52 PASS / 0 FAIL (standalone)
+    mock_bridge_test: 24 PASS / 0 FAIL (standalone)
+    mock_creds_test: 32 PASS / 0 FAIL (standalone)
+    mock_groups_test: 39 PASS / 0 FAIL (standalone)
+    mock_units_test: 50 PASS / 0 FAIL (standalone)
+    mock_ops_test: 32 PASS / 0 FAIL (standalone)
+    mock_inspect_test: 33 PASS / 0 FAIL (standalone)
+
+    mock_pools_test (NEW) covers: the pattern case
+    table (literal passthrough; {account}/{worker}
+    split incl. the no-dot rule; {ip:.} + octets;
+    {n}/{nn}/{nnn} incl. start/step and index-0;
+    {pool-host}/{port}/{proto-str}; honest failures
+    for missing current pool, {mac}, {host}, unknown
+    and malformed tokens; needs_current_pool);
+    pools_normalised's never-raise contract (error
+    reply / transport failure / no POOLS -> None);
+    scan enrichment end to end (dashd record ==
+    [{pool.example.com:3333, mockworker.001, "alive"}]
+    verbatim; cgminer == [{..., "Alive"}]; the stock
+    record omits the key); ops validation (pools
+    payload accepted, mixed payloads exit 2 incl.
+    through the CLI); apply end to end over two dashd
+    mocks (slots in order; {account} reuses the
+    device's own account; {nn} numbers farm.01 /
+    farm.02 in TARGET-LIST order across two targets;
+    {ip4} in slot 2; a {mac} job fails the device and
+    writes nothing; stock apply = not supported;
+    a clone-shaped payload keeps the target's own
+    password). All regression suites keep their exact
+    v0.27 counts — no existing suite pinned the
+    absence of record pools.
+
+  * Flutter (SDK 3.47.9 at ~/workspace/flutter-sdk):
+    flutter analyze: clean; flutter test: 110 PASS /
+    0 FAIL (local SDK 3.47.9; 94 pre-existing + 16 new
+    presets tests) — the Dart pattern table identical
+    to the Python one (incl. {n} ordering across
+    indices and every failure mode); PoolPreset /
+    GridConfig JSON round-trips incl. the pool_presets
+    key + GridStore persistence; empty-slot dropping
+    + the job form's password omission; mergeGroups
+    semantics (union, dedup, newer lastScan, one-sided
+    and both-null scans). Widget level: the Presets
+    center's two tabs; pool CRUD reporting through
+    onChanged (create / duplicate suffix / confirmed
+    delete); the editor's slot-1 rule, clash warning,
+    and live Preview; the center opening from the
+    toolbar; apply (seeded preset -> picker -> confirm
+    -> a switch_pool entry in the history file);
+    clone (S19 + L9 checked -> the confirm lists ONLY
+    the target -> history targets exclude the source
+    and the cgminer result is an honest failure);
+    enrichment rendering (Pools view mode shows the
+    record pools; the detail Pools tab renders the
+    S19's pools + both 'alive' statuses with no
+    inspect); the note column showing a seeded note;
+    "Lưu & quét" saving and landing in the group's
+    scan. Pre-existing tests touched: only the
+    version pin in widget_test.dart (v0.28.0).
+
+(b) VERIFIED ONLY BY CI (.github/workflows/
+build-flutter.yml):
+
+  * flutter build windows --release on a real Windows
+    runner and the BeeSkyFlutter-<tag>-win64.zip asset.
+    The app remains compile-verified only until the
+    owner runs it on real Windows (as since v0.21).
+
+
+# v0.29.0 — The VNish ops tail (dashd-documented operations)
+
+The v0.26 Operations port shipped only the actions with an
+existing BeeSky code path and left the rest as named
+GAP-UNIMPLEMENTED rows ("the api-doc documents the
+endpoint; BeeSky has no code path"). This release closes
+that tail where the contract allows. Following the
+dissect-before-porting rule, the spec source is **VNish's
+own documented API** — the OpenAPI document shipped in
+the dissected firmware (research/vnish rootfs,
+`usr/share/dashd/ui/docs/api-doc.json`, 41 endpoints) —
+cross-checked against HashCore's 27-type task list for
+presentation (task names, the Throttle dialog's range /
+default / explainer, the API-key Add/Remove dialog, the
+diagnostic export's directory + reason). The mapping
+was written to docs/vnish-ops-mapping.md BEFORE any
+code; an action is implemented only where its contract
+is unambiguous in the doc.
+
+PER-ACTION TABLE (api-doc endpoint · auth · verdict —
+this table is also the explicit status update of the
+v0.26 gap list in docs/operations-mapping.md §3):
+
+  pause (HashCore "Mining pause")
+    POST /api/v1/mining/pause, bodyless, bearer|apikey
+    SHIPPED as ops type pause_mining (dashd-only).
+  resume ("Resume mining")
+    POST /api/v1/mining/resume, bodyless, bearer|apikey
+    SHIPPED as resume_mining.
+  restart ("Restart mining")
+    POST /api/v1/mining/restart, bodyless, bearer|apikey
+    SHIPPED as restart_mining — the v0.26 merge of
+    mining-restart into reboot is UN-done for dashd;
+    device reboot stays `reboot`; cgminer keeps only
+    its restart-RPC reboot (no second action faked).
+  start / stop (HashCore-internal only, no enum entry)
+    POST /mining/start, /mining/stop documented
+    NOT SHIPPED — not user-facing in the original
+    (INFERRED internal building blocks); pause/resume
+    cover the user-facing row.
+  findMiner ("Locating miner")
+    POST /locate-miner, bodyless, NO auth in the doc,
+    reply LocateMinerStatus{is_enabled}; the twin
+    POST /find-miner is marked deprecated in the doc
+    SHIPPED as find_miner via /locate-miner ONLY.
+    No duration/on-off parameter exists in either
+    contract (HashCore shows none) — the result reports
+    the device-returned is_enabled state verbatim.
+  throttle ("Throttle mode")
+    POST /mining/throttle {percent: int, 20..100} ->
+    SaveConfigResult{restart_required, reboot_required},
+    bearer|apikey
+    SHIPPED as throttle; the app dialog ports HashCore's
+    (Power level, "AVAILABLE RANGE: 20-100%", "RESET TO
+    DEFAULT: 100%", the frequency explainer); the
+    reply's flags surface in the result message.
+  preset set (no HashCore task type)
+    OverclockSettingsRaw.preset inside MinerConfigRaw;
+    write path GET /settings (apikeyAuth ONLY) ->
+    POST /settings (InputConfig)
+    SHIPPED as set_preset on the exact read-modify-write
+    the shipped switch_pool url-form proves (incl. its
+    honest x-api-key failure). Labelled an
+    api-doc-grounded addition, NOT a HashCore port.
+  resetAutotuneProfiles ("Reset all autotune profiles")
+    POST /autotune/reset-all {restart: bool}, bearer|apikey
+    SHIPPED as reset_autotune_all (restart defaults true,
+    HashCore asks nothing).
+  resetCurrentAutotuneProfile ("Reset single profile")
+    GET /perf-summary (NO auth declared) ->
+    PerfSummary.current_preset.name, then
+    POST /autotune/reset {presets: [name], restart},
+    bearer|apikey
+    SHIPPED as reset_autotune_current; a device with no
+    current preset fails honestly. (The raw reset-list
+    endpoint is covered by these two; it is not a
+    separate type — no HashCore user-facing twin.)
+  configureApiKey ("Api key config")
+    POST /apikeys {key len 32, description} ->
+    {status: inserted|updated|nochanges};
+    POST /apikeys/delete {key}, bearer|apikey
+    SHIPPED as configure_api_key {operation: add|remove,
+    key, description?}; the device status surfaces in
+    the result message; HashCore's Add/Remove dialog
+    shape is the app's form.
+  changePassword ("Changing password")
+    InputConfig.password = PasswordChange {current, pw}
+    (both required; every InputConfig section is
+    nullable -> partial-write shape)
+    SHIPPED as change_password {new_password} via
+    POST /settings {"password": {...}}. "current" is
+    the winning set's password, recovered by the runner
+    (the fallback set, or the label-matched set behind
+    the probe's JWT); an API-key win or a set-less run
+    fails honestly ("the current password is unknown")
+    instead of guessing the factory default — the
+    runner passes an explicit empty sentinel for that
+    case. The partial-write semantics are INFERRED
+    from the doc's all-nullable shape: HARDWARE-
+    UNCONFIRMED, like the rest of this tail.
+  diagnosticReport ("Saving diagnostic report")
+    NO diagnostics endpoint exists in the doc;
+    GET /logs/{log_type} declares no response schema;
+    HashCore's bundle contents are unobservable (its
+    export dialog shows only a directory picker + an
+    optional reason)
+    SHIPPED as a labelled BeeSky VARIANT (ops type
+    diagnostic_report): per device the core writes
+    <report_dir>/<ip>-diagnostic.json = {kind,
+    variant, ip, source, at, reason, record, inspect}
+    — the health record + the inspect document from
+    the existing clients. A FETCH_ERROR device fails
+    honestly and produces no file.
+  conditionalRestart ("Restart (if required)")
+    STAYS A GAP: no restart-required state exists
+    anywhere in the doc (MinerState is a plain state
+    enum; SaveConfigResult's flags answer config saves
+    only) and HashCore's trigger condition is
+    unobservable — a condition is not invented.
+  resetFirmware (POST /settings/factory-reset)
+    STAYS A GAP by this release's safety scope: it is
+    a HashCore FIRMWARE-category task; firmware-family
+    actions stay deliberate one-device flows.
+  removeFirmware (POST /firmware/remove)
+    STAYS A GAP (same safety scope; `beesky fw` owns
+    firmware).
+  configureNetwork (InputConfig.network)
+    STAYS GAP-UNVERIFIED (unchanged from v0.26): a
+    partial network write can strand a device off the
+    LAN; its semantics need a hardware session.
+
+PYTHON CORE:
+
+  * beesky/core/actions.py: ten new dashd-only handlers
+    behind the existing execute() dispatch (auth via
+    DashdClient.post_json — API key / held JWT / lazily
+    minted JWT, the shipped pattern); non-dashd sources
+    get the honest "not supported for this source yet".
+    COMMAND_TYPES grows accordingly; the cloud agent
+    CAN now execute these types too (same registry).
+  * beesky/core/ops.py: TASK_TYPES grows to 14; every
+    new payload contract is validated in validate_job
+    BEFORE any I/O (throttle's doc range, the 32-char
+    key, non-empty preset / new password, report_dir),
+    so a malformed tail job exits 2 and touches
+    nothing. diagnostic_report is runner-level (like
+    rescan, it is not an actions.execute command) and
+    reuses _fetch_record + inspect_device.
+    _action_creds gains the change_password password
+    resolution described above.
+  * tests/mock_dashd.py extended per the api-doc: the
+    tail endpoints with the doc's auth per endpoint
+    (locate-miner deliberately UNGATED, perf-summary
+    open, GET /settings still apikey-only), an
+    out-of-range throttle refusal, a key-length refusal,
+    and per-hit recording of WHICH auth won
+    (apikey|bearer) — the tests assert request shape
+    (path / body / auth header), not just success.
+    Magic value: throttle percent 55 answers
+    restart_required=true so the flags path is testable.
+
+(a) VERIFIED LOCALLY (this machine):
+
+  * Python suites at the v0.29.0 pins (the release
+    sweep, tests/run_mock_test_v29.sh):
+      mock_ops2_test:     34 PASS / 0 FAIL (NEW)
+      mock_agent_bg_test: 52 PASS / 0 FAIL (pin suite)
+      mock_bridge_test:   24 PASS / 0 FAIL
+      mock_creds_test:    32 PASS / 0 FAIL
+      mock_groups_test:   39 PASS / 0 FAIL
+      mock_units_test:    50 PASS / 0 FAIL
+      mock_ops_test:      32 PASS / 0 FAIL
+      mock_inspect_test:  33 PASS / 0 FAIL
+      mock_pools_test:    43 PASS / 0 FAIL
+    mock_ops2 in detail: 11 payload-contract refusals
+    (JobError in-process + a CLI exit-2 with empty
+    stdout); pause/resume/restart successes with the
+    recorded auth kind (x-api-key for the key set,
+    bearer for the password set); a wrong-password 401
+    with nothing executed; the actions layer surfacing
+    the device's own err text verbatim; find-miner
+    unauthenticated, its ON then OFF states passing
+    through; throttle 80 (body + auth recorded) and 55
+    (restart flag in the message); both autotune
+    resets (reset-all's body; current = the mock's
+    perf-110 from /perf-summary); API-key add (status
+    'inserted' in the message + body recorded) and
+    remove; set_preset's settings POST carrying
+    miner.overclock.preset + the password-only
+    x-api-key failure; change_password's POST body
+    equalling PasswordChange {current: mock-pw, pw}
+    + the api-key-win honest failure posting nothing;
+    diagnostic bundles for dashd AND stock (kind,
+    record, inspect source, reason), the unreachable
+    device failing with no file; pause + throttle on
+    stock failing not-supported.
+  * Flutter (SDK 3.47.9 at ~/workspace/flutter-sdk):
+    flutter analyze: clean; flutter test: 117 PASS /
+    0 FAIL (110 pre-existing + 7 new ops tests) — the
+    tail types round-trip by wire name and all confirm
+    first; mock lifecycle: pause over the fleet (vnish
+    ok, cgminer honest not-supported, the dead unit
+    fails), diagnostic succeeding on answering units
+    of both families, find-miner's ON message; widget
+    level: the "Thêm lệnh" (All commands) menu in the
+    Operations bar driving pause end-to-end into a
+    pause_mining history entry, the throttle dialog's
+    range/default texts then a running throttle task,
+    and the API-key form refusing a short key before
+    anything starts. Pre-existing tests touched: only
+    the version pin in widget_test.dart (v0.29.0).
+
+(b) VERIFIED ONLY BY CI (.github/workflows/
+build-flutter.yml):
+
+  * flutter build windows --release on a real Windows
+    runner and the BeeSkyFlutter-<tag>-win64.zip asset.
+    The app remains compile-verified only until the
+    owner runs it on real Windows (as since v0.21).
+
+(c) HARDWARE-UNCONFIRMED (the whole tail): every new
+endpoint is implemented and mock-verified against the
+api-doc's contract, but NO real VNish device has
+answered one yet — response dialects (e.g. whether a
+bodyless POST answers 200 with an empty body, the
+perf-summary reply on a locked unit, the partial
+/settings write for PasswordChange) can differ from
+the document. The handlers surface device replies and
+refusals verbatim, so a dialect difference shows up
+as an honest per-device failure, never a fake success.
+
+---
+
+# v0.30.0 — Vendor coverage (HashCore's per-vendor adapters, dissected then ported)
+
+Following the dissect-before-porting rule, every vendor
+was dissected FIRST from the extracted Toolkit materials
+(~/workspace/asic-os-s19pro/research/hashcore/toolkit-x64/:
+the AOT string pool, en.json, package paths) and the
+mapping written to docs/vendor-coverage-mapping.md with
+per-vendor VERIFIED / INFERRED / UNKNOWN grading BEFORE
+any code. Method note: the Dart AOT pool is hash-consed
+(no library clustering), so attribution rests on
+distinctive literals only (DTO names, verbatim request
+fragments, the pool's single LuCI HTML-regex family).
+A vendor whose contract could not be verified ships as
+detection-only or a named gap — no dialect was invented.
+
+PER-VENDOR TABLE (detect · read · actions — verdict +
+evidence grade; gap ids live in the mapping doc):
+
+  MicroBT Whatsminer (cred family "whatsminer")
+    detect: socket dialect on :4028 answered in the
+      Msg envelope + the summary fingerprint keys
+      "Fan Speed In"/"Fan Speed Out" (VERIFIED literals;
+      Antminer cgminer SUMMARY carries no fan fields)
+      SHIPPED — probe step runs BEFORE the plain cgminer
+      read of the same summary, so neither side can
+      swallow the other.
+    read: summary/devs/pools/version socket DTOs
+      (VERIFIED names; read cmd names INFERRED from the
+      DTO family, only {"cmd": "get_token"} is verbatim)
+      SHIPPED read-only: rate from the MHS pair (native
+      rate_value in TH/s, MHS/1e6), fans In/Out, per-
+      board temps, pools verbatim. Chips 0/0 — the DTO
+      family evidences no per-chip counts (G-W2, mirrors
+      the open L9 caveat). Power NOT read — the socket
+      "Power" key is not attributable in the pool (G-W4).
+    actions: NONE. Every privileged call needs the
+      token scheme (get_token VERIFIED to exist; its
+      computation UNKNOWN) — reboot/switch_pool return
+      the honest NOT_SUPPORTED naming G-W1. The LuCI
+      HTTP transport (VERIFIED paths/regexes) is not
+      built (G-W3).
+  Canaan Avalon (cred family "avalon")
+    detect: cgminer-RPC device whose STATS carry
+      "MM ID<n>" keys (literal "MM ID0" VERIFIED) or a
+      Type starting "Avalon" SHIPPED — a refinement of
+      the cgminer claim, never a separate transport.
+    read: HashCore's own model is the shared one
+      (CgminerCommonStatsDto.fromAvalonJson VERIFIED)
+      SHIPPED via the existing cgminer read path:
+      GHS pair -> native TH/s, pools enrichment, fans.
+      No chains/chips — no chain_acs in the evidenced
+      dialect (G-A1: field semantics beyond the
+      fingerprint UNKNOWN).
+    actions: reboot rides the cgminer `restart` RPC
+      (the common model's verb) SHIPPED; switch_pool
+      keeps the cgminer-family gap.
+  IceRiver (cred family "iceriver")
+    Structure only in the pool (IceRiverApiSession,
+    DTO family, scheme "iceRiverApi://") — endpoints,
+    field keys, auth, detection ALL UNKNOWN.
+    GAP G-I1: cred tag ships so sets can be pre-staged;
+    devices are not detected or read as IceRiver.
+  SunLune / Jasminer (cred family "jasminer")
+    Structure only (full JSON DTO family incl.
+    HashLine/AvgHashLine/RejectLine) — contract
+    UNKNOWN. GAP G-S1: cred tag only, same terms.
+  Braiins OS (cred family "braiins") / LuxOS ("luxos")
+    Structure only (Braiins*/Luxor* DTO families; the
+    SHARED BraiinsLuxorTempDto shows near-identical
+    HTTP surfaces) — the detection marker is UNKNOWN
+    ("bosminer" appears nowhere in the pool).
+    GAPS G-B1/G-L1: cred tags only; devices keep
+    reading through the existing cgminer/stock chain
+    and are deliberately NOT reclassified on a guess.
+
+VENDOR SCOREBOARD vs HashCore's enum (en.json
+enum.firmware_vendor_enum — 15 keys verified this
+pass; UI-ANALYSIS said 16):
+  real read adapters (6): unknown/"CG Miner" (generic
+    cgminer), hashcore + oldVnish (dashd), bitmain
+    (stock), canaan NEW, microBt NEW (deepest of the
+    new two: dedicated transport).
+  cred-tag-only families (4): iceRiver, sunLune,
+    braiins, luxor.
+  absent (4): auradine, epic, pitBit, bitdeer — no
+    VN-farm relevance and zero contract evidence.
+  mock: HashCore's internal test double, n/a.
+
+DETECTION NON-COLLISION (the hard requirement): the
+new suite runs all five dialect mocks at once — the
+pre-existing dashd/stock/cgminer claims are asserted
+unchanged, the cgminer client is asserted UNABLE to
+read the Whatsminer mock (STATUS E), the Whatsminer
+client reads it exactly, the Avalon mock refines to
+avalon while the Antminer mock stays plain cgminer,
+and the Whatsminer mock's request log proves the
+scanner NEVER sends get_token (read-only discipline).
+
+(a) VERIFIED LOCALLY (this machine):
+
+  * Python (tests/run_mock_test_v30.sh, standalone
+    tallies): mock_vendors_test 51 PASS / 0 FAIL (NEW:
+    whatsminer client reads + fingerprint ±, record
+    fields incl. native TH/s + OVER_TEMP on the 87 °C
+    board + pools verbatim + power None, dialect
+    isolation both ways, the token refusal surfacing
+    verbatim, all five probe claims, cli/ops twin
+    fetches, inspect sections, avalon reboot landing
+    in the mock's log, whatsminer action gaps, the
+    six cred tags round-tripping + family-first
+    ordering + groups keeping the braiins tag);
+    regressions at established counts: pin/agent_bg
+    52 (under xvfb), bridge 24, creds 32, groups 39,
+    units 50, ops 32, ops2 34, inspect 33, pools 43 —
+    all 0 FAIL.
+  * Flutter (SDK 3.47.9 at ~/workspace/flutter-sdk):
+    flutter analyze clean; flutter test 125 PASS /
+    0 FAIL (117 pre-existing + 8 new vendor tests:
+    the six cred tags round-trip, the label map, the
+    cred editor showing "Whatsminer (MicroBT)", group
+    creds keeping braiins, the avalon source label,
+    the mock fleet's whatsminer record + firmware
+    grouping bucket + inspect shape). The mock fleet
+    grew a fifth record (WhatsMiner M30S, one board
+    at 87 °C), so fleet-count expectations in
+    widget/grid/groups/ops tests moved 4 -> 5 with
+    it; the demo group's stored last-scan matches.
+
+(b) VERIFIED ONLY BY CI (.github/workflows/
+build-flutter.yml):
+
+  * flutter build windows --release on a real Windows
+    runner and the BeeSkyFlutter-<tag>-win64.zip
+    asset. The app remains compile-verified only
+    until the owner runs it on real Windows (as
+    since v0.21).
+
+(c) HARDWARE-UNCONFIRMED (everything new): no real
+Whatsminer or Avalon has answered BeeSky yet. The
+read cmd names beyond get_token are INFERRED from
+DTO names — a real unit whose dialect differs will
+fail the fingerprint and fall back to the existing
+families or FETCH_ERROR, never a fake record. The
+Avalon fingerprint rests on one literal ("MM ID0")
+plus the Type prefix; field semantics beyond it
+(G-A1) and every G-W/G-I/G-S/G-B/G-L gap need a real
+device session to close. Whatsminer token actions
+stay unbuilt until the token computation is
+evidenced (a farm session or a fuller dissection).
+# v0.31.0 — Flutter stage 2: agent config app + unified installer
+
+The port source this time is OUR OWN Tk agent app
+(beesky/agent_gui.py + agent_app.py + agent_config.py):
+its behaviour was dissected FIRST and the mapping written
+to docs/agent-app-mapping.md (Tk behaviour -> Flutter
+behaviour, divergences D1-D8 named) BEFORE any code. The
+Python core is the spec and is UNTOUCHED — git shows zero
+changes under beesky/ except the __init__ version pin.
+
+WHAT SHIPPED:
+
+  * app_agent_flutter/ — beesky_agent_app.exe: the Tk
+    window 1:1 (header + version pill; cards "Kết nối
+    cloud" / "Quét tại trại" / "Trạng thái chạy ngầm";
+    Lưu cấu hình / Chạy thử / Bật-Tắt tự khởi động; test
+    pill; footer status line). Config load/save mirrors
+    agent_config.py exactly (tolerant parse incl. the
+    absent-key-keeps-dataclass-default rule the tests
+    caught for user/password='root'; disk-as-base + five
+    form fields; core field order on disk; missing-fields
+    and interval validation with the Tk texts verbatim).
+    Process work drives the core's OWN verbs:
+    beesky-agent test (overlay flags) / install-task /
+    remove-task, schtasks /Query for the task state,
+    beesky sysinfo --json for the first-run prefill.
+    Mock mode (BEESKY_MOCK) with fixture config + status.
+  * Unified BeeSkySetup (packaging/installer.iss):
+    components main / agent (Types full = both, compact =
+    main only, both checked by default); {app} holds the
+    CLI + Tk GUI + the main Flutter bundle; {app}\agent
+    holds beesky-agent.exe/agentw + the agent Flutter
+    bundle. Existing shortcuts unchanged ("BeeSky" ->
+    Tk GUI, "BeeSky Agent" -> beesky-agent.exe); the
+    Flutter faces get their own shortcuts.
+  * BeeSkyAgentSetup (packaging/agent.iss) kept for
+    agent-only farm PCs, now also embedding the agent
+    Flutter bundle in {app}; its pinned shortcut text is
+    byte-identical to before.
+  * OPTIONAL install-time pairing (the Pulse pattern,
+    mapping §2): both installers offer a Cloud URL +
+    Agent key + Tên trại page — all three or none, only
+    when no config file exists — and write
+    %APPDATA%\BeeSky\agent-config.json post-install
+    (ASCII-escaped JSON; the target stays for the app's
+    first-run prefill). Pulse requires the pair; BeeSky's
+    page is optional (divergence D8 in the mapping).
+  * build-windows.yml builds both Flutter apps and
+    stages dist\flutter-main / dist\flutter-agent for
+    Inno; build-flutter.yml gains the mirror job that
+    produces BeeSkyAgentFlutter-<tag>-win64.zip.
+
+BEHAVIOUR-PARITY TABLE vs the Tk app (details + the
+D1-D8 divergences in docs/agent-app-mapping.md):
+
+  config fields / file / path resolution ... SAME (Dart mirror)
+  validation + status texts ................ VERBATIM
+  status-card derivation ................... SAME (poll 2 s, D7)
+  http cloud hint .......................... SAME function, mirrored
+  test / auto-start controls ............... SAME outcomes via the
+                                             core's CLI verbs (D3/D4)
+  first-run target prefill ................. via sidecar sysinfo;
+                                             blank on agent-only
+                                             installs (D5)
+  DPAPI key display/edit ................... NOT replicable in
+                                             Dart: protected key =
+                                             empty field + keep-or-
+                                             replace hint; typed key
+                                             stored in the core's
+                                             legacy plain form (D2)
+                                             <- the port's one real
+                                             security downgrade,
+                                             stated not hidden
+  native window title ...................... no version in it (D8)
+
+FINAL RELEASE ASSET LIST (tag build; was 7, now 8):
+
+  build-windows.yml -> BeeSkySetup-0.31.0.exe,
+    BeeSkyAgentSetup-0.31.0.exe, beesky.exe,
+    beesky-gui.exe, beesky-agent.exe, beesky-agentw.exe
+  build-flutter.yml -> BeeSkyFlutter-v0.31.0-win64.zip,
+    BeeSkyAgentFlutter-v0.31.0-win64.zip
+  (+ update-manifest.json/.sig on tag builds when the
+  UPDATE_SIGNING_KEY secret is configured — the manifest
+  itself is unchanged: exes + installers only, the
+  Flutter zips were never part of the self-update
+  channel.)
+
+(a) VERIFIED LOCALLY (this machine):
+
+  * Python (tests/run_mock_test_v31.sh, standalone
+    tallies — the core is untouched, so this is the
+    full regression set at established counts):
+    mock_vendors_test 51 PASS / 0 FAIL; pin suite
+    mock_agent_bg_test 52 PASS / 0 FAIL (under xvfb;
+    "versions in sync at 0.31.0"); mock_bridge_test 24;
+    mock_creds_test 32; mock_groups_test 39;
+    mock_units_test 50; mock_ops_test 32;
+    mock_ops2_test 34; mock_inspect_test 33;
+    mock_pools_test 43 — all 0 FAIL. Packaging-pin
+    suite mock_agent_app_test also run standalone:
+    34 PASS / 0 FAIL (agent.iss shortcut + workflow
+    asset counts intact after the packaging edits).
+  * Flutter (SDK 3.47.9 at ~/workspace/flutter-sdk):
+    main app — flutter analyze clean; flutter test
+    125 PASS / 0 FAIL (unchanged; only its version pins
+    moved). Agent app — flutter analyze clean;
+    flutter test 34 PASS / 0 FAIL (NEW: config parse /
+    round-trips incl. DPAPI-blob keep + typed-key
+    replace, missing-fields order, status derivation
+    cases incl. missing status, warning + path +
+    interval-format units; argv contracts for the test /
+    install-task / remove-task verbs incl. the
+    protected-key --key omission; widget tests — full
+    window render from fixtures, save over disk base,
+    both refusal messages, test cycle landing the
+    verdict, protected-key flow, auto-start toggle,
+    first-run sysinfo prefill, key masking toggle,
+    live http hint).
+
+(b) VERIFIED ONLY BY CI:
+
+  * Both Flutter Windows builds + both zips
+    (build-flutter.yml), and the two Inno installers
+    with the staged bundles (build-windows.yml). The
+    Inno [Code] pairing page is conservative, standard
+    Pascal Script (CreateCustomPage / TNewEdit /
+    TNewPasswordEdit / SaveStringToFile) but is NOT
+    compilable in this sandbox — the first CI run of
+    build-windows on this tag is its first compile;
+    if ISCC rejects it, the .iss [Code] blocks are the
+    only suspects. Both apps remain compile-verified
+    only until the owner runs them on real Windows
+    (as since v0.21).
+
+(c) HARDWARE / WINDOWS-UNCONFIRMED:
+
+  * The Flutter agent app against a real DPAPI-written
+    config (the protected-state flow is unit-tested
+    against the format, not against a live crypt32
+    blob), the schtasks probe + task verbs from the
+    Flutter process, and the unified installer's
+    component selection + pairing write on a real PC.
+
+# v0.32.0 — The five remaining views + the sidecar fix
+
+Grounded in the owner's FIRST real-Windows test (2026-11-12):
+he extracted the v0.31.1 BeeSkyFlutter zip standalone (folder:
+beesky_app.exe + flutter_windows.dll + data/ — nothing else),
+so no beesky.exe ever sat beside the app; scans failed with
+"Lỗi quét: Không chạy được beesky (beesky): The system cannot
+find the file specified" and ticket export leaked the raw
+"ProcessException: … Command: beesky scan … --tickets
+.\tickets". No Defender involvement was evidenced. The
+dissection + per-view mapping was written BEFORE the build:
+docs/views-mapping.md (the "originals" are BeeSky's own web
+dashboard / cloud store / event engine / ticket writer).
+
+## Workstream B — the sidecar failure mode (the bug he hit)
+
+ROOT CAUSE (in code, app_flutter/lib/sidecar.dart):
+SidecarBridge.resolveBeeSkyExe() resolved override → env →
+dart-define → sibling beesky.exe → and then fell back to the
+BARE NAME 'beesky'. Nothing beside the app in the owner's
+layout meant every Process.run('beesky', …) raised
+ProcessException; _runJson wrapped it with the raw OS text,
+exportTickets had NO try/catch at all (the unwrapped
+ProcessException in his photo), and the sidebar's missing-exe
+check could not fire because a bare name has no path
+separator to test.
+
+FIX:
+  * Resolution: on Windows the resolver now returns the
+    EXPLICIT sibling path (<app exe dir>\beesky.exe) even
+    when the file is absent — both shipped layouts always
+    place it there, so absence becomes a knowable state
+    (bridge.sidecarMissing). POSIX keeps the bare-PATH
+    fallback (dev machines). Overrides unchanged; an
+    override naming a missing file counts as missing too.
+  * ONE friendly message everywhere: sysinfo, scan, group
+    scan, inspect, ops start and ticket export check the
+    state BEFORE spawning (and map a racing ProcessException
+    to the same text): "Không tìm thấy beesky.exe cạnh app —
+    hãy giải nén app vào cùng thư mục với beesky.exe (hoặc
+    cài bằng BeeSkySetup), và kiểm tra Windows Defender >
+    Protection history nếu file bị cách ly." The sidebar
+    pill reads "Chưa có ruột quét (thiếu beesky.exe)"; the
+    sysinfo status line shows the message itself.
+  * exportTickets gained its missing try/catch.
+
+PACKAGING (the structural fix): from v0.32 both portable
+zips are SELF-CONTAINED — build-flutter.yml jobs now build
+the PyInstaller spec themselves (the two workflows are
+independent runs on one tag; cross-workflow artifact
+download would couple + race them) and stage the sidecar
+into the runner folder before zipping, then VERIFY the zip
+in-job (fails unless every expected entry is present).
+Expected zip contents:
+  BeeSkyFlutter-<tag>-win64.zip:
+    beesky_app.exe, beesky.exe, flutter_windows.dll, data/…
+  BeeSkyAgentFlutter-<tag>-win64.zip:
+    beesky_agent_app.exe, beesky-agent.exe,
+    beesky-agentw.exe, flutter_windows.dll, data/…
+Size implication: main zip ~12 MB -> ~26 MB (+beesky.exe
+~14 MB); agent zip ~12 MB -> ~40 MB. The agent zip bundles
+BOTH agent exes symmetrically (the same staging route made
+it trivial) — agentw is required, not decoration: the
+agent app's install-task verb registers the windowless
+twin as the scheduled-task target, so a shell-only agent
+zip would break exactly the way the main zip did. Named
+divergence: zip-bundled exes are built from the same
+tagged source but are NOT eSigner-signed inside
+build-flutter (signing lives in build-windows; its signed
+beesky.exe remains the standalone release asset and the
+installers' embedded copy). The update manifest is
+unchanged (the zips were never in the self-update
+channel).
+
+## Workstream A — the five views (data source + scope)
+
+| View | Original | Data source (local) | Scope shipped |
+|------|----------|---------------------|---------------|
+| Bản đồ nhiệt | `beesky serve` web dashboard heat map (Tk has none) | CURRENT scan records in memory | Web semantics ported exactly: tiles sorted by numeric IP, last octet + temp + `ip · rate`, the web's 5 band hexes on max_temp_c, offline = grey/"Offline", problem = red border, web tooltip + web empty text. Divergences named in the mapping: tile click selects + jumps to Máy đào (web is display-only); bands render at 0.88 alpha on the dark theme. The v0.25 Overview heat-grid (filtered grid pipeline, HashCore-style) is a different surface and is unchanged. |
+| Điện năng | cloud energy report (store.energy_report over energy_hours; price setting default 2000 VNĐ/kWh) | records' power_w + beesky-history.json samples (which carry power_w) | The cloud report's three shapes over LOCAL data: current fleet (Σ kW, est. kWh/day, est. cost/day, honest N/M power-reporting coverage), 7-day integration of saved samples (rectangle rule, >30 min gaps skipped, day = start sample's day), per-day + per-device rows. The cloud's hour-integrated history is cloud-only; the view states this scope on its face. Price editable in Cài đặt. |
+| Lịch sử sửa | ticket files (report.write_tickets) — cloud repairs table is server-side | `tickets/` dir beside the sidecar, via the NEW read-only core verb `beesky tickets --dir DIR --json` (report.list_tickets) | Lists exported tickets newest-first (mtime), ip from filename, model + problem bullets parsed from the ticket text, full text on tap. Local ticket files carry NO status and NO timestamp — none is invented (the cloud status chips are not ported; mtime is shown as the export date). |
+| Sự kiện | core EventEngine (watch --state / serve ring) | NEW: `scan --events-state FILE` (bridge only) diffs each pass watch-style; app accumulates emissions in beesky-events.json | Engine semantics untouched (baseline seeding, anti-flap, cooldown); one state file PER TARGET string (one engine per watched target, like separate watch runs). App log newest-first, cap 500; rows = severity chip + the web dashboard's Vietnamese type/severity labels + ip · model + detail + time. Neither original filters by type, so the port doesn't either. Flagless bridge payloads are byte-identical to before (pinned). |
+| Cài đặt | — (settings that persist + take effect only) | beesky-settings.json (new app store) | Default scan target (wins over sysinfo's auto subnet at prefill; empty = auto), electricity price VNĐ/kWh (default 2000, feeds Điện năng), entry buttons reusing the EXISTING creds dialog + groups view, tickets-dir readout, about block (app version const + core version from sysinfo). No decorative toggles. |
+
+CORE ADDITIONS (both read-only, established bridge style):
+  * `beesky tickets --dir DIR --json` → one JSON document
+    {"tickets": [{file, ip, modified, model, problems,
+    text}]}; missing dir = empty list, exit 0.
+  * `scan --events-state FILE` (with --json): after records
+    are built, present = non-error records, engine diffs,
+    state persists (the watch _load_state/_save_state pair),
+    payload gains "events" — only with the flag.
+
+## Tests
+
+(a) VERIFIED LOCALLY (this machine):
+  * Python (tests/run_mock_test_v32.sh): NEW
+    mock_views_test 20 PASS / 0 FAIL (tickets verb:
+    round-trip of write_tickets output, newest-first,
+    problem-line parsing, missing-dir contract, human
+    mode; events-state: flagless payload has no "events"
+    key, pass 1 seeds silently, OFFLINE fires once,
+    anti-flap latch, BACK_ONLINE on return). Regression
+    set all green at established counts:
+    mock_vendors_test 51; mock_agent_bg_test 52 (xvfb;
+    "versions in sync at 0.32.0"); mock_bridge_test 24;
+    mock_creds_test 32; mock_groups_test 39;
+    mock_units_test 50; mock_ops_test 32;
+    mock_ops2_test 34; mock_inspect_test 33;
+    mock_pools_test 43; mock_agent_app_test PASSED
+    (xvfb, exit 0). The known timing-sensitive v0.11
+    firmware assertion did not flake this run.
+  * Flutter (SDK 3.47.9 at ~/workspace/flutter-sdk): main
+    app — flutter analyze clean; flutter test 141 PASS /
+    0 FAIL (125 established + 16 new in
+    test/views_test.dart: sidecar-missing pinned on all
+    six bridge verbs + the full shell — pill text, status
+    line, scan error, and NO 'ProcessException'/'cannot
+    find the file' text anywhere; heat band hexes +
+    thresholds; IP ordering; fleet-power coverage;
+    energy integration math (rectangle/gap/window);
+    formatVnd; settings + event-log store round-trips;
+    per-target state paths; all five views rendering from
+    the mock bridge incl. honest empty states; settings
+    save persisting AND taking effect in Điện năng;
+    sidebar shows no 'SAU'). The two _FleetBridge
+    overrides in grid_test.dart moved to the extended
+    bridge signatures. Agent app — analyze clean;
+    flutter test 34 PASS / 0 FAIL (version pins only).
+  * Version pins moved together: beesky 0.32.0, both
+    .iss MyAppVersion 0.32.0, main pubspec 0.32.0+13,
+    agent pubspec 0.32.0+3, mock sysinfo + app version
+    consts 0.32.0.
+
+(b) VERIFIED ONLY BY CI:
+  * Both Windows Flutter builds and the new self-contained
+    zip staging + verification steps in build-flutter.yml
+    (the YAML parses locally; PowerShell/Compress-Archive
+    cannot run in this sandbox — the first tag build is
+    their first execution), and build-windows' installer
+    builds (unchanged this release).
+
+(c) HARDWARE / WINDOWS-UNCONFIRMED:
+  * The whole v0.32 shell on real Windows — above all the
+    self-contained zip route that replaces the layout the
+    owner hit, the events diff against a real fleet
+    (engine semantics are the core's own, mock-verified),
+    and ticket listing against tickets exported on his PC.
+
+# v0.33.0 — Docs-based vendor adapters (Whatsminer actions + LuxOS)
+
+The dissection + per-vendor mapping was written BEFORE the
+build: docs/vendor-docs-mapping.md (the "originals" are each
+vendor's own published API docs — MicroBT's Whatsminer
+manuals, Luxor's docs.luxor.tech, Braiins' bos-plus-api /
+Academy). Evidence is graded per vendor in the mapping
+(OFFICIAL-DOC / CORROBORATED / INSUFFICIENT); a family whose
+spec stayed INSUFFICIENT ships as a named gap, no invented
+dialects.
+
+## Verdicts
+
+| Family | Verdict | Evidence |
+|---|---|---|
+| Whatsminer actions (G-W1) | CLOSED — token flow + reboot / restart_mining / pause / resume / find_miner / switch_pool | OFFICIAL-DOC (MicroBT V2.0.5/V2.2.2 + V1.3.11 manuals) |
+| LuxOS | IMPLEMENTED — detection + reads + reboot + curtail sleep/wakeup | OFFICIAL-DOC (docs.luxor.tech) + CORROBORATED (Luxor `luxos` PyPI package) |
+| Braiins OS | GAP G-B1 — gRPC PAPI fully specced but no stdlib path; socket equivalent's detection fingerprint unverified | OFFICIAL-DOC (gRPC) + CORROBORATED (bosminer 4028 API) |
+| IceRiver | GAP G-I1 — no public API spec found (user manuals only) | INSUFFICIENT |
+| Jasminer / SunLune | GAP G-J1 — no public API spec found (user manual only) | INSUFFICIENT |
+
+Coverage scoreboard: **7 real read adapters** of HashCore's
+15–16 (v0.30's 6 + LuxOS). Whatsminer is the first family
+with token-authenticated writes outside VNish.
+
+## Whatsminer token flow — the part v0.30 could not do
+
+The manuals' prose says `key = md5(salt + password)` but
+their own reference implementation is `openssl passwd -1`
+— MD5-crypt (`$1$`), not plain MD5. The reference governs:
+`key = md5crypt(password, salt)`,
+`sign = md5crypt(key + last4(time), newsalt)`, implemented
+in pure Python (`beesky/core/md5crypt.py` — `crypt` does not
+exist on Windows). Worked-example gate, reproduced from the
+manuals' own example inputs (time 5626, salt BQ5hoXV9,
+newsalt jbzkfQls, password admin) with the manuals' own
+reference implementation (OpenSSL 3.0.13):
+
+  key  = RxmaDUO33TS7O26yeMHZ81
+  sign = w.BNbkCV6n1aNWgiBWLzT/
+
+The mock Whatsminer uses those exact example salts and
+checks the client's token against the hardcoded
+openssl-derived sign — the end-to-end action test verifies
+against the worked example, not against the implementation
+under test. Writes use the plaintext token envelope
+`{"token": <sign>, "cmd": ...}` from the V1 manuals. The
+V2 manuals' ciphertext-only envelope (`aes256` ECB +
+`token,$sign|api_str`, `aeskey = sha256(key)`) is
+DOCUMENTED and NOT implemented: the manuals give no
+complete worked ciphertext example, so the aeskey byte
+form, the padding, and the token-vs-sign prefix are
+unverifiable from the text alone. A V2 firmware enforcing
+ciphertext-only refuses a plaintext write with Code 45 and
+the executor surfaces it verbatim. Password source: the
+winning whatsminer-tagged set, else the manuals' factory
+default "admin" (the message says so when it uses it).
+Reads still never send get_token.
+
+## LuxOS
+
+Transport is the cgminer-compatible TCP API on 4028
+(`{"command": ...}` + optional `"parameter"`, cgminer
+envelope replies) — the docs' own words: "follows the same
+pattern as the CGMiner API". Detection: `version` →
+STATUS Description starts "LUXminer" (Luxor's own CLI
+prints exactly `LUXminer 2024.5.1.155432-f2badc0f`); the
+probe refines a cgminer claim exactly like the v0.30
+Avalon refinement, and the non-collision suite re-runs
+(stock `cgminer …` / `bmminer …` never match). Reads ride
+the shared cgminer client + record builder (S19 Pro mock:
+109.13 TH/s, 3 boards, board 2 at 87 °C / 112/114 chips).
+Sessions: `logon` (no password — coordination, NOT
+security, per the docs) → 1-minute expiry, max one at a
+time; `logoff` always runs after a write; `kill` is NEVER
+sent. Actions: `rebootdevice` (parameter-less, per Luxor's
+own CLI; whether it needs a session is UNKNOWN in the
+docs read — a refusal surfaces verbatim), `curtail`
+sleep/wakeup (safe default form only — no `mode=unsafe`,
+the docs warn it stresses chips; a sleeping rig wakes ONLY
+via `wakeup`, the state survives a reboot, and the pause
+message says so).
+
+## Tests (mock_vendors2_test, 59 assertions)
+
+  * md5crypt against the manuals' worked example (key +
+    sign) + independent openssl vectors (hello/test1234,
+    empty password) + the last4(time) rule;
+  * Whatsminer: get_token fields, mint_token == worked
+    sign, privileged accept, wrong-password refusal
+    (Code 135 "check token error"), bare-call refusal,
+    reads-never-mint, all six actions incl. switch_pool
+    payload shape (slot 1 → pool2) and its honest
+    failures (no url/user, pool_id 5), default-admin
+    fallback, exactly 11 token mints (one per privileged
+    call, nothing else);
+  * LuxOS: fingerprint positive/negative (stock, bmminer,
+    empty), probe claims luxos / keeps antminer cgminer /
+    still refines avalon, record fields + native rate +
+    chips + OVER_TEMP + pools, reads-never-logon, inspect
+    sections, reboot + curtail sleep/wakeup with the
+    logon → curtail → logoff order;
+  * Braiins / IceRiver / Jasminer reboot stays the honest
+    gap (unknown miner source).
+
+## Regression sweep (tests/run_mock_test_v33.sh)
+
+  mock_views_test: 20 PASS / 0 FAIL
+  mock_vendors2_test: 59 PASS / 0 FAIL (new)
+  mock_vendors_test: 51 PASS / 0 FAIL
+  mock_agent_bg_test: 52 PASS / 0 FAIL
+  mock_bridge_test: 24 PASS / 0 FAIL
+  mock_creds_test: 32 PASS / 0 FAIL
+  mock_groups_test: 39 PASS / 0 FAIL
+  mock_units_test: 50 PASS / 0 FAIL
+  mock_ops_test: 32 PASS / 0 FAIL
+  mock_ops2_test: 34 PASS / 0 FAIL
+  mock_inspect_test: 33 PASS / 0 FAIL
+  mock_pools_test: 43 PASS / 0 FAIL
+  mock_agent_app_test: 41 PASS / 0 FAIL
+
+Flutter (local SDK): main app analyze clean + flutter test
+141 PASS; agent app analyze clean + flutter test 34 PASS.
+The only Dart change is the LuxOS source label
+(models.dart sourceLabel); creds.dart already carried all
+six family labels since v0.30.
+
+Version pins moved together: beesky 0.33.0, both .iss
+MyAppVersion 0.33.0, main pubspec 0.33.0+14, agent pubspec
+0.33.0+4, mock sysinfo + app version consts 0.33.0.
+
+(a) VERIFIED LOCALLY (this sandbox):
+  * Everything above: the md5crypt vectors against
+    openssl, the full mock sweep, both Flutter apps.
+  * The v0.30 test file's G-W1 expectations were updated
+    in step (reboot now lands, get_token exactly once by
+    the action) — the old "honest gap" assertions would
+    have failed the new behaviour, so they were changed,
+    not deleted silently.
+
+(b) VERIFIED ONLY BY CI:
+  * The Windows builds (build-flutter.yml /
+    build-windows.yml) for the tag; the version pins are
+    the only packaging-relevant change.
+
+(c) HARDWARE / WINDOWS-UNCONFIRMED:
+  * The Whatsminer token flow against a REAL Whatsminer:
+    the computation is openssl-verified and the envelope
+    is the manuals' own, but no real firmware has answered
+    it yet. First real run should use a full three-pool
+    update_pools payload (the mock cannot say what a real
+    miner does with empty slots) and should confirm the
+    plaintext envelope is accepted on that firmware
+    generation (a Code 45 refusal means that unit enforces
+    V2 ciphertext-only — see mapping §1.4).
+  * LuxOS against a REAL LuxOS miner: detection, reads
+    (above all whether STATS carries chain_acs at all),
+    rebootdevice's session requirement, and the curtail
+    sleep/wakeup round-trip.
+  * Braiins G-B1 closes with exactly one datum: a
+    `version` reply captured from a real Braiins OS
+    machine (or the cgminer.rs source line that builds
+    the version Description).
+
+# v0.34.0 — IP-Report + settings completion + UI smalls
+
+Two workstreams, mapping docs written BEFORE the build:
+docs/ipreport-mapping.md (the IP-Report research verdict +
+the port) and docs/settings-mapping.md (HashCore's settings /
+UX surface dissected from research/hashcore/UI-ANALYSIS.md +
+en.json, then the BeeSky subset).
+
+## G1 verdict: CLOSED (implementation) — IP-Report
+
+Research first, from public sources only. Two independent
+open-source implementations agree on the wire contract:
+
+| Source | What it proves | Grade |
+|---|---|---|
+| asic-rs (256foundation, pyasic lineage), src/listener.rs | AntMinerListener binds UDP 0.0.0.0:14235; the datagram's SENDER address is the miner — payload never parsed. WhatsMinerListener binds 0.0.0.0:8888 the same way. | OPEN-SOURCE-IMPLEMENTATION |
+| Find-My-Miner (OBitsPlease), IpReportListener.cs + README | Default port 14235; "Many miners broadcast their address on UDP port 14235 when their IP/IP-report button is pressed. Listen for IP report opens a passive listener (it sends nothing)". Parse: up to 200 bytes ASCII text; first private IPv4 + first MAC (colon- or dash-separated, normalised upper-case colon form); public IPs in payload ignored; Target = ReportedIp ?? Sender; binary payloads rendered "(binary) <hex>"; only private senders accepted. Test fixtures name the payload forms: Bitmain-style "192.168.1.55,AA:BB:CC:DD:EE:FF" and free text "Jasminer IP 192.168.1.99 mac de-e5-38-f4-64-87". | OPEN-SOURCE-IMPLEMENTATION |
+
+Agreed contract (CORROBORATED): UDP, bind 0.0.0.0, port
+14235; sender IP authoritative; payload is text carrying
+IP/MAC; private senders only. Whatsminer 8888 is
+SINGLE-SOURCE (asic-rs only) and is labelled as such in
+the UI. Still UNKNOWN: U1 the exact canonical Antminer
+payload bytes (no real capture in either source — the
+design does not depend on them: regex extraction + sender
+fallback accept any text form); U2 HashCore's own listener
+transport/port (nothing in the AOT pools attributes a port
+to IpReportService — BeeSky implements the public
+Bitmain-style protocol and claims no more); U3 Whatsminer
+8888 (single-source).
+
+What shipped (core beesky/core/ipreport.py, stdlib only):
+parse_report() (mirrors Find-My-Miner's Parse incl.
+binary-safe rendering, the private-IP rule and MAC
+normalisation), is_private_ip / is_acceptable_sender,
+IpReportListener (threads + UDP sockets, SO_REUSEADDR,
+bind 0.0.0.0, handle_datagram() extracted so tests can
+call it directly), DEFAULT_PORT = 14235,
+WHATS_MINER_PORT = 8888, MAX_TEXT_LENGTH = 200. CLI:
+`beesky ipreport listen [--port 14235] [--no-whatsminer]
+[--out FILE] [--duration SECONDS] [--allow-loopback]`
+(NDJSON {"listening": [...]}, {"report": {...}},
+{"stopped": ...} to stdout; persists to a store file
+{"version": 1, "reports": [...]} cap 100, newest first)
++ `beesky ipreport list --file FILE [--json]` (read-only).
+HashCore's surface ported: the settings toggle
+(ipReportListenerEnabled) and the Network-groups-screen
+panel ("IP Report listening started" / "Failed to start
+IP Report listening" / "Received IP Report: {}"), with a
+received address openable as a network group. BeeSky
+choices (divergences D-IP1–D-IP4): public Bitmain-style
+protocol, not a claimed HashCore port; 8888 labelled
+needs-a-real-button-press; per-report "Quét" (BeeSky's
+equivalent of HashCore's modifier-key isolate) and
+"Mở thành nhóm" (group named "IP Report <ip>"); reports
+persist to beesky-ipreports.json (HashCore retention
+UNKNOWN). Toggle defaults OFF (opt-in — listening opens
+UDP ports; HashCore's default UNKNOWN). Auradine's
+/ipreport DTOs are a different mechanism (Toolkit calling
+an Auradine miner) — NOT ported.
+
+Sandbox quirk: this VM forbids UDP sendto entirely (even
+loopback raises PermissionError). The receive path is
+verified through handle_datagram() (the exact function
+the socket loop calls) + real binds, NOT over the wire;
+the over-the-wire exchange is verified by the mock sender
+in the Flutter-side test and, finally, by a real miner.
+
+## Settings completion + UI smalls
+
+HashCore's Settings tabs (VERIFIED from en.json +
+UI-ANALYSIS): General (theme, language, scale, exit
+confirmation, display status time, auto operations,
+auto-open, auto-scan, squash, IP Report listening,
+hashrate in presets), Unlock (per-vendor — v0.23),
+Timeouts (custom network timeout, miner detection,
+connection, send, receive, send file, rescan count,
+stats update, batch ops), Logs (log dir, file/memory
+level, memory limit, diagnostic report), Advanced
+(threads, parallel task iterations, task timeout).
+Groups commands (VERIFIED): Autoscan groups · Import ·
+Export selected (JSON) · View groups in combined mode ·
+Merge · Reset statistics · Remove selected; global
+"Rescan all groups", "Reset statistics", "Remove all
+groups"; search "by IP, name or description". Hotkeys:
+select_all, invert_selection, isolate, unlock, rescan,
+search, clear_filter, set_view_mode/type, command_palette
+("Type a command..."), zoom in/out/reset (settings
+scale).
+
+BeeSky's 5 tabs — only real settings, all persisted in
+beesky-settings.json, all taking effect:
+
+| Tab | Settings (defaults) | Wired to |
+|---|---|---|
+| Chung | default target, ₫/kWh price (2000), scale 1.0 (90–130% step 5%), IP Report toggle (off) | scale → MediaQuery.textScaler; toggle → listener start/stop |
+| Tài khoản | link to the v0.23 creds dialog (+ count) | — |
+| Thời gian chờ | probe timeout 1.5 s (0.2–10) → scan --timeout; request timeout 3.0 s (0.2–120) → inspect --timeout + ops job timeout; ops stagger 0.0 s (0–60) → ops job stagger_s | core scan/inspect/ops (not display-only) |
+| Nhật ký | data dir readout + store files with sizes + clear ops history / clear events | deletes the real files' contents (confirm dialogs) |
+| Nâng cao | scan workers 64 (1–256) → scan --workers; ops workers 4 (1–8) → ops job workers | core scan/ops |
+
+NOT ported (named): theme/language (one theme, one
+language — Vietnamese); exit confirmation; auto-open;
+squash; hashrate-in-presets; log levels/memory limit
+(BeeSky writes no log files — Logs tab shows real store
+files instead); export/import app data; per-device
+"devices per batch" bucketing (BeeSky's stagger_s is the
+onset-spacing equivalent).
+
+Smalls shipped: command palette Ctrl+K (filter-as-you-
+type over real commands: Quét, Quét lại, Quét nhóm
+<each>, Quét tất cả nhóm, open each view, Tài khoản,
+Xuất phiếu) — a top-level shortcut so it works from every
+view; zoom Ctrl+= / Ctrl+- / Ctrl+0 + scale stepper in
+Cài đặt; combined mode "Xem gộp" on the groups screen
+(one virtual group over the UNION of all groups' targets
+with merged last-scan stats; its Quét runs ONE scan pass
+over the union spec); "Quét tất cả nhóm" (per-group
+passes in turn, records decorated app-side with the group
+name, one group's failure doesn't kill the pass);
+reset-statistics per group (card "Đặt lại", only when
+lastScan exists) + header "Đặt lại tất cả" + core verb
+`groups reset-stats <name>` / `groups reset-stats --all`
+(clears last_scan; targets/creds/autoscan untouched);
+group search box filtering by name + targets (HashCore
+also searches description; BeeSky groups have no
+description).
+
+Divergences: D-S1 scale is text scaling
+(MediaQuery.textScaler, 90–130%) — table fonts/labels
+grow, fixed-pixel chrome (sidebar width, row heights)
+does not; HashCore scales all interface elements. D-S2
+Unlock tab is a link to the existing creds dialog, not
+an inline editor (avoids a second source of truth).
+D-S3 combined mode = virtual group over union spec (one
+scan pass); HashCore's combined rendering internals
+UNKNOWN. D-S4 Logs tab shows store files + clear actions
+instead of log levels.
+
+Two real bugs found and fixed while testing (not
+regressions in the shipped features, both in v0.34's own
+new code):
+1. Palette dialog disposed its TextEditingController
+   synchronously right after `showDialog` returned — but
+   the route is still animating out and its TextField
+   rebuilds once more ("TextEditingController was used
+   after being disposed"). Fixed: the dialog is now a
+   StatefulWidget (_CommandPaletteDialog) that owns and
+   disposes its controller in its own dispose().
+2. The top-level Shortcuts + Focus(autofocus: true) stole
+   primary focus, so the v0.25 grid hotkeys (Ctrl+A/F/R,
+   F5, Esc) never reached the miners column — grid_test
+   "checkbox selection + isolate modes + hotkeys" failed
+   on "Đã chọn 5". Fixed: one focus, one shortcuts map
+   at the top level (grid intents view-guarded to the
+   miners view); the column's own Shortcuts/Focus wrapper
+   removed. The old views_test settings assertion was
+   updated for the tabbed layout ("N bộ đã lưu" now lives
+   on the Tài khoản tab).
+
+## Tests (mock_ipreport_test, 28 assertions)
+
+Parse (9: bitmain-style, free-text, no-IP fallback,
+public-claim ignored, binary preview, 200-char cap,
+sender rules ×3), listener via handle_datagram (6: binds
+both ports, antminer report fields, whatsminer family
+tag, public sender dropped, no-claim sender fallback,
+stops cleanly), CLI (3: listen binds + announces +
+received 0, list reads persisted store, taken-port fails
+exit 2 with "Failed to start"), timeouts (7: probe_host
+passes --timeout to port probes — captured via
+monkeypatch, discover passes --timeout to probe_host,
+inspect passes --timeout to inspect_device, scan
+--timeout accepted by CLI, ops job carries timeout +
+stagger_s, ops clamps negative timeout to 0.2s floor,
+ops stagger spaces onsets ≥0.8s for 3 devices),
+reset-stats (3: one group, --all, unknown group exit 2).
+Two fixes during testing: the port-clash test uses a
+holder socket WITHOUT SO_REUSEADDR (two REUSEADDR UDP
+sockets can coexist on Linux, so the clash path only
+fires against a non-reuse holder); ops _num clamps
+instead of rejecting (the test asserts the clamp, not a
+rejection).
+
+Flutter (new test/ipreport_test.dart, 18 tests): IpReport
+model round-trip + targetIp fallback + familyLabel;
+AppSettings round-trip of all new fields + a v0.32 file
+loading with the new defaults + copyWith; sidecar arg
+builders (scan/scanGroup/inspect carry --timeout/--workers
+only when given; ipreport verbs); mock bridge lists +
+streams the canned reports; SettingsView 5 tabs render,
+timeouts save through, scale stepper 100% → 105%, IP
+Report switch saves enabled, an out-of-range timeout is
+refused with an error, logs tab shows store files +
+sizes; groups search filters by name, reset-stats
+restores the MỚI tag, combined mode shows one union card
+and Quét gộp scans it; IP Report panel shows persisted
+reports, toggle starts the listener, a report opens as a
+group named after its IP; Ctrl+K opens the palette and
+picking "Mở Cài đặt" opens it; Ctrl+= zooms to 105%
+(shown in Cài đặt); MinerRecord.withGroup keeps every
+field and does not serialise groupName.
+
+## Regression sweep (tests/run_mock_test_v34.sh)
+
+  mock_ipreport_test: 28 PASS / 0 FAIL (new)
+  mock_views_test: 20 PASS / 0 FAIL
+  mock_vendors2_test: 59 PASS / 0 FAIL
+  mock_vendors_test: 51 PASS / 0 FAIL
+  mock_agent_bg_test: 52 PASS / 0 FAIL
+  mock_bridge_test: 24 PASS / 0 FAIL
+  mock_creds_test: 32 PASS / 0 FAIL
+  mock_groups_test: 39 PASS / 0 FAIL
+  mock_units_test: 50 PASS / 0 FAIL
+  mock_ops_test: 32 PASS / 0 FAIL
+  mock_ops2_test: 34 PASS / 0 FAIL
+  mock_inspect_test: 33 PASS / 0 FAIL
+  mock_pools_test: 43 PASS / 0 FAIL
+  mock_agent_app_test: 41 PASS / 0 FAIL
+
+Flutter (local SDK): main app analyze clean + flutter test
+159 PASS (141 + 18 new); agent app analyze clean +
+flutter test 34 PASS.
+
+Version pins moved together: beesky 0.34.0, both .iss
+MyAppVersion 0.34.0, main pubspec 0.34.0+15, agent pubspec
+0.34.0+5, mock sysinfo + app version consts 0.34.0,
+release-pin suite now pins 0.34.0.
+
+(a) VERIFIED LOCALLY (this sandbox):
+  * Everything above: the IP-Report parse/listener/CLI
+    against the two public implementations' contract, the
+    timeout wiring via monkeypatched probes, the full mock
+    sweep, both Flutter apps (incl. the two real bugs
+    above, found by the tests and fixed in this version).
+  * The v0.33-era views_test settings assertion was
+    updated for the tabbed layout (see above) — changed,
+    not deleted silently.
+
+(b) VERIFIED ONLY BY CI:
+  * The Windows builds (build-flutter.yml /
+    build-windows.yml) for the tag; no workflow files
+    changed in this version.
+
+(c) HARDWARE / WINDOWS-UNCONFIRMED:
+  * IP-Report against a REAL miner button-press: the wire
+    contract is corroborated by two independent
+    implementations, but no real Antminer/Whatsminer has
+    broadcast to BeeSky yet. First farm visit: press IP
+    Report on one miner while BeeSky listens, confirm the
+    report lands with the right IP/MAC (and whether the
+    Whatsminer 8888 listener fires — single-source).
+  * The timeout values against a real slow farm network:
+    the wiring is proven by monkeypatch + CLI, not by a
+    congested LAN.
+  * The v0.29 VNish ops tail, Whatsminer token flow and
+    LuxOS reads remain hardware-unconfirmed from v0.33.
+
+# v0.35.0 — Unlock-payload research + final parity audit
+
+The LAST content leg before the final delivery. Two parts:
+(A) a bounded research attempt on the remaining ~15% of the
+HashCore unlock recipe (run.sh / .bmu format / race timing —
+docs/unlock-payload-mapping.md), and (B) a full re-audit of
+BeeSky against the Toolkit surface (docs/parity-audit.md),
+with the two small gaps the audit found closable in-code
+fixed in this version.
+
+## Part A — unlock payload research: what was recovered
+
+Blutter: BLOCKED. It supports Android libapp.so (arm64) only;
+the Toolkit binary is Linux x64, and it would need the Dart
+SDK matching the app (3.11.5; this machine has 3.13.7). No
+Blutter run was possible.
+
+Rust disassembly (objdump cross-references from the string
+pool into the stripped librust_ffi_plugin.so): RECOVERED one
+constant — the upgrade race runs at most 10 attempts
+(`movw $0xa00` packs counter=0/limit=10; `cmp %cl,%al; jae`
+with cl=0x0a at the loop head 0x1b6961; the "attempts
+exhausted" error is built at 0x1b4bdc). The inter-attempt
+delay was NOT cleanly recovered (Duration arithmetic keyed
+off the attempt index suggests a tens-of-ms backoff, but the
+formula is ambiguous from the dump — recorded UNKNOWN, not
+guessed). The race timeouts are parameters from Dart
+(connectionTimeoutSec / installFwTimeoutSec in
+InstallFirmwareParam), not constants, so there is nothing to
+recover for them in the binary.
+
+run.sh / payload contents: UNRECOVERABLE from Toolkit by
+construction — the payload ships inside the firmware package,
+not Toolkit; no .bmu file exists anywhere in the research
+materials, and the VNish rootfs grep found no payload
+scripts (only /usr/sbin/update_firmware mentioning openssl
+dgst). The VNish NAND installer (extracted/nand137/runme.sh)
+is a different script (the firmware's own installer behind
+the HashCore signature chain) and is documented as context,
+not as the payload.
+
+.bmu format: public sources establish only that it is
+Bitmain's proprietary RSA-signed container (common variant
+starts 26 01, 15–18 MB, embeds a PEM public key) — no
+documented field layout. INSUFFICIENT to implement.
+
+Recipe confidence: ~85% → ~87% at step level. The 22-char
+constant in the unlock cluster is recorded by offset and
+existence only, per UNLOCK-DEEP policy — its value is not
+reproduced anywhere in this repo. firmware.py's unlock
+docstring now records the 10-attempt bound; no behaviour
+changed (the gated unlock already retries in a loop).
+
+## Part B — parity audit (docs/parity-audit.md)
+
+39 parity rows audited: 24 DONE, 9 PARTIAL, 5 GAP, 2 N/A.
+Vendor breadth 7/14 real adapters. Ops task types 14/27.
+Fresh three-lens scores: UI frame ~97%, VN daily-use loop
+~95%, total surface ~84% (blend shown in the audit doc).
+The audit's honest close: the remaining ~15% is not
+writable from this VM — it is gated on a farm session (6
+hardware confirmations), vendor docs/devices (7 families),
+a real firmware package / live locked-miner session
+(U-1..U-5), and the owner's own decisions (EV cert, VPS).
+
+## The two small gaps fixed in v0.35.0
+
+1. Group description (closes the v0.24 divergence):
+   core normalise_group accepts an optional "description"
+   string (default "", non-string fails loud); the store
+   round-trips it; the app's NetGroup carries it (fromJson /
+   toJson / copy / merge keeps keep's), the group card shows
+   it or "Không có mô tả", the editor has a Mô tả field, and
+   group search covers name + description + targets.
+2. MAC via the local ARP table (closes the v0.25 DATA-GAP):
+   new beesky/core/arp.py — parse_arp_table handles
+   Windows `arp -a`, Linux `ip neigh`, BSD/macOS `arp -an`
+   (dash/colon forms, unpadded BSD octets, broadcast and
+   incomplete entries skipped, later lines win); read_arp_table
+   never raises ({} on any failure); cli._scan_records reads
+   the table once per scan and _fetch_record attaches
+   record["mac"] when present (all adapters, incl. error
+   records). The grid's MAC column loses its dataGap flag.
+   S/N, chip BIN, PSU and board serials stay GAPs (no source).
+
+A real bug found by the new tests and fixed in this version:
+the first ARP regex used `[^0-9a-fA-F]*` between IP and MAC,
+which cannot cross words like "dev"/"lladdr" (they contain
+hex letters) — `ip neigh` and `arp -an` lines never matched.
+The parser now uses a lazy `.*?` with lookaround guards on
+the MAC token, and normalise_mac accepts 1–2-char octets.
+
+## Tests (mock_arp_test, 18 assertions)
+
+  mock_arp_test: 18 PASS / 0 FAIL (new — normalise 8,
+  parse 6, read-never-raises 2, live scan 2)
+  mock_groups_test: 41 PASS / 0 FAIL (39 + description
+  round-trip/default/non-string assertions)
+
+## Regression sweep (tests/run_mock_test_v35.sh)
+
+  mock_arp_test: 18 PASS / 0 FAIL (new)
+  mock_ipreport_test: 28 PASS / 0 FAIL
+  mock_views_test: 20 PASS / 0 FAIL
+  mock_vendors2_test: 59 PASS / 0 FAIL
+  mock_vendors_test: 51 PASS / 0 FAIL
+  mock_agent_bg_test: 52 PASS / 0 FAIL
+  mock_bridge_test: 24 PASS / 0 FAIL
+  mock_creds_test: 32 PASS / 0 FAIL
+  mock_groups_test: 41 PASS / 0 FAIL
+  mock_units_test: 50 PASS / 0 FAIL
+  mock_ops_test: 32 PASS / 0 FAIL
+  mock_ops2_test: 34 PASS / 0 FAIL
+  mock_inspect_test: 33 PASS / 0 FAIL
+  mock_pools_test: 43 PASS / 0 FAIL
+  mock_agent_app_test: 41 PASS / 0 FAIL
+
+Flutter (local SDK): main app analyze clean + flutter test
+159 PASS (incl. the groups editor test updated for the new
+description field — indices shifted, count 6 → 7, and the
+persisted description asserted); agent app analyze clean +
+flutter test 34 PASS.
+
+Version pins moved together: beesky 0.35.0, both .iss
+MyAppVersion 0.35.0, main pubspec 0.35.0+16, agent pubspec
+0.35.0+6, mock sysinfo + app version consts 0.35.0,
+release-pin suite now pins 0.35.0.
+
+(a) VERIFIED LOCALLY (this sandbox):
+  * Everything above: the ARP parse/read/attach path
+    (incl. the live scan against mock dashd with a canned
+    table), the group description round-trip on both sides,
+    the race-attempt constant by instruction trace, the full
+    mock sweep, both Flutter apps.
+  * The groups editor widget test was updated for the new
+    field (see above) — changed, not deleted silently.
+
+(b) VERIFIED ONLY BY CI:
+  * The Windows builds (build-flutter.yml /
+    build-windows.yml) for the tag; no workflow files
+    changed in this version.
+
+(c) HARDWARE / WINDOWS-UNCONFIRMED:
+  * MAC enrichment against a REAL farm scan: the parse +
+    attach path is verified, but no real miner MAC has come
+    through the ARP table yet (first farm scan will show
+    whether the column fills).
+  * The unlock residuals U-1..U-5 (docs/unlock-payload-
+    mapping.md §5) — unchanged, still session-gated.
+  * Everything carried over from v0.32–v0.34 (VNish ops
+    tail, Whatsminer token flow, LuxOS reads, IP-Report
+    wire, L9 chip-count check, Z15 raw SUMMARY).
+
+# v0.36.0 — Braiins + IceRiver adapters from open-source implementations
+
+The owner asked the direct question (2026-11-12 07:21): can
+Braiins and IceRiver be pulled out of an app after all? The
+Toolkit-app dissection route is exhausted for them (v0.33:
+AOT materials hold only enum names + cred tags). This leg
+mines established open-source miner-management libraries
+instead — pyasic (Upstream Data, Apache-2.0) as the prime
+source, asic-rs as the independent Braiins corroboration, and
+a real captured IceRiver packet (HackMD KS0 Ultra) as the
+worked example. Full record: docs/vendor-oss-mapping.md.
+
+## Verdicts
+
+| Family | Verdict | Evidence |
+|---|---|---|
+| Braiins OS (BOSMiner RPC) | IMPLEMENTED — detection + reads + pause/resume | CORROBORATED (Academy worked examples + pyasic + asic-rs) |
+| IceRiver | IMPLEMENTED — detection + reads + find_miner | CORROBORATED (pyasic + real packet + manuals) |
+| Jasminer / SunLune | GAP G-J1 — no OSS implementation exists | INSUFFICIENT |
+
+Coverage scoreboard: **9 real read adapters** of HashCore's
+15–16 (stock, vnish, whatsminer, avalon, luxos, braiins,
+iceriver + cgminer-generic). Parity-audit G-B1/G-I1 rows are
+closed by docs/vendor-oss-mapping.md (the audit doc itself,
+a v0.35 snapshot, is not rewritten).
+
+## Braiins OS — what the sources actually showed
+
+* Transport: TCP 4028, cgminer JSON envelope, no auth for
+  reads. The gRPC PAPI (port 50051) is NOT used — no stdlib
+  HTTP/2 + protobuf (mapping U-B3).
+* Fingerprint (the datum v0.33 lacked): every 4028 reply's
+  `STATUS[0].Description` is the build string — the Academy's
+  worked examples all show `"BOSminer+ 0.2.0-ea64aec8e"`.
+  Detection = case-insensitive "bosminer"/"boser" substring
+  in the `version` reply — pyasic's rule and asic-rs's rule,
+  identical. Non-collision re-run against stock, luxos,
+  whatsminer and avalon witnesses: all clean.
+* Reads: summary "MHS 1m" → native TH/s (pyasic's key);
+  pools (cgminer shape); fans RPM; temps (Chip/Board, IDs
+  6–8 with pyasic's offset rule); devdetails (Chips, Model);
+  devs ("MHS 1m"); tunerstatus power (ApproximateMinerPower-
+  Consumption) + chain states (non-stable → TUNER problem).
+* Actions: pause/resume only — the documented 4028 commands
+  (pyasic requires a PAUSE/RESUME section in the reply).
+  Reboot is NOT a 4028 command (pyasic reboots via SSH);
+  it stays honestly unsupported for braiins.
+
+## IceRiver — what the sources actually showed
+
+* Transport: HTTP :80. `POST /user/loginpost` (post=6,
+  admin/12345678) then `POST /user/userpanel` (post=4).
+  Login is best-effort (the HackMD author: no token needed
+  for the API); cookies ride along when the miner sets one.
+* Detection is two-gated: the console title
+  `<TITLE>用户界面</TITLE>` (cheap GET), then the panel-shape
+  gate (error == 0 + a data object carrying `softver1`).
+  The shape gate is decisive; the title alone never claims.
+* Reads from the captured KS0 Ultra packet (verbatim in
+  tests/mock_iceriver.py): rtpow "359G" + unit "G" → native
+  359 GH/s; boards (chipnum 18, intmp 48 as the chain temp);
+  fans [6079, 6079, 0, 0]; pools (addr/user/accepted/rejected,
+  connect/state) — pool `pass` is NEVER copied into the
+  record; mac; runtime "00:01:15:16" → 4516 s; model from
+  softver1 ("ICM168_3_2_14_ks0ultra_miner" → KS0ULTRA).
+  Power is NOT reported by the panel (G-I2).
+* Response-shape divergence (mapping U-I1, handled): the
+  real packet is `{"error": 0, "data": {...}}` while pyasic's
+  backend reads `["userpanel"]["data"]`. BeeSky accepts both;
+  the mock suite covers both shapes.
+* Actions: find_miner via locate (POST userpanel post=5
+  locate=1). Reboot: no documented endpoint. Pool-setting
+  (`/user/machineconfig`) exists in one source with a
+  `?`-separated query form — not trusted for writes (G-I3).
+* Probe password rule (found by the tests, not by design):
+  the implicit legacy pair root/root must NOT be tried for
+  IceRiver — on a device whose panel needs no login it would
+  "win" and record the wrong password. Only saved sets (in
+  family order) plus the factory default 12345678 are tried.
+
+## Jasminer — still a gap, checked twice
+
+No Jasminer backend, factory entry, model or web class in
+pyasic; no support in asic-rs; a web/GitHub search finds
+only the X4 user manual and Find-My-Miner, whose Jasminer
+fingerprint is explicitly "heuristic and firmware-dependent"
+(a `version` query on 4028 + hints), not a read API.
+`jasminer` stays a cred-family tag only.
+
+## Two real bugs found by the tests and fixed in this version
+
+1. The IceRiver probe tried the implicit root/root pair
+   first (see the password rule above) and recorded "root"
+   as the winning password. Fixed: only saved sets + the
+   factory default are tried.
+2. Both new mocks could not be respawned on the same port
+   (the TUNER-bad and wrapped-shape variants): the first
+   run's server-side connections sit in TIME_WAIT and a
+   listener without SO_REUSEADDR cannot rebind. Fixed:
+   both mocks now subclass their servers with
+   `allow_reuse_address = True` set before bind.
+
+## Tests
+
+* New suite mock_vendors3_test: **48 PASS / 0 FAIL**
+  (braiins detection + non-collision + record + pause/
+  resume + TUNER path; iceriver title/shape gates + both
+  response shapes + record + find_miner; jasminer gap).
+* Full sweep via tests/run_mock_test_v36.sh green at
+  established counts: arp 18, ipreport 28, views 20,
+  vendors2 59, vendors 51, agent_bg 52, bridge 24, creds 32,
+  groups 41, units 50, ops 32, ops2 34, inspect 33, pools 43,
+  agent_app 41.
+* Flutter: analyze clean in both apps; main 159/159,
+  agent 34/34 (sourceLabel gained braiins/iceriver; the
+  Tk gui.SOURCE_LABEL mirrors it).
+
+## Verification status
+
+(a) VERIFIED LOCALLY (this sandbox):
+  * Everything above: both adapters against their mocks
+    (incl. the TUNER-bad and wrapped-shape respawns), the
+    full mock sweep, both Flutter apps.
+  * The cgminer pools normaliser refactor (pools_normalised
+    now delegates to pools_normalised_from) — the luxos/
+    stock paths re-run green in the sweep.
+
+(b) VERIFIED ONLY BY CI:
+  * The Windows builds (build-flutter.yml /
+    build-windows.yml) for the tag; no workflow files
+    changed in this version.
+
+(c) HARDWARE / WINDOWS-UNCONFIRMED:
+  * Braiins reads on a real BOSMiner/BOSer machine — above
+    all the BOSer Description string (U-B1) and the
+    pause/resume reply shape (U-B2); a BOSer that dropped
+    the 4028 API entirely would not be detected.
+  * IceRiver reads on a real machine — the wrapped-vs-
+    top-level response shape per firmware generation (U-I1),
+    and whether loginpost enforces the password on newer
+    firmware (the panel works without it either way).
+  * Everything carried over from v0.32–v0.35 (VNish ops
+    tail, Whatsminer token flow, LuxOS reads, IP-Report
+    wire, L9 chip-count check, Z15 raw SUMMARY, unlock
+    residuals U-1..U-5).
+
+# v0.37.0 — ePIC adapter from Epic's own published material
+
+The ePIC family was the last cred-tag-only family with a
+published public contract (docs/epic-mapping.md). Unlike
+Braiins/IceRiver (v0.36: mined from OSS libraries), Epic
+publishes BOTH the API docs AND the dashboard that speaks
+them — so the spec source is Epic's own material: APIv2
+(epic-miner v4.0.0, SC200) + APIv3 (PowerPlay) plus the
+dashboard's connection code (src/portscan.js,
+src/app.jsx handleApi, src/tabs/ControlTab.jsx,
+src/tabs/FanTab.jsx). The dashboard is the ground truth
+where the docs use placeholders: it pins the PORT (4028,
+triple-corroborated), the POST bodies (incl. /coin's
+pool_url/login, /fanspeed as a number, /tune's string
+clks/voltage), and the one /miner value it ever sends
+("stop" — "start" stays UNKNOWN, resume NOT implemented).
+
+## Verdicts
+
+| Family | Verdict | Evidence |
+|---|---|---|
+| ePIC (Epic SC200, v4.0.0 / PowerPlay) | READ + CONTROL, docs + dashboard-verified | APIv2/APIv3 docs + dashboard code; mock from the doc shapes + dashboard payloads |
+| Jasminer | still a cred tag only | no public API spec, no captured packet, no adapter logic in the Toolkit AOT materials |
+
+Scoreboard: **10 real read adapters** (cgminer-generic,
+dashd for hashcore+oldVnish, bitmain stock, canaan,
+microBt, whatsminer-token, luxos, braiins, iceriver,
+epic). Jasminer is the only cred-tag-only family left.
+
+## What the adapter does
+
+* Transport: HTTP JSON to http://<ip>:4028/...; GETs need
+  no password; POSTs carry {"param": ..., "password": "..."}
+  and return {"result": bool, "error": string|null}.
+  Factory default password "letmein" (README, stated
+  twice); a cred set tagged "epic" supplies its password.
+* Detection (probe step 1c, after Whatsminer + cgminer
+  fail on the open 4028): GET /summary -> HTTP 200 + JSON
+  object with a non-empty Hostname + a Session object
+  carrying numeric "Average MHs" + an HBs list. The
+  Hostname prefix is NOT checked (the dashboard never
+  checks it). Non-collision: no other BeeSky family
+  serves HTTP JSON on 4028.
+* Reads: native rate MH/s from Session "Average MHs"
+  (gh_5s from LastAverageMHs); elapsed from Session
+  Uptime; power = PSU "Input Power" else sum of HBs
+  Input Power else sum of Output Power; chains from
+  HBs[] with Index verbatim; temps per board; fans as a
+  percentage only (no rpm pretence — fan_speed_pct);
+  pools from StratumConfigs (current pool "Alive" while
+  IsPoolConnected, standby pools "Dead" — dashboard
+  shows no per-pool liveness either); chips 0/0 (the
+  API has no chip counts); extras: hostname, coin,
+  accepted/rejected, hb_status.
+* Controls (all POST, all verified against the
+  dashboard's handleApi): reboot / softreboot (delay 0 =
+  instant), /miner "stop" (pause_mining; resume is
+  honestly unsupported — no verified "start" value),
+  /identify (find_miner), /mode (set_preset: preset +
+  power_target), /coin (switch_pool: reads /summary
+  first, replaces one slot, re-sends the rest
+  unchanged, max 3), /password (change_password),
+  /power (set_power_target), /shutdowntemp, /fanspeed
+  (1–100 int), /tune (clock MHz + voltage mV as
+  strings). Wrong passwords are refused with the
+  miner's error verbatim; missing payload values fail
+  client-side, never silently default.
+
+## UNKNOWNs (mapping U-E1..U-E6, not guessed)
+
+* U-E1 canonical payload bytes — docs show
+  placeholders; shapes are the docs' + dashboard's.
+* U-E2 model strings beyond SC200.
+* U-E3 /miner "start" — resume NOT implemented.
+* U-E4 /tune/voltage + /tune/clock/all formats.
+* U-E5 /hashrate as a chip-count candidate.
+* U-E6 whether v2 serves /hashrate + /temps +
+  /voltages (v3-only in the docs).
+* Not wired (safety / firmware / destructive scope):
+  /network, /systemupdate, /defaultconfig,
+  /hwconfig, /clearhashrate.
+
+## Tests
+
+* New suite mock_vendors4_test: **45 PASS / 0 FAIL**
+  (detection incl. non-collision rerun vs stock /
+  LuxOS / Braiins / Whatsminer witnesses, record
+  fields/units, control request shapes, auth handling,
+  honest refusals, inspect tabs, jasminer-still-a-gap).
+* Full regression sweep (tests/run_mock_test_v37.sh):
+  vendors4 45, vendors3 48, arp 18, ipreport 28,
+  views 20, vendors2 59, vendors 51, agent_bg 52,
+  bridge 24, creds 32, groups 41, units 50, ops 32,
+  ops2 34, inspect 33, pools 43, agent_app 41 —
+  all green.
+* Flutter: analyze clean both apps; main 159 tests,
+  agent 34 tests, all green (one stale pinned key
+  list in vendors_test.dart updated for the new
+  'epic' family label).
+
+## Verification status
+
+(a) VERIFIED LOCALLY (this sandbox):
+  * Everything above: the ePIC adapter against the
+    doc-shaped mock (incl. wrong-password refusals
+    and the dashboard-shaped control bodies), the
+    full mock sweep, both Flutter apps.
+
+(b) VERIFIED ONLY BY CI:
+  * The Windows builds (build-flutter.yml /
+    build-windows.yml) for the tag; no workflow files
+    changed in this version.
+
+(c) HARDWARE / WINDOWS-UNCONFIRMED:
+  * ePIC reads + controls on a real SC200 / PowerPlay
+    machine — above all U-E3 (is there a /miner
+    "start"?) and U-E6 (does v2 serve /hashrate?).
+    A real /capabilities reply would close U-E2.
+  * Everything carried over from v0.32–v0.36
+    (VNish ops tail, Whatsminer token flow, LuxOS /
+    Braiins / IceRiver reads, IP-Report wire, L9
+    chip-count check, Z15 raw SUMMARY, unlock
+    residuals U-1..U-5).
+
+# v0.38.0 — Auradine + SealMiner adapters from the vendors' own material
+
+The Toolkit re-mining (docs/vendor-remining.md §2) found
+three NEW vendor families in the CLI's --fw-type enum:
+auradine (556 hits), epic (closed as v0.37), pit-bit (19),
+sealminer (6). This version closes two of the three from
+the vendors' own published material
+(docs/vendor-docs2-mapping.md): Auradine and SealMiner
+are both implemented in the two established open-source
+miner libraries, asic-rs and pyasic, which agree on
+transport, auth and every control body — CORROBORATED —
+and the Auradine Hardware Reference confirms the ports.
+Pit-Bit stays a named gap (G-PB1): it is a custom
+Antminer firmware, not a hardware vendor, and no doc,
+no OSS implementation and no fingerprint literal exists
+anywhere — a Pit-Bit machine is already readable by the
+stock/cgminer path, only the "pit-bit" label is missing.
+
+## Verdicts
+
+| Family | Verdict | Evidence |
+|---|---|---|
+| Auradine (Teraflux AT1500/AT2870/AT2880/AI2500/AI3680/AH3880) | READ + CONTROL | asic-rs RPC+web backends with real test-JSON fixtures + pyasic backends, CORROBORATED; hardware reference confirms ports 80/443/4028/8443 |
+| SealMiner (Bitdeer A2, A3 Pro Hydro) | READ + CONTROL | asic-rs RPC+web backends with real test-JSON fixtures + Bitdeer setup guides for the web-UI facts |
+| Pit-Bit | still a gap (G-PB1) | no vendor doc, no OSS implementation in pyasic or asic-rs, no fingerprint literal; Toolkit trace is only `PitBitApiSession.fromBitmainSession` (it speaks the stock protocol) |
+
+Scoreboard: **12 real read adapters** (cgminer-generic,
+dashd for hashcore+oldVnish, bitmain stock, canaan,
+microBt, whatsminer-token, luxos, braiins, iceriver,
+epic, auradine, sealminer). Jasminer + pit-bit are the
+only families without a read adapter; pit-bit has no
+cred tag either (its sets are tagged "stock", the
+protocol it speaks).
+
+## What the adapters do
+
+* Auradine — transport: cgminer RPC on TCP 4028
+  ({"command": ...}\n, STATUS array) + web HTTP :8080
+  with token auth (POST /token {"command": "token",
+  "user", "password"} -> token at /Token/0/Token;
+  later requests carry a `Token` header; a 401 or a
+  TOKEN/SESSION/EXPIRED/UNAUTHORIZED error re-auths
+  once and retries). Default auth admin/admin (both
+  libraries agree). Detection: the `version` reply
+  contains "gcminer" or "fluxos" (case-insensitive —
+  D-AU1: asic-rs checks case-sensitively but its own
+  fixtures carry "GCMiner"/"FluxOS"). Reads: native
+  rate MH/s from summary "MHS 5s"/"MHS av" (rate_value
+  = MHS av / 1e6 TH/s); boards from devs (temp) +
+  asccount (396 chips / 3 boards = 132/board, asic-rs
+  expected-minus-failed rule over the temperature /
+  voltage / frequency chip data); fans rpm from web
+  fan; power = summary Wattage else PSU PowerIn parsed
+  from its units string ("58.94W"); pools from RPC
+  pools (cgminer shape); hostname/MAC/serial from web
+  ipreport; board temp spread (min/max of BoardTemp)
+  rides board_temp_min_c / board_temp_max_c. Controls
+  (all web POST, token auth): reboot (restart, no
+  params), restart_mining (restart, param "gcminer"),
+  pause/resume (mode {"sleep": "on"/"off"}),
+  find_miner (led {"code": 3} on / 2 off),
+  set_power_target (mode {"mode": "custom", "tune":
+  "power", "power": <watts>}), switch_pool
+  (updatepools {"pools": [{url, user, pass}]}, max 3,
+  empty password becomes "x"; reads the current RPC
+  pools first, replaces one slot, re-sends the rest).
+  set_fan_speed is NOT wired — only a per-fan form
+  exists and BeeSky's task carries no fan selector.
+* SealMiner — transport: cgminer RPC on TCP 4028 +
+  web HTTP :80 CGI (POST /cgi-bin/login.php with form
+  username=<user>&origin_pwd=<pass> +
+  X-Requested-With -> session cookie; later calls are
+  GET/POST /cgi-bin/<command>.php with a Cookie
+  header). Default auth seal/seal (asic-rs code;
+  D-SE2: the setup guides disagree on case).
+  Detection: the `version` reply contains "bdminer"
+  (case-insensitive — D-SE1: asic-rs checks
+  case-sensitively but its fixtures carry "bdminer
+  4.11.1" / "BDMiner"). The "amazeui" web fingerprint
+  is NOT used (U-SE1, suspected Avalon collision).
+  Reads: native rate MH/s from summary "MHS 5s"/"MHS
+  av"; boards from the flat stats object ("<n> Chip
+  Count" minus "<n> Bad Chip Count", temp = max of
+  the non-zero "<n> Temp 0..3", intake = first,
+  outlet = last); fans rpm from "<n> Speed" for n in
+  0.."Fan Count" (4 in the fixture); power = stats
+  "PSU Input Power" else web miner_psu_status Power;
+  pools from RPC pools; MAC from stats, serial from
+  "Ctrl Board SN". Controls: reboot (web GET
+  reboot.php), pause (RPC ascset "0,suspend"), resume
+  (stats PM State == "Running" -> no-op success, else
+  RPC restart — asic-rs's own guard), find_miner (web
+  POST led_conf.php {"key": "led", "value":
+  "on"|"off"}), set_power_target (RPC ascset
+  "0,powerlimit,{\"value\":\"<watts>\"}", success =
+  STATUS S + Code 119), set_mining_mode (new command
+  type; RPC ascset "0,workmode,{\"mode\":
+  "low_power"|"normal"|"high_performance"}";
+  low_power is A2-only — the model is read from
+  devdetails first and an unreadable model refuses
+  rather than guessing), switch_pool (RPC updatepools
+  with the parameter as a JSON STRING, then a web
+  reboot fire-and-forget). restart_mining is honestly
+  unsupported (asic-rs's impl is empty); change
+  password / logs / factory reset / firmware upgrade
+  are unsupported by the vendor's own client.
+* Probe: both are refinements on the SAME `version`
+  reply as LuxOS/Braiins inside the cgminer claim
+  (after the Avalon refinement) — one extra call the
+  probe already pays for. Non-collision rerun covers
+  stock, LuxOS, Braiins, Whatsminer, Epic and
+  IceRiver witnesses.
+* Cred tags "auradine" + "sealminer" added (CRED_TYPES);
+  the ops password rule is the whatsminer/luxos one
+  (winning set's password, else the factory default);
+  the SealMiner web CGI rides the candidate's
+  http_port (80 on a real miner), the Auradine web
+  API rides its fixed vendor port 8080. New ops
+  command type "set_mining_mode" (SealMiner only).
+  Flutter labels added (sourceLabel + cred type
+  labels); the ops UI needs no change (the epic-only
+  controls were never exposed there either).
+
+## UNKNOWNs (mapping U-AU1..U-AU5, U-SE1..U-SE4, not guessed)
+
+* U-AU1 exact canonical payload bytes (fixtures are
+  asic-rs test captures, not a live-miner session).
+* U-AU2 the :8443 REST API shapes (known to exist,
+  no endpoint evidenced).
+* U-AU3 fixture rate magnitudes (look like a dev
+  unit; units are MH/s per convention).
+* U-AU4 board/chip counts for AT2870/AD2500/AD3500
+  (Unknown fallback covers; devdetails + asccount
+  report the real counts at runtime).
+* U-AU5 web STATUS descriptions vary by endpoint
+  ("2.2.0" vs "GCMiner-…" vs "FluxOS-…") — no impact.
+* U-SE1 the "amazeui" web fingerprint (not used).
+* U-SE2 exact canonical payload bytes (same caveat
+  as U-AU1).
+* U-SE3 the web numeric mining-mode values (the RPC
+  ascset form is wired instead).
+* U-SE4 PM State values other than "Running".
+* Not wired (safety / firmware / destructive scope):
+  Auradine factory-reset, firmware_upgrade,
+  set_network, set_psu, register, restart_api_server;
+  SealMiner change_password, logs, factory reset,
+  firmware upgrade.
+* A mock-construction note, recorded in the mapping
+  doc: neither library ships a devdetails fixture,
+  so both mocks construct a minimal devdetails reply
+  carrying ONLY the field the client reads
+  (/DEVDETAILS/0/Model) with the value evidenced in
+  the ipreport/sysinfo fixtures ("AT1500" / "A2").
+
+## Tests
+
+* New suite mock_vendors5_test: **91 PASS / 0 FAIL**
+  (detection incl. fingerprint units + non-collision
+  rerun vs stock / LuxOS / Braiins / Whatsminer /
+  Epic / IceRiver witnesses, record fields/units for
+  both families, every wired control with its exact
+  request body, token-expiry re-auth, the resume
+  no-op + restart branches, the low_power A2 gate,
+  wrong-password refusals, inspect tabs,
+  pit-bit-still-a-gap).
+* Full regression sweep (tests/run_mock_test_v38.sh):
+  vendors5 91, vendors4 45, vendors3 48, arp 18,
+  ipreport 28, views 20, vendors2 59, vendors 51,
+  agent_bg 52, bridge 24, creds 32, groups 41,
+  units 50, ops 32, ops2 34, inspect 33, pools 43,
+  agent_app 41 — all green.
+* Flutter: analyze clean both apps; main 159 tests,
+  agent 34 tests, all green (one stale pinned key
+  list in vendors_test.dart updated for the two new
+  family labels, same as v0.37's epic update).
+
+## Verification status
+
+(a) VERIFIED LOCALLY (this sandbox):
+  * Everything above: both adapters against the
+    fixture-verbatim mocks (incl. wrong-password
+    refusals, the exact control bodies, the token
+    re-auth, the A2 gate and the resume branches),
+    the full mock sweep, both Flutter apps.
+
+(b) VERIFIED ONLY BY CI:
+  * The Windows builds (build-flutter.yml /
+    build-windows.yml) for the tag; no workflow files
+    changed in this version.
+
+(c) HARDWARE / WINDOWS-UNCONFIRMED:
+  * Auradine reads + controls on a real Teraflux
+    machine — above all U-AU1 (one real reply) and
+    U-AU3 (fixture rate magnitudes), plus the
+    :8443 REST API (U-AU2) and the AT2870/AD
+    board counts (U-AU4).
+  * SealMiner reads + controls on a real A2 / A3 Pro
+    Hydro — above all U-SE2 (one real reply), the
+    web numeric mining-mode values (U-SE3), and the
+    PM State values beyond "Running" (U-SE4).
+  * Everything carried over from v0.32–v0.37
+    (VNish ops tail, Whatsminer token flow, LuxOS /
+    Braiins / IceRiver / ePIC reads, IP-Report wire,
+    L9 chip-count check, Z15 raw SUMMARY, unlock
+    residuals U-1..U-5).
+
+# v0.39.0 — Full desktop UI/UX redesign: BeeSky Cloud Light
+
+Redesign, not rebuild (owner's master prompt, spec in
+docs/redesign-mapping.md): the Flutter Miner Scanner and
+the Flutter agent app move from dark graphite to the
+"BeeSky Cloud Light × Linear × Modern Windows 11 Fluent
+UI" light theme. ALL functionality, scanning logic, APIs,
+data models and persistence are preserved; the Python
+core is untouched (no core file changed in this version).
+
+## What changed
+
+* Design tokens (app_flutter/lib/theme.dart and
+  app_agent_flutter/lib/theme.dart): Brand Primary
+  #FFE000, Hover #F5D200, Text Primary #202A28, Text
+  Secondary #7B8877, App Background #F7F8F4, Sidebar
+  #FFFFFF, Surface #FFFFFF, Border #E0E5D9, Active Nav
+  #FFF1B7, Success #16A34A, Warning #F59E0B, Error
+  #DC2626, Info #2563EB. Same constant names as before
+  (bg/panel/border/accent/text/muted/ok/warn/bad/hotTemp/
+  selectBg + new brandHover, activeNav, info, surface,
+  accentInk #7A5A00), so the ~281 BeeSkyColors call sites
+  flip with the theme file alone. Contrast rule: pure
+  #FFE000 is fill/border only, never small text on white
+  — every accent-as-text site moved to accentInk.
+  Radii: card 16→12, widget 12→8, pill 999.
+  ThemeData.light, fontFamilyFallback [Inter, 'Segoe UI',
+  Roboto] (Inter is a fallback NAME, not a bundled font
+  — Segoe UI renders on Windows; no new dependencies).
+  GlassCard restyled: white surface, 1px #E0E5D9 border,
+  one soft shadow, no rim light. Helpers added: numStyle
+  (tabular figures) + monoStyle (Consolas/Courier New);
+  IP column is now monospace semibold.
+* Application shell (home_page.dart): sidebar 228→188px
+  white with section captions (QUẢN LÝ / THEO DÕI /
+  HỆ THỐNG), active nav = #FFF1B7 bg + dark text/icon
+  (was accent tint + yellow text); breadcrumb helper
+  ("BeeSky / <page>", 11px muted) + connection pill in
+  the miners/groups headers; page titles 20→22px;
+  footer status bar (readiness dot + scan status; the
+  engine version is shown once, in the sidebar footer,
+  not repeated in the status bar). Stale "SAU" comment
+  fixed — all 7 views are implemented since v0.32.
+  Logo subtitle 'QUẢN LÝ MÁY ĐÀO' re-set to 9px/0
+  letter-spacing: 10px/1.6 clipped at the 188px sidebar
+  on wide Linux fonts (verified in the screenshots).
+* Views (views.dart): heat-band scale goes pastel
+  (<60 #D1FAE5, <70 #FEF9C3, <80 #FDE68A, <90 #FED7AA,
+  ≥90 #FECACA, no-reading #E5E7EB) with dark text on all
+  tiles, same thresholds; tile sub-text white 85% →
+  dark 70%; viewHeader 22px + breadcrumb.
+* Selection/toggles: _segmented/_miniToggle selected →
+  #FFF1B7 bg + dark text + amber border; 'MỚI' pill →
+  amber ink on #FFF1B7; sort indicator, overview cell
+  border, ops progress icon, MiniChart line, overview
+  check icon → accentInk; _statusChip tints updated to
+  the new hues; ops/presets dialogs' accent text →
+  accentInk.
+* Detail panel (home_page.dart): the note tab's 'Lưu
+  ghi chú' button moved OUT of the scroll view into a
+  fixed action row at the panel bottom (sticky save —
+  a genuine UX fix: the primary action stays reachable
+  without scrolling at any window height). This also
+  fixed the detail_test note test, which the redesign's
+  taller header had pushed below the fold at 1280×800.
+  Header padding trimmed 16→12 top / 12→10 bottom in
+  the miners + groups headers to recover the breadcrumb's
+  height.
+* Agent app: same light tokens applied to its surfaces
+  only — layout and behaviour unchanged, so the product
+  stays consistent.
+* No oversized KPI cards anywhere (standing ban kept);
+  dense, table-first layout preserved throughout.
+
+## Screenshots (real Flutter render, mock data, 2560×1600)
+
+Linux build (temporary local-only linux/ runner, removed
+before commit) run under Xvfb :99 with --dart-define=
+BEESKY_MOCK=1, driven by XTest clicks + the Ctrl+R rescan
+hotkey; full-window captures in
+~/workspace/beesky-demo/redesign-v39/:
+
+* 01-groups.png — Nhóm mạng (2 demo groups, IP Report panel)
+* 02-miners.png — Máy đào, mock scan filled: 5 miners in
+  254 addresses (3.4 s), S19 Pro detail open (Số liệu tab)
+* 03-detail.png — WhatsMiner M30S detail, OVER_TEMP problem
+  card (chain 2: 87 °C >= 85 °C limit), per-board temps
+* 04-settings.png — Cài đặt, 5 tabs (Chung/Tài khoản/Thời
+  gian chờ/Nhật ký/Nâng cao), zoom 100%, IP Report toggle
+
+Driver scripts kept beside the shots (shoot*.py).
+
+## Tests
+
+* flutter analyze: clean in BOTH apps.
+* flutter test: main **159/159**, agent **34/34** — all
+  green. Two tests broke during the redesign and were
+  fixed by fixing the UI, not by weakening the tests:
+  widget_test "BeeSky v0.38.0" expected once (footer
+  status bar duplicated the sidebar footer's version —
+  version removed from the status bar) and detail_test
+  note save (button below the fold — sticky save row).
+  Test pins updated for the new heat-band hexes
+  (views_test.dart, 6 expects) and the version bump
+  (widget_test, views_test, ipreport_test).
+* Full regression sweep (tests/run_mock_test_v38.sh):
+  vendors5 91, vendors4 45, vendors3 48, arp 18,
+  ipreport 28, views 20, vendors2 59, vendors 51,
+  agent_bg 52, bridge 24, creds 32, groups 41,
+  units 50, ops 32, ops2 34, inspect 33, pools 43,
+  agent_app 41 — all green. Core untouched.
+
+## Version bump
+
+0.38.0 → 0.39.0 everywhere the pin suite checks:
+beesky/__init__.py, app_flutter/pubspec.yaml
+(0.39.0+20), app_agent_flutter/pubspec.yaml (0.39.0+10),
+app_flutter/lib/models.dart (beeskyAppVersion),
+app_flutter/lib/sidecar.dart (mock SysInfo version),
+app_agent_flutter/lib/agent_config.dart
+(agentAppVersion), packaging/installer.iss +
+packaging/agent.iss (MyAppVersion), tests/
+mock_agent_bg_test.py (pin suite). The pin suite
+("versions in sync at 0.39.0") passes.
+
+## Verification status
+
+(a) VERIFIED LOCALLY (this sandbox):
+  * Everything above: both Flutter apps (analyze + full
+    test suites), the full mock sweep, and the four
+    screenshots — real rendered output of the redesigned
+    UI with mock data, screenshot-verified (Groups /
+    Miners / Detail / Settings), including the live mock
+    scan filling the table and the detail panel opening.
+  * The Linux build needed the sandbox toolchain first:
+    ninja-build + clang + libgtk-3-dev (apt; libzstd1
+    downgraded 1.5.5+dfsg2-2build1.1+hatch1 → archive
+    1.5.5+dfsg2-2build1.1 to unbreak the gtk-3-dev
+    install). These are VM packages, not repo changes.
+  * A screenshot-driving note, not an app bug: XTest
+    clicks at coordinates estimated from downscaled
+    views missed the buttons by ~50–60px; coordinates
+    measured from the full-res renders (button bands
+    located by pixel scan) land correctly, and the
+    Ctrl+R hotkey independently proved the scan path.
+
+(b) VERIFIED ONLY BY CI:
+  * The Windows builds (build-flutter.yml /
+    build-windows.yml) for the tag; no workflow files
+    changed in this version. `flutter build windows`
+    cannot run on this Linux VM.
+
+(c) HARDWARE / WINDOWS-UNCONFIRMED:
+  * The redesign on real Windows (Segoe UI rendering,
+    real beesky.exe sidecar, real miners): the Linux
+    render uses DejaVu Sans (no Segoe UI on Linux) and
+    the mock bridge — layout, colours and states are
+    verified, font metrics on Windows will differ
+    slightly (the logo subtitle was set with margin:
+    9px/0 spacing fits the 188px sidebar on both).
+  * Inter is a fallback name, not a bundled font — if
+    Anh wants the exact Inter look on Windows, the font
+    files must be bundled (a new asset, not done here).
+  * Everything carried over from v0.32–v0.38 (vendor
+    adapters, VNish ops tail, Whatsminer token flow,
+    LuxOS / Braiins / IceRiver / Epic reads, IP-Report
+    wire, L9 chip-count check, Z15 raw SUMMARY, unlock
+    residuals U-1..U-5, Jasminer + Pit-Bit gaps).
+
+## Known limitations / minor notes
+
+* Settings "Chung" tab: the two fields under "Quét &
+  điện" sit close together — the "Giá điện (VNĐ/kWh)"
+  floating label nearly touches the field above. It is
+  the pre-existing field spacing (not changed by this
+  redesign), not an overflow; left as-is.
+* Detail panel title shows the model name twice for the
+  mock S19 Pro ("Antminer S19 Pro Pro") — pre-existing
+  mock-sample quirk, not the redesign.

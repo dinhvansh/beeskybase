@@ -9,9 +9,32 @@
                                    (--json with no FILE prints one JSON
                                     document to stdout — the Flutter
                                     shell's sidecar bridge, v0.21)
+    python -m beesky scan --group NAME [--creds-file sets.json]
+                                   [--groups-file beesky-groups.json]
+                                   (the group's targets + credential
+                                    sets lead; last_scan is persisted)
+    python -m beesky groups [--groups-file FILE]
+                                   list | add --name N --targets T |
+                                   remove NAME | show NAME |
+                                   export FILE | import FILE
+                                   (network groups, v0.24 —
+                                    docs/network-groups-mapping.md)
 
     python -m beesky sysinfo [--json]  (version + auto-detected default
                                         scan target; --json for machines)
+
+    python -m beesky inspect <ip> [--json] [--creds-file sets.json]
+                                   [--group NAME] [--groups-file FILE]
+                                   (one-device deep fetch — pools /
+                                   fans / per-board detail for the
+                                   detail tabs; v0.27,
+                                   docs/device-detail-mapping.md)
+
+    python -m beesky ops --job FILE   (one Operations task — rescan /
+                                        reboot / switch_pool — over a
+                                        job file's targets, streaming
+                                        NDJSON progress; v0.26,
+                                        docs/operations-mapping.md)
 
     python -m beesky watch <target> [--interval 30] [--notify config.json]
                                     [--state state.json] [--once]
@@ -36,7 +59,14 @@
                                    [--force-file PATH] [--relaunch]
                                    (signed self-update, docs/updating.md)
 
-    python -m beesky fw identify <ip> [--ssh-user root]
+    python -m beesky ipreport listen [--port 14235] [--no-whatsminer]
+                                   [--out FILE] [--duration SECONDS]
+                                   [--allow-loopback]
+                                   (listen for miners' hardware IP-Report
+                                    broadcasts, NDJSON reports to stdout;
+                                    v0.34, docs/ipreport-mapping.md)
+    python -m beesky ipreport list --file FILE [--json]
+                                   (read persisted reports)
                                    [--ssh-password-env VAR] [--ssh-key F]
     python -m beesky fw install <ip> <firmware-file> [--yes]
                                    [--wait-minutes 5] (VNish API or stock CGI)
@@ -50,55 +80,61 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import secrets
+import signal
 import sys
+import threading
 import time
+from datetime import datetime
 from pathlib import Path
 
 from . import __version__
 from .agent import AgentService
 from .cloud.server import run_cloud_server
 from .cloud.store import CloudStore
+from .core import arp as arp_mod
 from .core import firmware as firmware_mod
+from .core import groups as groups_mod
+from .core import inspect as inspect_mod
+from .core import ipreport as ipreport_mod
+from .core import ops as ops_mod
 from .core import notify as notify_mod
 from .core import report
 from .core import updater
+from .core.auradine import AuradineClient, AuradineError
 from .core.bitmain import BitmainClient, BitmainError
+from .core.braiins import BraiinsClient, BraiinsError
 from .core.cgminer import CgminerClient, CgminerError
 from .core.dashd import DashdClient, DashdError
-from .core.discover import (Candidate, default_scan_target, discover,
-                            parse_targets, probe_host)
+from .core.epic import EpicClient, EpicError
+from .core.discover import (CRED_TYPES, Candidate, default_scan_target,
+                            discover, parse_targets, probe_host)
+from .core.iceriver import (DEFAULT_PASSWORD as ICERIVER_DEFAULT_PASSWORD,
+                            IceRiverClient, IceRiverError)
+from .core.sealminer import SealMinerClient, SealMinerError
+from .core.whatsminer import WhatsminerClient, WhatsminerError
 from .core.events import EventEngine
 from .web.server import MonitorService, run_server
 
 
-def _load_creds_file(path: str) -> list[dict]:
-    """Read a --creds-file: a JSON list of credential sets (v0.23).
+def _normalise_creds(data: list, source: str) -> list[dict]:
+    """Normalise raw credential-set entries (v0.23 schema).
 
-    Schema: [{"label": "...", "user": "...", "password": "...",
-    "type": "any"|"stock"|"vnish", "api_key": "..."}, ...]. An entry
-    needs a login+password pair OR an "api_key" (the VNish API-key
-    unlock method — HashCore keys methods per vendor the same way).
+    Shared by --creds-file loading and by network-group creds
+    (v0.24 — a group's embedded sets are the same schema, checked
+    with the same rules and the same messages). An entry needs a
+    login+password pair OR an "api_key" (the VNish API-key unlock
+    method — HashCore keys methods per vendor the same way).
     "label" defaults to the user name (or "api_key"); a
-    missing/unknown "type" normalises to "any". Raises ValueError
-    with an operator-readable message — a typo'd file must fail
-    loud, never silently scan with wrong logins.
+    missing/unknown "type" normalises to "any".
     """
-    try:
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"cannot read creds file {path}: {exc}") from exc
-    if not isinstance(data, list):
-        raise ValueError(
-            f"creds file {path}: top level must be a JSON list of "
-            "{\"label\", \"user\", \"password\", \"type\"} objects")
     creds: list[dict] = []
     for idx, item in enumerate(data):
         if not isinstance(item, dict):
-            raise ValueError(
-                f"creds file {path}: entry {idx} must be an object")
+            raise ValueError(f"{source}: entry {idx} must be an object")
         user = item.get("user")
         secret = item.get("password")
         api_key = item.get("api_key")
@@ -106,7 +142,7 @@ def _load_creds_file(path: str) -> list[dict]:
         has_key = isinstance(api_key, str) and bool(api_key)
         if not has_login and not has_key:
             raise ValueError(
-                f"creds file {path}: entry {idx} needs string "
+                f"{source}: entry {idx} needs string "
                 "\"user\" + \"password\", or an \"api_key\"")
         label = item.get("label")
         raw_type = item.get("type")
@@ -116,9 +152,29 @@ def _load_creds_file(path: str) -> list[dict]:
             "user": user if isinstance(user, str) else "",
             "password": secret if isinstance(secret, str) else "",
             "api_key": api_key if has_key else None,
-            "type": raw_type if raw_type in ("stock", "vnish") else "any",
+            "type": raw_type if raw_type in CRED_TYPES else "any",
         })
     return creds
+
+
+def _load_creds_file(path: str) -> list[dict]:
+    """Read a --creds-file: a JSON list of credential sets (v0.23).
+
+    Schema: [{"label": "...", "user": "...", "password": "...",
+    "type": <family tag — discover.CRED_TYPES>, "api_key": "..."},
+    ...]. Raises ValueError with an operator-readable message — a
+    typo'd file must fail loud, never silently scan with wrong
+    logins.
+    """
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot read creds file {path}: {exc}") from exc
+    if not isinstance(data, list):
+        raise ValueError(
+            f"creds file {path}: top level must be a JSON list of "
+            "{\"label\", \"user\", \"password\", \"type\"} objects")
+    return _normalise_creds(data, f"creds file {path}")
 
 
 def _scan_creds(args: argparse.Namespace) -> list[dict] | None:
@@ -151,10 +207,76 @@ def _validate_creds(args: argparse.Namespace, command: str) -> int | None:
     return None
 
 
-def _fetch_record(cand: Candidate, args: argparse.Namespace) -> dict:
+def _fetch_record(cand: Candidate, args: argparse.Namespace,
+                  arp_table: dict | None = None) -> dict:
     """Pull full health data for one candidate via its claiming adapter."""
     ip, timeout = cand.ip, max(args.timeout, 2.0)
-    if cand.source == "vnish":
+    if cand.source == "whatsminer":
+        # MicroBT socket dialect (v0.30) — anonymous reads, so
+        # never a cred_label (the probe may have set one only if a
+        # set was tagged for the family; the label rule below is
+        # generic and stays).
+        client = WhatsminerClient(ip, port=cand.cgminer_port,
+                                  timeout=timeout)
+        try:
+            record = client.fetch_record(ip)
+        except WhatsminerError as exc:
+            record = report.error_record(ip, str(exc),
+                                         source="whatsminer")
+    elif cand.source == "braiins":
+        # Braiins OS BOSMiner RPC (v0.36.0) — no auth for reads.
+        client = BraiinsClient(ip, port=cand.cgminer_port,
+                               timeout=timeout)
+        try:
+            record = client.fetch_record(ip)
+        except BraiinsError as exc:
+            record = report.error_record(ip, str(exc),
+                                         source="braiins")
+    elif cand.source == "iceriver":
+        # IceRiver web API (v0.36.0) — the probe's winning
+        # password rides the candidate; the factory default is
+        # the fallback when the probe never ran (direct fetch).
+        client = IceRiverClient(
+            ip, port=cand.http_port, timeout=timeout,
+            password=cand.iceriver_password or DEFAULT_PASSWORD)
+        try:
+            record = client.fetch_record(ip)
+        except IceRiverError as exc:
+            record = report.error_record(ip, str(exc),
+                                         source="iceriver")
+    elif cand.source == "epic":
+        # ePIC HTTP JSON API on 4028 (v0.37.0) — GET reads need
+        # no password, so the fetch never carries one.
+        client = EpicClient(ip, port=cand.cgminer_port,
+                            timeout=timeout)
+        try:
+            record = client.fetch_record(ip)
+        except EpicError as exc:
+            record = report.error_record(ip, str(exc),
+                                         source="epic")
+    elif cand.source == "auradine":
+        # Auradine RPC 4028 + web :8080 (v0.38.0) — reads need
+        # no auth, so the fetch never carries one.
+        client = AuradineClient(ip, port=cand.cgminer_port,
+                                timeout=timeout)
+        try:
+            record = client.fetch_record(ip)
+        except AuradineError as exc:
+            record = report.error_record(ip, str(exc),
+                                         source="auradine")
+    elif cand.source == "sealminer":
+        # SealMiner RPC 4028 + web CGI :80 (v0.38.0) — the web
+        # CGI lives on the HTTP port, so it rides the
+        # candidate's http_port (80 on a real miner).
+        client = SealMinerClient(ip, port=cand.cgminer_port,
+                                 web_port=cand.http_port,
+                                 timeout=timeout)
+        try:
+            record = client.fetch_record(ip)
+        except SealMinerError as exc:
+            record = report.error_record(ip, str(exc),
+                                         source="sealminer")
+    elif cand.source == "vnish":
         client = DashdClient(ip, port=cand.http_port, timeout=timeout,
                              api_key=args.api_key or cand.dashd_api_key,
                              token=args.token or cand.dashd_token)
@@ -176,20 +298,40 @@ def _fetch_record(cand: Candidate, args: argparse.Namespace) -> dict:
             record = report.error_record(ip, str(exc), source="stock")
     else:
         # cgminer RPC (also the fallback for port-open-but-silent
-        # candidates) — no auth, so never a cred_label.
+        # candidates; "avalon" is the same wire with the Canaan
+        # refinement the probe applied, "luxos" the same wire with
+        # the LUXminer version refinement, v0.33.0) — no auth, so
+        # never a cred_label.
+        source = cand.source if cand.source in ("avalon", "luxos") \
+            else "cgminer"
         client = CgminerClient(ip, port=cand.cgminer_port, timeout=timeout)
         try:
             summary = client.summary()
-            stats = client.stats()
+            stats = cand.stats_data or client.stats()
         except CgminerError as exc:
-            record = report.error_record(ip, str(exc), source="cgminer")
+            record = report.error_record(ip, str(exc), source=source)
         else:
-            record = report.build_record(ip, summary, stats, source="cgminer")
+            record = report.build_record(ip, summary, stats, source=source)
+            # Pool enrichment (v0.28): one extra RPC call of the
+            # same class/timeout as summary+stats; its failure
+            # omits the field, never the record (docs/presets-
+            # ipreport-mapping.md §4).
+            pools = client.pools_normalised()
+            if pools is not None:
+                record["pools"] = pools
     # The winning set's label rides the record (v0.23) so the apps can
     # show which login a machine line uses; error records and RPC /
     # default-cred records stay label-free.
     if cand.cred_label and not _is_error_record(record):
         record["cred_label"] = cand.cred_label
+    # MAC from the host's ARP cache (v0.35): the scan just talked to
+    # this IP over TCP, so the cache holds its MAC. Best-effort —
+    # a missing entry leaves the record without "mac" (the grid
+    # shows "—"), never a failed record.
+    if arp_table:
+        mac = arp_table.get(ip)
+        if mac:
+            record["mac"] = mac
     return record
 
 
@@ -201,7 +343,8 @@ def _scan_records(args: argparse.Namespace) -> list[dict]:
         username=args.user, password=args.password,
         api_key=args.api_key, token=args.token,
         creds=_scan_creds(args))
-    return [_fetch_record(c, args) for c in candidates]
+    arp_table = arp_mod.read_arp_table()
+    return [_fetch_record(c, args, arp_table=arp_table) for c in candidates]
 
 
 def _print_table(records: list[dict]) -> None:
@@ -241,6 +384,60 @@ def _jsonable(value):
     return str(value)
 
 
+def _apply_group(args: argparse.Namespace):
+    """Resolve `scan --group NAME` (v0.24) onto the args namespace.
+
+    The group's targets replace the scan target, and the credential
+    layers merge core-side: the group's own sets first, then the
+    --creds-file (global) sets, pre-seeded into the _scan_creds
+    cache so _scan_records consumes the merged list.
+    discover.ordered_creds partitions that list stably, so its
+    tiers try group-family → global-family → group-any →
+    global-any → the rest. Returns (store, group) so cmd_scan can
+    persist last_scan afterwards; None without --group. Raises
+    ValueError (unknown group, unreadable store, malformed creds
+    anywhere) — cmd_scan turns it into exit 2 before scanning.
+    """
+    name = getattr(args, "group", None)
+    if not name:
+        return None
+    store = groups_mod.GroupStore(getattr(args, "groups_file", None))
+    group = store.find(name)
+    if group is None:
+        raise ValueError(
+            f"group not found: {name!r} (store: {store.path})")
+    group_sets = _normalise_creds(
+        group["creds"], f"group {name!r} creds") if group["creds"] else None
+    merged = groups_mod.effective_creds(group_sets, _scan_creds(args))
+    if merged is not None:
+        args._creds_cache = merged
+        args._creds_loaded = True
+    args.target = group["targets"]
+    return store, group
+
+
+def _persist_group_scan(store: groups_mod.GroupStore, group: dict,
+                        records: list[dict]) -> None:
+    """Write the group's last_scan summary after a successful scan.
+
+    Best-effort: a store that refuses the write must not fail a
+    scan that already succeeded — the warning goes to stderr,
+    which bridge mode keeps off stdout by design.
+    """
+    try:
+        scanned = len(parse_targets(group["targets"]))
+    except ValueError:
+        scanned = len(records)
+    summary = groups_mod.scan_summary(
+        records, scanned,
+        datetime.now().astimezone().isoformat(timespec="seconds"))
+    try:
+        store.record_scan(group["name"], summary)
+    except (ValueError, OSError) as exc:
+        print(f"scan: warning: could not save last_scan for group "
+              f"{group['name']!r}: {exc}", file=sys.stderr)
+
+
 def cmd_scan(args: argparse.Namespace) -> int:
     # --json with no FILE ("-" sentinel from argparse) selects the
     # sidecar bridge mode (v0.21): stdout carries ONE JSON document
@@ -249,6 +446,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
     bridge = getattr(args, "json", None) == "-"
     started = time.monotonic()
     try:
+        group_ctx = _apply_group(args)
         records = _scan_records(args)
     except ValueError as exc:
         print(f"scan: {exc}", file=sys.stderr)
@@ -266,6 +464,21 @@ def cmd_scan(args: argparse.Namespace) -> int:
             "found": len(records),
             "elapsed_s": round(elapsed, 3),
         }
+        # --events-state (v0.32): run this pass through the event
+        # engine, `watch --state` style, and carry the diff in the
+        # payload. ONLY with the flag — a flagless bridge scan's
+        # document is byte-identical to before. First pass against
+        # a fresh state only seeds baselines (no events), exactly
+        # like the engine's watch behaviour.
+        events_state = getattr(args, "events_state", None)
+        if events_state:
+            engine = EventEngine()
+            _load_state(engine, events_state)
+            present = {r["ip"]: r for r in records
+                       if not _is_error_record(r)}
+            payload["events"] = [
+                _jsonable(e) for e in engine.observe_cycle(present)]
+            _save_state(engine, events_state)
         print(json.dumps(payload, ensure_ascii=False))
     else:
         if not records:
@@ -279,11 +492,35 @@ def cmd_scan(args: argparse.Namespace) -> int:
                 json.dumps(records, indent=2, ensure_ascii=False),
                 encoding="utf-8")
             print(f"JSON written to {args.json}")
+    if group_ctx is not None:
+        _persist_group_scan(group_ctx[0], group_ctx[1], records)
     if args.tickets:
         written = report.write_tickets(records, args.tickets)
         for path in written:
             print(f"Ticket written to {path}",
                   file=sys.stderr if bridge else sys.stdout)
+    return 0
+
+
+def cmd_tickets(args: argparse.Namespace) -> int:
+    """List exported repair tickets (v0.32) — read-only.
+
+    The listing half of `scan --tickets DIR`: report.list_tickets
+    parses the .txt files write_tickets produced (newest first).
+    --json prints ONE document {"tickets": [...]} for the Flutter
+    shell's Lịch sử sửa view; a missing directory lists as empty.
+    """
+    tickets = report.list_tickets(args.dir)
+    if args.json:
+        print(json.dumps({"tickets": tickets}, ensure_ascii=False))
+    else:
+        if not tickets:
+            print(f"No tickets in {args.dir}")
+        for ticket in tickets:
+            print(f"{ticket['modified']}  {ticket['ip']}  "
+                  f"{ticket['model']}  "
+                  f"({len(ticket['problems'])} problem(s))  "
+                  f"{ticket['file']}")
     return 0
 
 
@@ -301,6 +538,290 @@ def cmd_sysinfo(args: argparse.Namespace) -> int:
     else:
         print(f"BeeSky {info['version']}")
         print(f"Default scan target: {info['default_target']}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# inspect — one-device deep fetch (v0.27): pools / fans / per-board
+# detail behind the Flutter detail tabs, through the scan's own
+# probe + credential resolution (docs/device-detail-mapping.md)
+# ---------------------------------------------------------------------------
+
+def _inspect_creds(args: argparse.Namespace) -> list[dict] | None:
+    """Credential sets for `inspect`: scan's layers, minus the target.
+
+    --group contributes its sets ahead of the --creds-file ones
+    (groups.effective_creds — the v0.24 layering); the group's
+    TARGETS do not apply: inspect always names its one device.
+    Raises ValueError (unknown group, malformed sets anywhere) —
+    cmd_inspect turns it into exit 2 before any device I/O.
+    """
+    name = getattr(args, "group", None)
+    if not name:
+        return _scan_creds(args)
+    store = groups_mod.GroupStore(getattr(args, "groups_file", None))
+    group = store.find(name)
+    if group is None:
+        raise ValueError(
+            f"group not found: {name!r} (store: {store.path})")
+    group_sets = _normalise_creds(
+        group["creds"], f"group {name!r} creds") if group["creds"] else None
+    return groups_mod.effective_creds(group_sets, _scan_creds(args))
+
+
+def cmd_inspect(args: argparse.Namespace) -> int:
+    # The target must be ONE IPv4 address — a range here is a typo,
+    # and deep-fetching a whole subnet was never the verb's job.
+    # Validation happens before any I/O (scan's exit-2 contract).
+    try:
+        addr = ipaddress.ip_address(args.ip)
+        if addr.version != 4:
+            raise ValueError("not IPv4")
+    except ValueError:
+        print(f"inspect: {args.ip!r} is not a single IPv4 address",
+              file=sys.stderr)
+        return 2
+    bad = _validate_creds(args, "inspect")
+    if bad is not None:
+        return bad
+    try:
+        creds = _inspect_creds(args)
+    except ValueError as exc:
+        print(f"inspect: {exc}", file=sys.stderr)
+        return 2
+    doc = inspect_mod.inspect_device(
+        args.ip, timeout=args.timeout, http_port=args.http_port,
+        cgminer_port=args.cgminer_port, username=args.user,
+        password=args.password, api_key=args.api_key, token=args.token,
+        creds=creds)
+    if args.json:
+        # Bridge mode: stdout is exactly ONE JSON document.
+        print(json.dumps(_jsonable(doc), ensure_ascii=False))
+    else:
+        print(json.dumps(_jsonable(doc), indent=2, ensure_ascii=False))
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# groups — network groups (v0.24): named scan targets with their own
+# credential sets, autoscan settings and last-scan summaries, stored
+# in beesky-groups.json (docs/network-groups-mapping.md)
+# ---------------------------------------------------------------------------
+
+def _group_store(args: argparse.Namespace) -> groups_mod.GroupStore:
+    return groups_mod.GroupStore(getattr(args, "groups_file", None))
+
+
+def _groups_fail(message: str) -> int:
+    print(f"groups: {message}", file=sys.stderr)
+    return 2
+
+
+def cmd_groups(args: argparse.Namespace) -> int:
+    store = _group_store(args)
+    action = args.groups_command
+    try:
+        groups = store.load()
+    except ValueError as exc:
+        return _groups_fail(str(exc))
+
+    if action == "list":
+        if not groups:
+            print(f"No groups defined (store: {store.path}).")
+            return 0
+        for g in groups:
+            last = g["last_scan"]
+            last_text = ("never scanned" if last is None else
+                         f"last scan {last['at']}: {last['found']} found, "
+                         f"{last['ok']} ok, {last['check']} check, "
+                         f"{last['error']} error")
+            auto = (f"autoscan {g['autoscan']['interval_min']}m"
+                    if g["autoscan"]["enabled"] else "autoscan off")
+            print(f"{g['name']}  [{g['targets']}]  "
+                  f"{len(g['creds'])} cred set(s), {auto}, {last_text}")
+        return 0
+
+    if action == "add":
+        if groups_mod.find_group(groups, args.name.strip()) is not None:
+            return _groups_fail(f"group already exists: {args.name!r}")
+        try:
+            group = groups_mod.normalise_group(
+                {"name": args.name, "targets": args.targets},
+                "groups add")
+        except ValueError as exc:
+            return _groups_fail(str(exc))
+        groups.append(group)
+        store.save(groups)
+        print(f"Added group {group['name']!r} [{group['targets']}] "
+              f"(store: {store.path}).")
+        return 0
+
+    if action == "remove":
+        group = groups_mod.find_group(groups, args.name)
+        if group is None:
+            return _groups_fail(f"group not found: {args.name!r}")
+        store.save([g for g in groups if g["name"] != group["name"]])
+        print(f"Removed group {group['name']!r}.")
+        return 0
+
+    if action == "show":
+        group = groups_mod.find_group(groups, args.name)
+        if group is None:
+            return _groups_fail(f"group not found: {args.name!r}")
+        print(json.dumps(group, indent=2, ensure_ascii=False))
+        return 0
+
+    if action == "reset-stats":
+        # v0.34: HashCore's "Reset statistics" (per group, or --all
+        # for every group) — clears last_scan so the group reads
+        # "never scanned" again (the MỚI tag returns). Targets,
+        # creds and autoscan are untouched.
+        if args.all:
+            for g in groups:
+                g["last_scan"] = None
+            store.save(groups)
+            print(f"Reset statistics for {len(groups)} group(s).")
+            return 0
+        group = groups_mod.find_group(groups, args.name)
+        if group is None:
+            return _groups_fail(f"group not found: {args.name!r}")
+        group["last_scan"] = None
+        store.save(groups)
+        print(f"Reset statistics for group {group['name']!r}.")
+        return 0
+
+    if action == "export":
+        payload = {"version": groups_mod.STORE_VERSION, "groups": groups}
+        try:
+            Path(args.file).write_text(
+                json.dumps(payload, indent=2, ensure_ascii=False),
+                encoding="utf-8")
+        except OSError as exc:
+            return _groups_fail(f"cannot write {args.file}: {exc}")
+        print(f"Exported {len(groups)} group(s) to {args.file}.")
+        return 0
+
+    if action == "import":
+        try:
+            data = json.loads(Path(args.file).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            return _groups_fail(f"cannot read import file {args.file}: {exc}")
+        if isinstance(data, list):
+            raw_groups = data
+        elif isinstance(data, dict) and isinstance(data.get("groups"), list):
+            raw_groups = data["groups"]
+        else:
+            return _groups_fail(
+                f"import file {args.file}: expected the groups document "
+                "({\"version\": 1, \"groups\": [...]}) or a bare list")
+        try:
+            imported = [groups_mod.normalise_group(
+                item, f"{args.file} entry {idx}")
+                for idx, item in enumerate(raw_groups)]
+        except ValueError as exc:
+            return _groups_fail(str(exc))
+        before = {g["name"] for g in groups}
+        merged = groups_mod.merge_import(groups, imported)
+        store.save(merged)
+        replaced = sum(1 for g in imported if g["name"] in before)
+        print(f"Imported {len(imported)} group(s) from {args.file}: "
+              f"{replaced} replaced, {len(imported) - replaced} added, "
+              f"{len(merged)} total.")
+        return 0
+
+    return _groups_fail(f"unknown groups command: {action}")
+
+
+# ---------------------------------------------------------------------------
+# ipreport — listen for miners' hardware IP-Report broadcasts (v0.34)
+# ---------------------------------------------------------------------------
+
+IPREPORT_STORE_VERSION = 1
+IPREPORT_STORE_CAP = 100
+
+
+def _load_ipreport_store(path: str) -> list[dict]:
+    """Reports persisted by `ipreport listen --out FILE` (newest
+    first, capped) — the Flutter panel reads this same file."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if isinstance(data, dict) and isinstance(data.get("reports"), list):
+        return [r for r in data["reports"] if isinstance(r, dict)]
+    return []
+
+
+def _append_ipreport(path: str, report: dict) -> None:
+    stored = _load_ipreport_store(path)
+    stored = [report] + [r for r in stored
+                         if r.get("ip") != report.get("ip")
+                         or r.get("sender") != report.get("sender")]
+    stored = stored[:IPREPORT_STORE_CAP]
+    tmp = Path(str(path) + ".tmp")
+    tmp.write_text(json.dumps({"version": IPREPORT_STORE_VERSION,
+                               "reports": stored}, ensure_ascii=False),
+                   encoding="utf-8")
+    tmp.replace(path)
+
+
+def cmd_ipreport(args: argparse.Namespace) -> int:
+    action = args.ipreport_command
+    if action == "list":
+        reports = _load_ipreport_store(args.file)
+        if args.json:
+            print(json.dumps({"reports": reports}, ensure_ascii=False))
+        elif not reports:
+            print(f"No IP reports recorded (store: {args.file}).")
+        else:
+            for r in reports:
+                print(f"{r.get('ip') or r.get('sender')}  "
+                      f"MAC {r.get('mac') or '—'}  "
+                      f"({r.get('family') or '?'}, từ {r.get('sender')})")
+        return 0
+
+    # listen — one NDJSON {"report": {...}} line per broadcast, to
+    # stdout (the Flutter panel streams this like an ops run) and,
+    # with --out, persisted to the store file.
+    ports = [args.port]
+    if not args.no_whatsminer and ipreport_mod.WHATS_MINER_PORT not in ports:
+        ports.append(ipreport_mod.WHATS_MINER_PORT)
+    received: list[dict] = []
+
+    def on_report(report: dict) -> None:
+        received.append(report)
+        print(json.dumps({"report": report}, ensure_ascii=False),
+              flush=True)
+        if args.out:
+            try:
+                _append_ipreport(args.out, report)
+            except OSError:
+                pass
+
+    listener = ipreport_mod.IpReportListener(
+        on_report=on_report, ports=tuple(ports),
+        allow_loopback=args.allow_loopback)
+    bound = listener.start()
+    if not bound:
+        print("ipreport: Failed to start IP Report listening — "
+              f"ports {ports} are already in use (another listener, "
+              "e.g. Bitmain's IP Reporter, may own them).",
+              file=sys.stderr)
+        return 2
+    print(json.dumps({"listening": bound}, ensure_ascii=False), flush=True)
+    try:
+        if args.duration and args.duration > 0:
+            time.sleep(args.duration)
+        else:
+            while True:
+                time.sleep(3600)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        listener.stop()
+    if args.duration and args.duration > 0:
+        print(json.dumps({"stopped": True,
+                          "received": len(received)}, ensure_ascii=False))
     return 0
 
 
@@ -326,6 +847,46 @@ def _save_state(engine: EventEngine, path: str) -> None:
 
 def _is_error_record(record: dict) -> bool:
     return any(p.get("code") == "FETCH_ERROR" for p in record["problems"])
+
+
+def cmd_ops(args: argparse.Namespace) -> int:
+    """Run one Operations task from a job file, NDJSON to stdout.
+
+    Exit 2 when the job (or its group / creds references) is
+    malformed — validated before any device is touched, like
+    scan's contract. A job that RAN exits 0 whatever the
+    per-device outcomes were; the summary line carries the
+    counts and the derived task status.
+    """
+    try:
+        job = ops_mod.load_job(args.job)
+        # Resolve creds up front too: an unknown group / unreadable
+        # creds file must fail before the stream's first line.
+        ops_mod.resolve_creds(job)
+    except ops_mod.JobError as exc:
+        print(f"ops: {exc}", file=sys.stderr)
+        return 2
+
+    cancel = threading.Event()
+
+    def _request_cancel(signum, frame):  # noqa: ARG001 — signal API
+        cancel.set()
+
+    # POSIX stop path (mapping §4.7): SIGTERM/SIGINT ask the runner
+    # to stop starting devices and still emit its summary. On
+    # Windows the app kills this process outright; no handler runs.
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(sig, _request_cancel)
+        except (ValueError, OSError):
+            pass  # not the main thread / unsupported — kill still works
+
+    def emit(event: dict) -> None:
+        print(json.dumps(_jsonable(event), ensure_ascii=False),
+              flush=True)
+
+    ops_mod.run_job(job, emit, cancel)
+    return 0
 
 
 def cmd_watch(args: argparse.Namespace) -> int:
@@ -725,13 +1286,109 @@ def main(argv: list[str] | None = None) -> int:
 
     scan = sub.add_parser("scan", help="scan a target for miners and report health")
     _add_common_args(scan)
+    # A --group scan takes its target from the group (v0.24), so the
+    # positional becomes optional for scan alone; main() re-checks
+    # that a target or a group was given.
+    for _action in scan._actions:
+        if _action.dest == "target":
+            _action.nargs = "?"
+    scan.add_argument("--group", metavar="NAME",
+                      help="scan a saved network group: its targets "
+                           "replace the positional target and its own "
+                           "credential sets merge ahead of "
+                           "--creds-file's (v0.24; see `beesky groups`)")
+    scan.add_argument("--groups-file", metavar="FILE",
+                      help="groups store file for --group (default: "
+                           "beesky-groups.json beside the executable, "
+                           "fallback %%APPDATA%%\\BeeSky; or env "
+                           "BEESKY_GROUPS_FILE)")
     scan.add_argument("--json", nargs="?", const="-", metavar="FILE",
                       help="write status records as JSON to FILE; with no "
                            "FILE, print ONE JSON document to stdout "
                            "(sidecar bridge mode for the Flutter shell)")
     scan.add_argument("--tickets", metavar="DIR",
                       help="write one repair ticket per problem miner into DIR")
+    scan.add_argument("--events-state", metavar="FILE",
+                      help="bridge mode only: diff this pass through "
+                           "the event engine with its state persisted "
+                           "at FILE (watch --state semantics) and add "
+                           "the pass's events to the JSON payload "
+                           "under \"events\" (v0.32)")
     scan.set_defaults(func=cmd_scan)
+
+    tickets = sub.add_parser(
+        "tickets", help="list exported repair tickets (read-only, v0.32)")
+    tickets.add_argument("--dir", required=True, metavar="DIR",
+                         help="the tickets directory scan --tickets "
+                              "wrote into")
+    tickets.add_argument("--json", action="store_true",
+                         help="print ONE JSON document "
+                              "{\"tickets\": [...]} (sidecar bridge mode)")
+    tickets.set_defaults(func=cmd_tickets)
+
+    groups = sub.add_parser(
+        "groups", help="network groups: named scan targets with "
+                       "their own credential sets, autoscan settings "
+                       "and last-scan summaries (v0.24)")
+    groups.add_argument("--groups-file", metavar="FILE",
+                        help="groups store file (default: "
+                             "beesky-groups.json beside the executable, "
+                             "fallback %%APPDATA%%\\BeeSky; or env "
+                             "BEESKY_GROUPS_FILE)")
+    groups_sub = groups.add_subparsers(dest="groups_command", required=True)
+    groups_sub.add_parser("list", help="list all groups")
+    g_add = groups_sub.add_parser("add", help="add a group")
+    g_add.add_argument("--name", required=True, help="group name")
+    g_add.add_argument("--targets", required=True,
+                       help="scan targets: CIDR / range / comma mix "
+                            "(same syntax as the scan target)")
+    g_remove = groups_sub.add_parser("remove", help="remove a group")
+    g_remove.add_argument("name", help="group name")
+    g_show = groups_sub.add_parser("show", help="print one group as JSON")
+    g_show.add_argument("name", help="group name")
+    g_reset = groups_sub.add_parser(
+        "reset-stats", help="clear a group's last-scan statistics "
+                           "(v0.34; HashCore's 'Reset statistics')")
+    g_reset.add_argument("name", nargs="?", help="group name")
+    g_reset.add_argument("--all", action="store_true",
+                         help="reset statistics for every group")
+    g_export = groups_sub.add_parser(
+        "export", help="export all groups as JSON")
+    g_export.add_argument("file", help="destination file")
+    g_import = groups_sub.add_parser(
+        "import", help="import groups from a JSON file, merging BY "
+                       "NAME (a same-name group replaces the stored "
+                       "one, others are kept)")
+    g_import.add_argument("file", help="file written by `groups export`")
+    groups.set_defaults(func=cmd_groups)
+
+    ipreport = sub.add_parser(
+        "ipreport", help="listen for miners' hardware IP-Report "
+                         "broadcasts (v0.34; docs/ipreport-mapping.md)")
+    ip_sub = ipreport.add_subparsers(dest="ipreport_command", required=True)
+    ip_listen = ip_sub.add_parser(
+        "listen", help="listen on UDP 14235 (Antminer) + 8888 "
+                       "(Whatsminer) and stream NDJSON reports")
+    ip_listen.add_argument("--port", type=int, default=14235,
+                           help="Antminer-style report port (default 14235)")
+    ip_listen.add_argument("--no-whatsminer", action="store_true",
+                           help="do not listen on the Whatsminer port 8888")
+    ip_listen.add_argument("--out", metavar="FILE",
+                           help="persist reports to FILE "
+                                "(beesky-ipreports.json shape)")
+    ip_listen.add_argument("--duration", type=float, default=0,
+                           help="listen for N seconds then stop "
+                                "(0 = until Ctrl+C)")
+    ip_listen.add_argument("--allow-loopback", action="store_true",
+                           help="accept reports from 127.0.0.1 (tests only)")
+    ip_list = ip_sub.add_parser(
+        "list", help="read persisted IP reports (read-only)")
+    ip_list.add_argument("--file", required=True, metavar="FILE",
+                         help="the store file `ipreport listen --out` wrote")
+    ip_list.add_argument("--json", action="store_true",
+                         help="print ONE JSON document "
+                              "{\"reports\": [...]}")
+    ipreport.set_defaults(func=cmd_ipreport)
 
     sysinfo = sub.add_parser(
         "sysinfo", help="print version + auto-detected default scan "
@@ -739,6 +1396,56 @@ def main(argv: list[str] | None = None) -> int:
     sysinfo.add_argument("--json", action="store_true",
                          help="print as one JSON document")
     sysinfo.set_defaults(func=cmd_sysinfo)
+
+    inspect = sub.add_parser(
+        "inspect", help="deep-fetch ONE miner (pools / fans / "
+                        "per-board detail) as JSON — the detail "
+                        "tabs' data (v0.27; docs/device-detail-"
+                        "mapping.md)")
+    inspect.add_argument("ip", help="miner IP address (single host)")
+    inspect.add_argument("--json", action="store_true",
+                         help="print the document as ONE JSON line "
+                              "(sidecar bridge mode)")
+    inspect.add_argument("--timeout", type=float, default=3.0,
+                         help="per-request timeout seconds "
+                              "(default 3)")
+    inspect.add_argument("--user", default="root",
+                         help="legacy single login (default root)")
+    inspect.add_argument("--password", default="root",
+                         help="legacy single password (default root)")
+    inspect.add_argument("--creds-file", metavar="FILE",
+                         help="JSON list of credential sets "
+                              "(v0.23 schema) tried in family order")
+    inspect.add_argument("--group", metavar="NAME",
+                         help="resolve credentials through a saved "
+                              "network group: its sets lead the "
+                              "--creds-file ones (v0.24 layering); "
+                              "the group's targets do NOT apply")
+    inspect.add_argument("--groups-file", metavar="FILE",
+                         help="groups store file for --group "
+                              "(default: beesky-groups.json beside "
+                              "the executable)")
+    inspect.add_argument("--api-key", metavar="KEY",
+                         help="dashd x-api-key (VNish API-key method)")
+    inspect.add_argument("--token", metavar="JWT",
+                         help="dashd bearer token")
+    inspect.add_argument("--http-port", type=int, default=80,
+                         help="web/API port (default 80)")
+    inspect.add_argument("--cgminer-port", type=int, default=4028,
+                         help="cgminer RPC port (default 4028)")
+    inspect.set_defaults(func=cmd_inspect)
+
+    ops = sub.add_parser(
+        "ops", help="run ONE Operations task (rescan / reboot / "
+                    "switch_pool / the v0.29 VNish tail) over a "
+                    "set of miners, streaming NDJSON progress "
+                    "(v0.26; docs/operations-mapping.md + "
+                    "docs/vnish-ops-mapping.md). The job is a JSON "
+                    "FILE — secrets never ride the command line")
+    ops.add_argument("--job", required=True, metavar="FILE",
+                     help="job JSON file (see beesky/core/ops.py "
+                          "for the schema)")
+    ops.set_defaults(func=cmd_ops)
 
     watch = sub.add_parser(
         "watch", help="watch a target, emit events and send notifications")
@@ -895,4 +1602,7 @@ def main(argv: list[str] | None = None) -> int:
     fw_unlock.set_defaults(func=cmd_fw_unlock)
 
     args = parser.parse_args(argv)
+    if getattr(args, "command", None) == "scan" and not args.target \
+            and not getattr(args, "group", None):
+        parser.error("scan: a target is required (or use --group NAME)")
     return args.func(args)

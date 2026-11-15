@@ -15,7 +15,8 @@ import 'theme.dart';
 /// passwords never travel on a command line:
 ///
 ///   [{"label": "...", "user": "...", "password": "...",
-///     "type": "any" | "stock" | "vnish"}, ...]
+///     "type": "any" | "stock" | "vnish" | "whatsminer" | "avalon" |
+///      "iceriver" | "jasminer" | "braiins" | "luxos" | "epic"}, ...]
 ///
 /// "type" is the machine-family tag: the core tries sets tagged for
 /// the detected family first, then "any", then the rest (a wrong tag
@@ -29,7 +30,7 @@ class CredSet {
   String label;
   String user;
   String secret;
-  String type; // 'any' | 'stock' | 'vnish'
+  String type; // a credTypeLabels key ('any' = every family)
   String apiKey;
 
   CredSet({
@@ -44,7 +45,7 @@ class CredSet {
         label: (json['label'] ?? '') as String,
         user: (json['user'] ?? '') as String,
         secret: (json['password'] ?? '') as String,
-        type: const ['stock', 'vnish'].contains(json['type'])
+        type: credTypeLabels.containsKey(json['type'])
             ? json['type'] as String
             : 'any',
         apiKey: (json['api_key'] ?? '') as String,
@@ -68,10 +69,25 @@ class CredSet {
 }
 
 /// Type tag -> the label the creds dialog's dropdown shows.
+/// The family set is HashCore's vendor universe as ported in
+/// docs/vendor-coverage-mapping.md §6 (v0.30): detection exists
+/// for whatsminer + avalon; iceriver / jasminer / braiins / luxos
+/// are tag-only families until their contracts are evidenced.
+/// v0.37 adds epic (docs/epic-mapping.md) — detected + read +
+/// controlled from Epic's own published API docs + dashboard.
 const credTypeLabels = <String, String>{
   'any': 'Mọi loại máy',
   'stock': 'Antminer gốc',
   'vnish': 'VNish',
+  'whatsminer': 'Whatsminer (MicroBT)',
+  'avalon': 'Avalon (Canaan)',
+  'iceriver': 'IceRiver',
+  'jasminer': 'Jasminer (SunLune)',
+  'braiins': 'Braiins OS',
+  'luxos': 'LuxOS',
+  'epic': 'Epic',
+  'auradine': 'Auradine',
+  'sealminer': 'Sealminer (Bitdeer)',
 };
 
 /// Persistence for the creds file.
@@ -154,26 +170,18 @@ class CredStore {
   }
 }
 
-/// The credentials editor: one row per saved set (label, user,
-/// password obscured, machine-type dropdown, delete), an add
-/// button, and Save/Cancel. Returns the edited list on Save, null
-/// on cancel. Fully-blank rows are dropped on save.
-Future<List<CredSet>?> showCredsDialog(
-  BuildContext context,
-  List<CredSet> initial,
-) {
-  return showDialog<List<CredSet>>(
-    context: context,
-    builder: (_) => _CredsDialog(initial: initial),
-  );
-}
-
-class _CredsDialog extends StatefulWidget {
+/// The editable list of credential-set rows — shared by the global
+/// creds dialog below AND the network-group editor (v0.24: a group
+/// carries its own sets in the same schema). One row per set:
+/// label, user, password obscured, machine-type dropdown, delete,
+/// plus an add button. The parent reads the result via
+/// [CredSetsEditorState.collect] (fully-blank rows are dropped).
+class CredSetsEditor extends StatefulWidget {
   final List<CredSet> initial;
-  const _CredsDialog({required this.initial});
+  const CredSetsEditor({super.key, required this.initial});
 
   @override
-  State<_CredsDialog> createState() => _CredsDialogState();
+  CredSetsEditorState createState() => CredSetsEditorState();
 }
 
 class _Row {
@@ -197,7 +205,7 @@ class _Row {
   }
 }
 
-class _CredsDialogState extends State<_CredsDialog> {
+class CredSetsEditorState extends State<CredSetsEditor> {
   late final List<_Row> _rows = [for (final c in widget.initial) _Row(c)];
 
   @override
@@ -215,70 +223,41 @@ class _CredsDialogState extends State<_CredsDialog> {
         _rows.removeAt(i);
       });
 
-  void _save() {
-    final result = <CredSet>[
-      for (final r in _rows)
-        if (r.label.text.trim().isNotEmpty ||
-            r.user.text.trim().isNotEmpty ||
-            r.secret.text.isNotEmpty ||
-            r.apiKey.text.trim().isNotEmpty)
-          CredSet(
-            label: r.label.text.trim(),
-            user: r.user.text.trim(),
-            secret: r.secret.text,
-            type: r.data.type,
-            apiKey: r.apiKey.text.trim(),
-          ),
-    ];
-    Navigator.of(context).pop(result);
-  }
+  /// The edited sets; fully-blank rows are dropped (the save rule
+  /// both dialogs share).
+  List<CredSet> collect() => <CredSet>[
+        for (final r in _rows)
+          if (r.label.text.trim().isNotEmpty ||
+              r.user.text.trim().isNotEmpty ||
+              r.secret.text.isNotEmpty ||
+              r.apiKey.text.trim().isNotEmpty)
+            CredSet(
+              label: r.label.text.trim(),
+              user: r.user.text.trim(),
+              secret: r.secret.text,
+              type: r.data.type,
+              apiKey: r.apiKey.text.trim(),
+            ),
+      ];
 
   @override
   Widget build(BuildContext context) {
-    const fieldPad = EdgeInsets.symmetric(horizontal: 10, vertical: 8);
-    return AlertDialog(
-      backgroundColor: BeeSkyColors.panel,
-      title: const Text('Tài khoản máy đào'),
-      content: SizedBox(
-        width: 560,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Mỗi bộ là một tài khoản web của một dòng máy. Quét sẽ '
-              'thử bộ gắn đúng loại máy trước, rồi "Mọi loại máy", '
-              'rồi các bộ còn lại.',
-              style: TextStyle(color: BeeSkyColors.muted, fontSize: 12),
-            ),
-            const SizedBox(height: 12),
-            Flexible(
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: _rows.length,
-                itemBuilder: (context, i) => _row(i, fieldPad),
-              ),
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: _addRow,
-              icon: const Icon(Icons.add, size: 16),
-              label: const Text('Thêm bộ'),
-            ),
-          ],
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < _rows.length; i++) _row(i),
+        OutlinedButton.icon(
+          onPressed: _addRow,
+          icon: const Icon(Icons.add, size: 16),
+          label: const Text('Thêm bộ'),
         ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Hủy'),
-        ),
-        FilledButton(onPressed: _save, child: const Text('Lưu')),
       ],
     );
   }
 
-  Widget _row(int i, EdgeInsets fieldPad) {
+  Widget _row(int i) {
+    const fieldPad = EdgeInsets.symmetric(horizontal: 10, vertical: 8);
     final r = _rows[i];
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -367,6 +346,68 @@ class _CredsDialogState extends State<_CredsDialog> {
           ],
         ],
       ),
+    );
+  }
+}
+
+/// The credentials editor dialog: the shared [CredSetsEditor] in a
+/// dialog with Save/Cancel. Returns the edited list on Save, null
+/// on cancel.
+Future<List<CredSet>?> showCredsDialog(
+  BuildContext context,
+  List<CredSet> initial,
+) {
+  return showDialog<List<CredSet>>(
+    context: context,
+    builder: (_) => _CredsDialog(initial: initial),
+  );
+}
+
+class _CredsDialog extends StatefulWidget {
+  final List<CredSet> initial;
+  const _CredsDialog({required this.initial});
+
+  @override
+  State<_CredsDialog> createState() => _CredsDialogState();
+}
+
+class _CredsDialogState extends State<_CredsDialog> {
+  final _editorKey = GlobalKey<CredSetsEditorState>();
+
+  void _save() =>
+      Navigator.of(context).pop(_editorKey.currentState?.collect());
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: BeeSkyColors.panel,
+      title: const Text('Tài khoản máy đào'),
+      content: SizedBox(
+        width: 560,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Mỗi bộ là một tài khoản web của một dòng máy. Quét sẽ '
+                'thử bộ gắn đúng loại máy trước, rồi "Mọi loại máy", '
+                'rồi các bộ còn lại.',
+                style: TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+              ),
+              const SizedBox(height: 12),
+              CredSetsEditor(key: _editorKey, initial: widget.initial),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Hủy'),
+        ),
+        FilledButton(onPressed: _save, child: const Text('Lưu')),
+      ],
     );
   }
 }

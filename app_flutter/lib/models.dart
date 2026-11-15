@@ -16,6 +16,11 @@ const List<String> rateUnitOrder = ['TH/s', 'GH/s', 'MH/s', 'ksol/s', 'sol/s'];
 /// makes the core emit a per-chain OVER_TEMP problem.
 const double tempLimitC = 85;
 
+/// The Flutter shell's own version — moves WITH the product
+/// version (pubspec 0.39.0+20); the sidebar and Cài đặt show the
+/// CORE's version from sysinfo, this one is the app's.
+const String beeskyAppVersion = '0.39.0';
+
 /// "1101.0, ksol/s" -> "1,101.00 ksol/s" — mirrors Python's f"{v:,.2f}".
 String formatRateNum(double value) {
   final fixed = value.toStringAsFixed(2);
@@ -52,6 +57,9 @@ class Problem {
         severity: (json['severity'] ?? '') as String,
         detail: (json['detail'] ?? '') as String,
       );
+
+  Map<String, dynamic> toJson() =>
+      {'code': code, 'severity': severity, 'detail': detail};
 }
 
 class ChainInfo {
@@ -73,9 +81,42 @@ class ChainInfo {
         chipsTotal: (json['chips_total'] as num).toInt(),
       );
 
+  Map<String, dynamic> toJson() => {
+        'index': index,
+        'temp_c': tempC,
+        'chips_alive': chipsAlive,
+        'chips_total': chipsTotal,
+      };
+
   /// At/over the core's TEMP_LIMIT_C — the board renders red wherever
   /// per-board temps are shown (table NHIỆT cell, detail board lines).
   bool get isHot => tempC != null && tempC! >= tempLimitC;
+}
+
+/// One pool slot of a scan record (wire key `pools`). Since
+/// v0.28 the core fills it during a normal scan for the
+/// families that expose pools there — dashd from the summary
+/// it already fetched, cgminer via its RPC `pools` command;
+/// stock records omit the field (docs/presets-ipreport-
+/// mapping.md §4). [status] passes through verbatim from the
+/// firmware ("alive" / "Alive" — never remapped).
+class PoolInfo {
+  final String url;
+  final String worker;
+  final String? status;
+  const PoolInfo({required this.url, required this.worker, this.status});
+
+  factory PoolInfo.fromJson(Map<String, dynamic> json) => PoolInfo(
+        url: (json['url'] ?? '') as String,
+        worker: (json['worker'] ?? json['user'] ?? '') as String,
+        status: json['status'] as String?,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'url': url,
+        'worker': worker,
+        if (status != null) 'status': status,
+      };
 }
 
 class MinerRecord {
@@ -102,6 +143,42 @@ class MinerRecord {
   /// records — the detail panel only shows a login that was proven.
   final String? credLabel;
 
+  /// Seconds since boot (wire `elapsed_s`, on the wire since the
+  /// core's first record schema, parsed by the app only in v0.25).
+  final int elapsedS;
+
+  /// cgminer "GHS 5s" (wire `ghs_5s`) — GH/s-family terms ONLY;
+  /// see [rateRtText] for how the realtime column uses it honestly.
+  final double? ghs5s;
+
+  /// Wall power in watts (wire `power_w`) when the source reports
+  /// one (VNish dashd, some cgminer stats); null on classic
+  /// Bitmain bmminer, whose firmware reports no power at all.
+  final double? powerW;
+
+  /// MAC address — a DATA-GAP today (nothing in the core emits
+  /// one); parsed so the column/search light up if it ever lands.
+  final String? mac;
+
+  /// Pool slots (wire `pools`) — filled by the core since
+  /// v0.28 for vnish + cgminer records; empty for stock (no
+  /// scan-time source) and for error records.
+  final List<PoolInfo> pools;
+
+  /// The operator's device note (v0.27 detail tab), decorated
+  /// APP-SIDE from the note store — never on the wire: the
+  /// core neither emits nor reads it, and [toJson] does not
+  /// serialise it. It exists so the grid's GHI CHÚ column
+  /// (v0.28) reads the note through the record like every
+  /// other cell (docs/presets-ipreport-mapping.md §6).
+  final String note;
+
+  /// The network group this record was scanned under (v0.34
+  /// "Quét tất cả nhóm"): decorated APP-SIDE like [note] — the
+  /// core's scan has no group concept, and [toJson] does not
+  /// serialise it. Empty outside a group scan.
+  final String groupName;
+
   const MinerRecord({
     required this.ip,
     required this.model,
@@ -117,7 +194,66 @@ class MinerRecord {
     required this.rateUnit,
     required this.legacyThs,
     this.credLabel,
+    this.elapsedS = 0,
+    this.ghs5s,
+    this.powerW,
+    this.mac,
+    this.pools = const [],
+    this.note = '',
+    this.groupName = '',
   });
+
+  /// A copy carrying [note] (the app-side decoration above);
+  /// every wire field is preserved untouched.
+  MinerRecord withNote(String note) => MinerRecord(
+        ip: ip,
+        model: model,
+        source: source,
+        chains: chains,
+        fansRpm: fansRpm,
+        chipsAlive: chipsAlive,
+        chipsTotal: chipsTotal,
+        maxTempC: maxTempC,
+        issues: issues,
+        status: status,
+        rateValue: rateValue,
+        rateUnit: rateUnit,
+        legacyThs: legacyThs,
+        credLabel: credLabel,
+        elapsedS: elapsedS,
+        ghs5s: ghs5s,
+        powerW: powerW,
+        mac: mac,
+        pools: pools,
+        note: note,
+        groupName: groupName,
+      );
+
+  /// A copy carrying [groupName] (the v0.34 combined-scan
+  /// decoration); every other field is preserved untouched.
+  MinerRecord withGroup(String groupName) => MinerRecord(
+        ip: ip,
+        model: model,
+        source: source,
+        chains: chains,
+        fansRpm: fansRpm,
+        chipsAlive: chipsAlive,
+        chipsTotal: chipsTotal,
+        maxTempC: maxTempC,
+        issues: issues,
+        status: status,
+        rateValue: rateValue,
+        rateUnit: rateUnit,
+        legacyThs: legacyThs,
+        credLabel: credLabel,
+        elapsedS: elapsedS,
+        ghs5s: ghs5s,
+        powerW: powerW,
+        mac: mac,
+        pools: pools,
+        note: note,
+        groupName: groupName,
+      );
 
   factory MinerRecord.fromJson(Map<String, dynamic> json) {
     return MinerRecord(
@@ -141,8 +277,41 @@ class MinerRecord {
       rateUnit: json['rate_unit'] as String?,
       legacyThs: (json['ths'] as num?)?.toDouble(),
       credLabel: json['cred_label'] as String?,
+      elapsedS: ((json['elapsed_s'] as num?) ?? 0).toInt(),
+      ghs5s: (json['ghs_5s'] as num?)?.toDouble(),
+      powerW: (json['power_w'] as num?)?.toDouble(),
+      mac: json['mac'] as String?,
+      pools: ((json['pools'] as List<dynamic>?) ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(PoolInfo.fromJson)
+          .toList(),
     );
   }
+
+  /// The wire shape back (v0.26: the Operations "Xuất danh sách"
+  /// export serialises selected records with it). Mirrors
+  /// [MinerRecord.fromJson]'s keys exactly.
+  Map<String, dynamic> toJson() => {
+        'ip': ip,
+        'model': model,
+        'source': source,
+        'chains': chains.map((c) => c.toJson()).toList(),
+        'fans_rpm': fansRpm,
+        'chips_alive': chipsAlive,
+        'chips_total': chipsTotal,
+        'max_temp_c': maxTempC,
+        'problems': issues.map((p) => p.toJson()).toList(),
+        'status': status,
+        'rate_value': rateValue,
+        'rate_unit': rateUnit,
+        'ths': legacyThs,
+        'cred_label': credLabel,
+        'elapsed_s': elapsedS,
+        'ghs_5s': ghs5s,
+        'power_w': powerW,
+        'mac': mac,
+        'pools': pools.map((p) => p.toJson()).toList(),
+      };
 
   bool get hasFetchError => issues.any((p) => p.code == 'FETCH_ERROR');
   bool get isOk => status == 'OK';
@@ -188,8 +357,167 @@ class MinerRecord {
         'cgminer' => 'cgminer RPC',
         'vnish' => 'VNish',
         'stock' => 'Bitmain gốc',
+        'whatsminer' => 'Whatsminer',
+        'avalon' => 'Avalon (Canaan)',
+        'luxos' => 'LuxOS',
+        'braiins' => 'Braiins OS',
+        'iceriver' => 'IceRiver',
+        'epic' => 'Epic',
+        'auradine' => 'Auradine',
+        'sealminer' => 'Sealminer',
         _ => source,
       };
+
+  // ------------------------------------------------------------------
+  // Grid accessors (v0.25) — everything the data-grid columns, sort,
+  // search and filters read. Derived values are arithmetic on real
+  // record fields; gaps stay null and render "—" (docs/grid-mapping.md).
+  // ------------------------------------------------------------------
+
+  /// "3d 4h 12m" / "4h 12m" / "12m" — compact uptime from [elapsedS].
+  String get uptimeText {
+    if (elapsedS <= 0) return '—';
+    final d = elapsedS ~/ 86400;
+    final h = (elapsedS % 86400) ~/ 3600;
+    final m = (elapsedS % 3600) ~/ 60;
+    if (d > 0) return '${d}d ${h}h';
+    if (h > 0) return '${h}h ${m}m';
+    return '${m}m';
+  }
+
+  String get powerText =>
+      powerW == null ? '—' : '${powerW!.toStringAsFixed(0)} W';
+
+  /// Efficiency in J/TH — DERIVED (power_w / ths) for TH/s records
+  /// that report power; null everywhere else (a J/TH figure for a
+  /// Scrypt/Equihash unit would be a fabrication).
+  double? get efficiencyJTh {
+    final w = powerW;
+    final ths = legacyThs;
+    if (w == null || ths == null || ths <= 0) return null;
+    return w / ths;
+  }
+
+  String get efficiencyText {
+    final e = efficiencyJTh;
+    return e == null ? '—' : '${e.toStringAsFixed(1)} J/TH';
+  }
+
+  /// Realtime rate for the HASHRATE RT column — PARTIAL by data:
+  /// the wire's `ghs_5s` is GH/s-family only, so it is shown (as
+  /// TH/s) solely for TH/s-family records; other units have no
+  /// separate realtime value on the wire and honestly read null.
+  (double, String)? get rateRt {
+    final g = ghs5s;
+    if (g == null) return null;
+    final unit = rate?.$2 ?? 'TH/s';
+    if (unit != 'TH/s') return null;
+    return (g / 1000.0, 'TH/s');
+  }
+
+  String get rateRtText {
+    final r = rateRt;
+    return r == null ? '—' : formatRate(r.$1, r.$2);
+  }
+
+  /// Algorithm — DERIVED from the native rate unit using the same
+  /// family conventions as the core's `_native_rate` calibration.
+  String get algorithmLabel => switch (rateUnit) {
+        'ksol/s' || 'sol/s' => 'Equihash',
+        'MH/s' => 'Scrypt',
+        'TH/s' || 'GH/s' => 'SHA-256',
+        _ => '—',
+      };
+
+  /// Boards with at least one missing chip — DERIVED badChainsCount.
+  int get badBoards => chains.where((c) => c.chipsTotal > c.chipsAlive).length;
+
+  /// Problem codes joined for the MÃ LỖI column / filters / search.
+  String get errorCodesText => issues.map((p) => p.code).toSet().join(', ');
+
+  /// Chain [i]'s temperature, or null when the board is absent or
+  /// reported none (a Board-4 filter never matches a 3-board unit).
+  double? boardTempAt(int i) =>
+      (i >= 0 && i < chains.length) ? chains[i].tempC : null;
+
+  String boardTempTextAt(int i) {
+    final t = boardTempAt(i);
+    return t == null ? '—' : '${t.toStringAsFixed(0)}°';
+  }
+
+  /// Pool slot [i]'s URL / worker — empty strings when the record
+  /// carries no pool data (stock records, error records).
+  String poolUrlAt(int i) => (i < pools.length) ? pools[i].url : '';
+  String poolWorkerAt(int i) => (i < pools.length) ? pools[i].worker : '';
+
+  /// Sort/comparison key for rates: (family rank, value in the
+  /// family's smallest unit). Rates are NEVER compared across units
+  /// (the v0.20 lesson) — families order by the canonical unit
+  /// order, values compare inside the family.
+  (int, double)? get rateSortKey {
+    final r = rate;
+    if (r == null) return null;
+    final rank = rateUnitOrder.indexOf(r.$2);
+    final base = switch (r.$2) {
+      'TH/s' => r.$1 * 1e12,
+      'GH/s' => r.$1 * 1e9,
+      'MH/s' => r.$1 * 1e6,
+      'ksol/s' => r.$1 * 1e3,
+      _ => r.$1, // sol/s and anything unknown: already the base
+    };
+    return (rank < 0 ? rateUnitOrder.length : rank, base);
+  }
+
+  /// Everything the grid search matches against (HashCore: "Search
+  /// by IP / MAC, Pool or Worker"; BeeSky adds model + worker from
+  /// every slot + the device note). MAC parts are empty while the
+  /// MAC gap stands; pools are real data since v0.28.
+  String get searchHaystack => [
+        ip,
+        mac ?? '',
+        model,
+        note,
+        for (final p in pools) ...[p.url, p.worker],
+      ].join(' ').toLowerCase();
+}
+
+/// Numeric IP comparison (octet by octet) — lexicographic ordering
+/// would put 192.168.2.99 after 192.168.2.101. Non-IP strings fall
+/// back to plain string order, after parseable IPs.
+int compareIp(String a, String b) {
+  List<int>? parse(String s) {
+    final parts = s.split('.');
+    if (parts.length != 4) return null;
+    final out = <int>[];
+    for (final p in parts) {
+      final v = int.tryParse(p);
+      if (v == null) return null;
+      out.add(v);
+    }
+    return out;
+  }
+
+  final pa = parse(a);
+  final pb = parse(b);
+  if (pa == null && pb == null) return a.compareTo(b);
+  if (pa == null) return 1;
+  if (pb == null) return -1;
+  for (var i = 0; i < 4; i++) {
+    final c = pa[i].compareTo(pb[i]);
+    if (c != 0) return c;
+  }
+  return 0;
+}
+
+/// "1,234" style integer grouping for counts in grid chrome.
+String formatCount(int value) {
+  final s = '$value';
+  final buf = StringBuffer();
+  for (var i = 0; i < s.length; i++) {
+    if (i > 0 && (s.length - i) % 3 == 0) buf.write(',');
+    buf.write(s[i]);
+  }
+  return buf.toString();
 }
 
 /// Grouped fleet total — a direct port of report.fleet_rate_totals +
@@ -230,16 +558,91 @@ int fleetProblemCount(List<MinerRecord> records) =>
 int fleetStatusCount(List<MinerRecord> records, String label) =>
     records.where((r) => r.statusLabel == label).length;
 
+/// One fleet event from the core's EventEngine (wire document of
+/// beesky/core/events.py, carried in the scan bridge payload only
+/// when the app passes --events-state — v0.32). The Vietnamese
+/// labels are the web dashboard's (`TYPE_LABEL` / `SEV_LABEL` in
+/// beesky/web/dashboard.html) so every BeeSky surface names an
+/// event the same way.
+class FleetEvent {
+  final double ts;
+  final String time;
+  final String ip;
+  final String model;
+  final String? source;
+  final String type;
+  final String severity;
+  final String detail;
+
+  const FleetEvent({
+    required this.ts,
+    required this.time,
+    required this.ip,
+    required this.model,
+    required this.source,
+    required this.type,
+    required this.severity,
+    required this.detail,
+  });
+
+  factory FleetEvent.fromJson(Map<String, dynamic> json) => FleetEvent(
+        ts: ((json['ts'] as num?) ?? 0).toDouble(),
+        time: (json['time'] ?? '') as String,
+        ip: (json['ip'] ?? '') as String,
+        model: (json['model'] ?? 'Unknown') as String,
+        source: json['source'] as String?,
+        type: (json['type'] ?? '') as String,
+        severity: (json['severity'] ?? 'info') as String,
+        detail: (json['detail'] ?? '') as String,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'ts': ts,
+        'time': time,
+        'ip': ip,
+        'model': model,
+        'source': source,
+        'type': type,
+        'severity': severity,
+        'detail': detail,
+      };
+
+  static const Map<String, String> typeLabels = {
+    'OFFLINE': 'Mất kết nối',
+    'BACK_ONLINE': 'Đã kết nối lại',
+    'HASHRATE_DROP': 'Sụt hashrate',
+    'OVER_TEMP': 'Quá nhiệt',
+    'CHIPS_LOST': 'Mất chip',
+    'CHAIN_DOWN': 'Board ngắt',
+  };
+
+  static const Map<String, String> severityLabels = {
+    'info': 'Thông tin',
+    'warning': 'Cảnh báo',
+    'major': 'Nghiêm trọng',
+    'critical': 'Khẩn cấp',
+  };
+
+  String get typeLabel => typeLabels[type] ?? type;
+  String get severityLabel => severityLabels[severity] ?? severity;
+}
+
 class ScanResult {
   final List<MinerRecord> records;
   final int scanned;
   final int found;
   final double elapsedS;
+
+  /// Events the core's engine diffed out of THIS pass (v0.32);
+  /// empty unless the scan ran with an events-state file.
+  final List<FleetEvent> events;
+
   const ScanResult({
     required this.records,
     required this.scanned,
     required this.found,
     required this.elapsedS,
+    this.events = const [],
   });
 
   factory ScanResult.fromJson(Map<String, dynamic> json) => ScanResult(
@@ -249,7 +652,48 @@ class ScanResult {
         scanned: ((json['scanned'] as num?) ?? 0).toInt(),
         found: ((json['found'] as num?) ?? 0).toInt(),
         elapsedS: ((json['elapsed_s'] as num?) ?? 0).toDouble(),
+        events: ((json['events'] as List<dynamic>?) ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map(FleetEvent.fromJson)
+            .toList(),
       );
+}
+
+/// One exported repair ticket as the core's read-only
+/// `beesky tickets --dir … --json` verb lists it (v0.32): the
+/// .txt file report.write_tickets wrote, parsed back by its
+/// owner (report.list_tickets). Local ticket files carry NO
+/// status — the field simply does not exist on disk (the cloud
+/// repairs table has one; see docs/views-mapping.md §3).
+class TicketInfo {
+  final String file;
+  final String ip;
+  final String modified; // ISO local time of the file's mtime
+  final String model;
+  final List<String> problems;
+  final String text;
+
+  const TicketInfo({
+    required this.file,
+    required this.ip,
+    required this.modified,
+    required this.model,
+    required this.problems,
+    required this.text,
+  });
+
+  factory TicketInfo.fromJson(Map<String, dynamic> json) => TicketInfo(
+        file: (json['file'] ?? '') as String,
+        ip: (json['ip'] ?? '') as String,
+        modified: (json['modified'] ?? '') as String,
+        model: (json['model'] ?? '') as String,
+        problems: ((json['problems'] as List<dynamic>?) ?? const [])
+            .map((e) => '$e')
+            .toList(),
+        text: (json['text'] ?? '') as String,
+      );
+
+  DateTime? get modifiedAt => DateTime.tryParse(modified);
 }
 
 class SysInfo {
@@ -261,4 +705,66 @@ class SysInfo {
         version: (json['version'] ?? '') as String,
         defaultTarget: (json['default_target'] ?? '') as String,
       );
+}
+
+/// One miner IP-Report broadcast (v0.34, docs/ipreport-mapping.md):
+/// the core listener's report document. [ip] is the address the
+/// payload claims (first private IPv4 in the text) or null — then
+/// [targetIp] falls back to [sender], exactly like the reference
+/// implementations. [family] is "antminer" (UDP 14235,
+/// CORROBORATED) or "whatsminer" (UDP 8888, SINGLE-SOURCE).
+class IpReport {
+  final double receivedAt; // epoch seconds, as the core wrote it
+  final String sender;
+  final String text;
+  final String? ip;
+  final String? mac;
+  final String? family;
+
+  const IpReport({
+    required this.receivedAt,
+    required this.sender,
+    required this.text,
+    this.ip,
+    this.mac,
+    this.family,
+  });
+
+  /// The address to open/scan: the miner's own claim when valid,
+  /// otherwise the packet's source (Find-My-Miner's Target rule).
+  String get targetIp => ip ?? sender;
+
+  String get familyLabel => switch (family) {
+        'whatsminer' => 'Whatsminer',
+        'antminer' => 'Antminer',
+        _ => 'Không rõ hãng',
+      };
+
+  DateTime get receivedTime =>
+      DateTime.fromMillisecondsSinceEpoch((receivedAt * 1000).round());
+
+  String get whenText {
+    final t = receivedTime;
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${two(t.hour)}:${two(t.minute)}:${two(t.second)} '
+        '${two(t.day)}/${two(t.month)}';
+  }
+
+  factory IpReport.fromJson(Map<String, dynamic> json) => IpReport(
+        receivedAt: ((json['received_at'] as num?) ?? 0).toDouble(),
+        sender: (json['sender'] ?? '') as String,
+        text: (json['text'] ?? '') as String,
+        ip: json['ip'] as String?,
+        mac: json['mac'] as String?,
+        family: json['family'] as String?,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'received_at': receivedAt,
+        'sender': sender,
+        'text': text,
+        'ip': ip,
+        'mac': mac,
+        'family': family,
+      };
 }

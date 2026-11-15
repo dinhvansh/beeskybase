@@ -1,61 +1,115 @@
 import 'package:flutter/material.dart';
 
-/// BeeSky palette — ported 1:1 from the Python design system
-/// (beesky/ui_theme.py) so the Flutter app and the Tk fallback look like
-/// one product. Radii mirror ui_theme too: 16 cards / 12 widgets / pills.
+/// BeeSky Cloud Light — the v0.39 redesign tokens (docs/redesign-mapping.md).
+///
+/// "BeeSky Cloud Light × Linear × Modern Windows 11 Fluent UI":
+/// warm white app background, white sidebar/surfaces, thin
+/// #E0E5D9 borders, soft yellow highlights, dark text. The constant
+/// NAMES are kept from the dark theme on purpose — the ~281 call
+/// sites across lib/ flip to light with this file alone.
+///
+/// Contrast rule: pure brand yellow (#FFE000) is a FILL/BORDER
+/// color only. It is never used as small text on white — every
+/// accent-as-text call site uses [BeeSkyColors.accentInk] instead.
 class BeeSkyColors {
-  static const bg = Color(0xFF0B0B0D);
-  static const panel = Color(0xFF15151A);
-  static const panel2 = Color(0xFF1C1C22);
-  static const border = Color(0xFF26262E);
-  static const panelGlass = Color(0xFF191920);
-  static const glassBorder = Color(0xFF34343E);
-  static const rimLight = Color(0xFF3D3D4A);
-  static const ghostFill = Color(0xFF22222B);
-  static const entryFill = Color(0xFF1E1E26);
-  static const entryBorder = Color(0xFF30303C);
-  static const tableWell = Color(0xFF121216);
-  static const tableHeading = Color(0xFF1D1D24);
-  static const tableZebra = Color(0xFF17171D);
-  static const accent = Color(0xFFF5D800);
+  // Prompt table, 1:1.
+  static const brand = Color(0xFFFFE000); // Brand Primary
+  static const brandHover = Color(0xFFF5D200); // Brand Hover
+  static const text = Color(0xFF202A28); // Text Primary
+  static const muted = Color(0xFF7B8877); // Text Secondary
+  static const bg = Color(0xFFF7F8F4); // App Background
+  static const sidebarBg = Color(0xFFFFFFFF); // Sidebar Background
+  static const surface = Color(0xFFFFFFFF); // Surface
+  static const border = Color(0xFFE0E5D9); // Border
+  static const activeNav = Color(0xFFFFF1B7); // Active Navigation
+  static const ok = Color(0xFF16A34A); // Success
+  static const warn = Color(0xFFF59E0B); // Warning
+  static const bad = Color(0xFFDC2626); // Error
+  static const info = Color(0xFF2563EB); // Info
+
+  // Legacy names, remapped to the light system (call sites keep
+  // working unchanged).
+  static const panel = surface;
+  static const panel2 = bg;
+  static const panelGlass = surface;
+  static const glassBorder = border;
+  static const rimLight = surface; // no rim light on light cards
+  static const ghostFill = Color(0xFFEFF2EA);
+  static const entryFill = surface;
+  static const entryBorder = border;
+  static const tableWell = surface;
+  static const tableHeading = bg;
+  static const tableZebra = Color(0xFFFAFBF8);
+  static const accent = brand;
   static const accentText = Color(0xFF141414);
-  static const text = Color(0xFFF2F2F3);
-  static const muted = Color(0xFF9CA3AF);
-  static const ok = Color(0xFF34D399);
-  static const warn = Color(0xFFFBBF24);
-  static const bad = Color(0xFFF87171);
+  static const accentHover = brandHover;
+
+  /// Dark amber for small yellow-meaning text/icons on light
+  /// backgrounds (sort indicators, running-state icons, "MỚI"
+  /// pill, focused labels). #FFE000 text on white fails contrast.
+  static const accentInk = Color(0xFF7A5A00);
 
   /// A hashboard at/over the temperature limit (models.tempLimitC),
-  /// in the table's NHIỆT cell and the detail panel's board lines —
-  /// the approved prototype's `.bt.hot` red (#FF6B6B).
-  static const hotTemp = Color(0xFFFF6B6B);
-  static const selectBg = Color(0xFF3A3410);
+  /// in the table's NHIỆT cell and the detail panel's board lines.
+  static const hotTemp = bad;
+  static const selectBg = activeNav;
 }
 
-const double radiusCard = 16;
-const double radiusWidget = 12;
+/// 4px spacing scale; radii per the prompt: cards 10–12,
+/// buttons 8–9, inputs 8.
+const double radiusCard = 12;
+const double radiusWidget = 8;
 const double radiusPill = 999;
 
+/// Numeric values: tabular figures so columns don't jitter.
+/// IPs / technical identifiers: monospace fallback stack.
+const _tabular = FontFeature.tabularFigures();
+
+TextStyle numStyle({double fontSize = 13, FontWeight? weight, Color? color}) {
+  return TextStyle(
+    fontSize: fontSize,
+    fontWeight: weight,
+    color: color,
+    fontFeatures: const [_tabular],
+  );
+}
+
+TextStyle monoStyle({double fontSize = 13, FontWeight? weight, Color? color}) {
+  return TextStyle(
+    fontSize: fontSize,
+    fontWeight: weight,
+    color: color,
+    fontFamilyFallback: const ['Consolas', 'Courier New', 'monospace'],
+  );
+}
+
 ThemeData buildBeeSkyTheme() {
-  final base = ThemeData.dark(useMaterial3: true);
+  final base = ThemeData.light(useMaterial3: true);
+  const fontFallback = ['Inter', 'Segoe UI', 'Roboto'];
   return base.copyWith(
     scaffoldBackgroundColor: BeeSkyColors.bg,
     colorScheme: base.colorScheme.copyWith(
       primary: BeeSkyColors.accent,
       onPrimary: BeeSkyColors.accentText,
-      surface: BeeSkyColors.panel,
+      surface: BeeSkyColors.surface,
       onSurface: BeeSkyColors.text,
       error: BeeSkyColors.bad,
     ),
     textTheme: base.textTheme.apply(
       bodyColor: BeeSkyColors.text,
       displayColor: BeeSkyColors.text,
+      fontFamilyFallback: fontFallback,
+    ),
+    appBarTheme: const AppBarTheme(
+      backgroundColor: BeeSkyColors.surface,
+      foregroundColor: BeeSkyColors.text,
+      elevation: 0,
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: BeeSkyColors.entryFill,
       isDense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(radiusWidget),
         borderSide: const BorderSide(color: BeeSkyColors.entryBorder),
@@ -66,10 +120,11 @@ ThemeData buildBeeSkyTheme() {
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(radiusWidget),
-        borderSide: const BorderSide(color: BeeSkyColors.accent),
+        borderSide: const BorderSide(color: BeeSkyColors.accentInk, width: 1.5),
       ),
       labelStyle: const TextStyle(color: BeeSkyColors.muted),
-      floatingLabelStyle: const TextStyle(color: BeeSkyColors.accent),
+      floatingLabelStyle: const TextStyle(color: BeeSkyColors.accentInk),
+      hintStyle: const TextStyle(color: BeeSkyColors.muted),
     ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
@@ -78,36 +133,89 @@ ThemeData buildBeeSkyTheme() {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(radiusWidget),
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
         textStyle: const TextStyle(fontWeight: FontWeight.w700),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
-        backgroundColor: BeeSkyColors.ghostFill,
+        backgroundColor: BeeSkyColors.surface,
         foregroundColor: BeeSkyColors.text,
-        side: const BorderSide(color: BeeSkyColors.glassBorder),
+        side: const BorderSide(color: BeeSkyColors.border),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(radiusWidget),
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(
+        foregroundColor: BeeSkyColors.accentInk,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(radiusWidget),
+        ),
+      ),
+    ),
+    checkboxTheme: CheckboxThemeData(
+      fillColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.selected)
+            ? BeeSkyColors.accent
+            : BeeSkyColors.surface,
+      ),
+      checkColor: WidgetStateProperty.all(BeeSkyColors.accentText),
+      side: const BorderSide(color: BeeSkyColors.border),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+    ),
+    tabBarTheme: TabBarThemeData(
+      // v0.39.1 fix: bare TabBars (Settings 5 tabs, Presets center)
+      // inherited labelColor = colorScheme.primary = #FFE000, so the
+      // selected tab — and any tab on hover — rendered yellow text on
+      // white (≈1.6:1, unreadable). v0.39.2, owner feedback: labels
+      // are plain black, and hover has NO yellow at all — just a
+      // neutral pale-grey wash. Yellow survives only as the thin
+      // underline indicator (a fill).
+      labelColor: BeeSkyColors.text,
+      unselectedLabelColor: BeeSkyColors.muted,
+      indicatorColor: BeeSkyColors.accent,
+      dividerColor: BeeSkyColors.border,
+      overlayColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.hovered)
+            ? BeeSkyColors.ghostFill
+            : Colors.transparent,
+      ),
+    ),
+    popupMenuTheme: const PopupMenuThemeData(
+      color: BeeSkyColors.surface,
+      surfaceTintColor: Colors.transparent,
+    ),
+    dialogTheme: const DialogThemeData(
+      backgroundColor: BeeSkyColors.surface,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.all(Radius.circular(radiusCard)),
       ),
     ),
     dividerTheme: const DividerThemeData(color: BeeSkyColors.border),
     snackBarTheme: const SnackBarThemeData(
-      backgroundColor: BeeSkyColors.panel2,
-      contentTextStyle: TextStyle(color: BeeSkyColors.text),
+      backgroundColor: BeeSkyColors.text,
+      contentTextStyle: TextStyle(color: BeeSkyColors.surface),
     ),
     progressIndicatorTheme: const ProgressIndicatorThemeData(
-      color: BeeSkyColors.accent,
+      color: BeeSkyColors.accentInk,
+    ),
+    tooltipTheme: const TooltipThemeData(
+      decoration: BoxDecoration(
+        color: BeeSkyColors.text,
+        borderRadius: BorderRadius.all(Radius.circular(6)),
+      ),
+      textStyle: TextStyle(color: BeeSkyColors.surface, fontSize: 12),
     ),
   );
 }
 
-/// A "glass" card in the desktop sense used by the Tk app since v0.18:
-/// translucent panel tone, 1px glass border, a rim-light top edge and
-/// 16px rounded corners. (Real backdrop blur is what the WEB dashboards
-/// do with CSS; on desktop this stays a simulated glass like the Tk app.)
+/// A light card: white surface, 1px thin border, one soft shadow,
+/// 12px corners. (v0.39: the dark "glass" card — translucent panel,
+/// rim light, heavy shadow — is retired with the dark theme.)
 class GlassCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
@@ -126,31 +234,13 @@ class GlassCard extends StatelessWidget {
         border: Border.all(color: BeeSkyColors.glassBorder),
         boxShadow: const [
           BoxShadow(
-            color: Color(0x66000000),
-            blurRadius: 18,
-            offset: Offset(0, 8),
+            color: Color(0x0F202A28),
+            blurRadius: 8,
+            offset: Offset(0, 2),
           ),
         ],
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(radiusCard),
-        child: Stack(
-          children: [
-            // Rim light: a hairline highlight along the top edge.
-            const Positioned(
-              top: 0,
-              left: 14,
-              right: 14,
-              child: Divider(
-                height: 1,
-                thickness: 1,
-                color: BeeSkyColors.rimLight,
-              ),
-            ),
-            Padding(padding: padding, child: child),
-          ],
-        ),
-      ),
+      child: Padding(padding: padding, child: child),
     );
   }
 }

@@ -3,18 +3,45 @@
 Discovery recipe (same shape as mature fleet tools): for every host in the
 target, walk the adapter chain in a fixed order —
 
-  1. cgminer RPC on TCP 4028 (Bitmain & most forks; richest data)
+  1. socket APIs on TCP 4028: the MicroBT Whatsminer dialect
+     ({"cmd": ...} envelopes + the Fan Speed In/Out fingerprint)
+     first, then cgminer RPC (Bitmain & most forks; richest data) —
+     with a Canaan Avalon refinement on the cgminer claim (the
+     STATS "MM ID" module fingerprint; v0.30, see
+     docs/vendor-coverage-mapping.md) and a LuxOS refinement
+     (the ``version`` Description starts "LUXminer"; v0.33.0,
+     see docs/vendor-docs-mapping.md §2), Auradine and
+     SealMiner refinements (the ``version`` reply carries
+     "gcminer"/"fluxos" resp. "bdminer", case-insensitive;
+     v0.38.0, see docs/vendor-docs2-mapping.md §1–§2),
+     then the ePIC HTTP
+     JSON probe (GET /summary, Hostname+Session+HBs gate;
+     v0.37.0, see docs/epic-mapping.md §2) — an Epic miner
+     answers the two earlier probes with non-parseable
+     replies, so it falls through to the HTTP probe cleanly
   2. VNish/HashCore dashd HTTP API on :80 (GET /api/v1/summary signature)
   3. Bitmain stock web CGI on :80 (digest auth, /cgi-bin/get_miner_status.cgi)
+  4. IceRiver web API on :80 (console-title gate, then the
+     userpanel shape gate; v0.36.0, docs/vendor-oss-mapping.md §2)
 
 — and keep the first adapter that answers like a miner. Probing is threaded
 with bounded workers and short timeouts so a /24 scans in seconds.
 
 Multi-credential scans (v0.23): fleets run several machine lines with
 different web logins, so the authenticated steps (dashd /unlock, stock
-digest) accept a list of credential sets — each tagged "any" / "stock"
-/ "vnish" — and try them family-first (see ordered_creds). The winning
+digest) accept a list of credential sets — each tagged with a machine
+family — and try them family-first (see ordered_creds). The winning
 set's label is carried on the candidate into the record (cred_label).
+Family tags (v0.30): the HashCore vendor set ported in
+docs/vendor-coverage-mapping.md §6 — detection exists for whatsminer,
+avalon, luxos (v0.33.0) and braiins + iceriver (v0.36.0,
+docs/vendor-oss-mapping.md); epic (v0.37.0, docs/epic-mapping.md);
+auradine + sealminer (v0.38.0, docs/vendor-docs2-mapping.md);
+jasminer is still a tag-only family
+(its contract is a named gap in
+docs/vendor-oss-mapping.md §4); pit-bit has neither
+a tag nor an adapter (G-PB1 in
+docs/vendor-docs2-mapping.md §3).
 """
 
 from __future__ import annotations
@@ -24,9 +51,17 @@ import socket
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
+from .auradine import is_auradine_version
 from .bitmain import BitmainClient
+from .braiins import is_braiins_version
 from .cgminer import CgminerClient
 from .dashd import DashdClient, DashdError
+from .epic import EpicClient, is_epic_summary
+from .iceriver import (DEFAULT_PASSWORD as ICERIVER_DEFAULT_PASSWORD,
+                       IceRiverClient, IceRiverError, panel_model)
+from .luxos import is_luxos_version
+from .sealminer import is_sealminer_version
+from .whatsminer import WhatsminerClient, is_whatsminer_summary
 
 HTTP_PORT = 80
 CGMINER_PORT = 4028
@@ -81,13 +116,18 @@ class Candidate:
     """One host that looks like a miner, with the adapter that claimed it."""
 
     ip: str
-    source: str | None = None  # "cgminer" | "vnish" | "stock"
+    source: str | None = None  # "cgminer" | "vnish" | "stock" |
+    #                            "whatsminer" | "avalon" | "luxos" |
+    #                            "braiins" | "iceriver" | "epic"
     http_open: bool = False
     cgminer_open: bool = False
     cgminer_ok: bool = False  # answered a real `summary` command
     model: str | None = None
     summary: dict = field(default_factory=dict)
     status_data: dict = field(default_factory=dict)  # stock probe payload cache
+    stats_data: dict = field(default_factory=dict)  # cgminer-family stats
+    # cache (v0.30: the probe's Avalon-refinement fetch, reused by
+    # the fetch stage so a scan pays for the stats call once)
     http_port: int = HTTP_PORT
     cgminer_port: int = CGMINER_PORT
     # Multi-credential results (v0.23): which saved set authenticated,
@@ -95,6 +135,9 @@ class Candidate:
     cred_label: str | None = None   # winning set's label (None = default/RPC)
     dashd_token: str | None = None  # JWT minted by the winning dashd login
     dashd_api_key: str | None = None  # x-api-key of the winning vnish set
+    iceriver_password: str | None = None  # winning IceRiver web password
+    # (v0.36.0: the panel probe tries iceriver-tagged sets, then the
+    # factory default; the fetch stage reuses the winner)
     username: str = "root"          # winning stock cred — fetch reuses it
     password: str = "root"
 
@@ -155,17 +198,45 @@ def _port_open(ip: str, port: int, timeout: float) -> bool:
         return False
 
 
-CRED_TYPES = ("any", "stock", "vnish")
+CRED_TYPES = ("any", "stock", "vnish", "whatsminer", "avalon",
+              "iceriver", "jasminer", "braiins", "luxos", "epic",
+              "auradine", "sealminer")
 
 
 def cred_type(entry: dict) -> str:
     """A credential set's machine-type tag, normalised (v0.23).
 
-    Only "stock" / "vnish" are family tags; a missing or unknown tag
+    The family tags are CRED_TYPES (v0.30: the HashCore vendor set —
+    docs/vendor-coverage-mapping.md §6); a missing or unknown tag
     means "any" (back-compat with untyped sets).
     """
     tag = entry.get("type")
-    return tag if tag in ("stock", "vnish") else "any"
+    return tag if tag in CRED_TYPES else "any"
+
+
+def _avalon_fingerprint(stats: dict, summary: dict) -> bool:
+    """Canaan Avalon fingerprint on a cgminer claim (v0.30).
+
+    HashCore parses Avalon STATS from cgminer STATS JSON with a
+    dedicated factory (docs/vendor-coverage-mapping.md §2); the
+    distinguishing marks in the payload are the module keys
+    "MM ID<n>" (Avalon hash-module entries — stock Antminer STATS
+    carries none) or a Type naming the Avalon line. Positive-only:
+    no mark, no reclassification.
+    """
+    if not isinstance(stats, dict):
+        stats = {}
+    entries = stats.get("stats_entries")
+    dicts = [e for e in entries if isinstance(e, dict)] \
+        if isinstance(entries, list) else []
+    dicts.append(stats)
+    for entry in dicts:
+        for key in entry:
+            if str(key).startswith("MM ID"):
+                return True
+        if str(entry.get("Type") or "").startswith("Avalon"):
+            return True
+    return str((summary or {}).get("Type") or "").startswith("Avalon")
 
 
 def ordered_creds(creds: list[dict], family: str) -> list[dict]:
@@ -209,17 +280,100 @@ def probe_host(ip: str, timeout: float = 1.5, http_port: int = HTTP_PORT,
     cand.http_open = _port_open(ip, http_port, timeout)
     cand.cgminer_open = _port_open(ip, cgminer_port, timeout)
 
-    # 1) cgminer RPC — richest data, try first whenever the port is open.
+    # 1) Socket APIs on 4028, whenever the port is open.
     if cand.cgminer_open:
+        # 1a) MicroBT Whatsminer dialect (v0.30): a modern Whatsminer
+        # does not answer the cgminer envelope at all, and a cgminer
+        # device answers this dialect with a STATUS-E error — the
+        # fan-pair fingerprint can therefore never mis-claim a
+        # cgminer miner (docs/vendor-coverage-mapping.md §1.2).
         try:
-            cand.summary = CgminerClient(
-                ip, port=cgminer_port, timeout=timeout).summary()
+            wm_item = WhatsminerClient(
+                ip, port=cgminer_port, timeout=timeout).summary_item()
+        except Exception:  # noqa: BLE001 — a probe must never raise
+            wm_item = {}
+        if is_whatsminer_summary(wm_item):
+            cand.source = "whatsminer"
+            cand.summary = wm_item
+            cand.cgminer_ok = True
+            cand.model = wm_item.get("Type") or wm_item.get("Model")
+            return cand
+
+        # 1b) cgminer RPC — richest data for the cgminer family.
+        try:
+            client = CgminerClient(ip, port=cgminer_port, timeout=timeout)
+            cand.summary = client.summary()
             cand.cgminer_ok = bool(cand.summary)
         except Exception:
             cand.cgminer_ok = False
         if cand.cgminer_ok:
             cand.source = "cgminer"
             cand.model = cand.summary.get("Type") or cand.summary.get("Model")
+            # Canaan Avalon refinement (v0.30): Avalon is a cgminer
+            # device with its own STATS flavour — one stats fetch
+            # (cached for the fetch stage) checks the fingerprint.
+            try:
+                cand.stats_data = client.stats()
+            except Exception:
+                cand.stats_data = {}
+            if _avalon_fingerprint(cand.stats_data, cand.summary):
+                cand.source = "avalon"
+            else:
+                # LuxOS refinement (v0.33.0, docs/vendor-docs-mapping.md
+                # §2.4): a cgminer-claim device whose `version`
+                # Description starts "LUXminer" is a LuxOS miner.
+                # One extra call, positive-only — stock answers
+                # `cgminer …` / `bmminer …` and never matches.
+                try:
+                    version_resp = client.command("version")
+                except Exception:
+                    version_resp = {}
+                if is_luxos_version(version_resp):
+                    cand.source = "luxos"
+                elif is_braiins_version(version_resp):
+                    # Braiins refinement (v0.36.0,
+                    # docs/vendor-oss-mapping.md §1.2): the same
+                    # `version` reply carrying "bosminer"/"boser"
+                    # (the STATUS Description build string) is a
+                    # Braiins OS miner. Same positive-only rule —
+                    # no other family carries either substring.
+                    cand.source = "braiins"
+                elif is_auradine_version(version_resp):
+                    # Auradine refinement (v0.38.0,
+                    # docs/vendor-docs2-mapping.md §1.2): the
+                    # `version` reply carrying "gcminer"/"fluxos"
+                    # (GCMiner / FluxOS) is a Teraflux miner.
+                    # Case-insensitive — the libraries' own
+                    # fixtures carry the markers mixed-case
+                    # (D-AU1). "cgminer" is not "gcminer".
+                    cand.source = "auradine"
+                elif is_sealminer_version(version_resp):
+                    # SealMiner refinement (v0.38.0,
+                    # docs/vendor-docs2-mapping.md §2.2): the
+                    # `version` reply carrying "bdminer"
+                    # (BDMiner) is a Bitdeer SealMiner.
+                    # Case-insensitive (D-SE1).
+                    cand.source = "sealminer"
+            return cand
+
+        # 1c) ePIC HTTP JSON (v0.37.0, docs/epic-mapping.md §2):
+        # GET :4028/summary, claim on the structural gate
+        # (Hostname + Session/"Average MHs" + HBs). An Epic miner
+        # answers the two probes above with non-parseable
+        # replies, so reaching here is expected for it — and
+        # no cgminer-family device can pass the gate, because
+        # none of them serves HTTP JSON on 4028.
+        try:
+            epic_summary = EpicClient(
+                ip, port=cgminer_port, timeout=timeout).summary()
+        except Exception:  # noqa: BLE001 — a probe must never raise
+            epic_summary = {}
+        if is_epic_summary(epic_summary):
+            cand.source = "epic"
+            cand.summary = epic_summary
+            cand.cgminer_ok = True
+            # The model comes from /capabilities, which the fetch
+            # stage reads — the probe claims on the summary alone.
             return cand
 
     # 2) + 3) HTTP adapters need the web port.
@@ -291,6 +445,41 @@ def probe_host(ip: str, timeout: float = 1.5, http_port: int = HTTP_PORT,
                 cand.username = entry["user"]
                 cand.password = entry["password"]
                 cand.cred_label = entry.get("label")
+                return cand
+
+        # IceRiver (v0.36.0, docs/vendor-oss-mapping.md §2.4):
+        # the console-title gate (one GET — cheap, and it keeps
+        # the two POSTs off every router/admin page in the range),
+        # then the panel-shape gate. Passwords are tried in family
+        # order (iceriver-tagged sets first), then the factory
+        # default 12345678; the winner rides the candidate into
+        # the fetch stage. The shape gate is decisive — the title
+        # alone never claims a host.
+        ice = IceRiverClient(ip, port=http_port,
+                             timeout=fetch_timeout)
+        if ice.has_console_title():
+            passwords: list[str] = []
+            if explicit_creds:
+                # Saved sets only: the implicit single entry (creds
+                # is None) carries the stock legacy pair root/root,
+                # which is never an IceRiver password — trying it
+                # first would "win" on any device whose panel needs
+                # no login, and record the wrong password.
+                for entry in ordered_creds(cred_list, "iceriver"):
+                    pwd = entry.get("password")
+                    if pwd and pwd not in passwords:
+                        passwords.append(pwd)
+            if ICERIVER_DEFAULT_PASSWORD not in passwords:
+                passwords.append(ICERIVER_DEFAULT_PASSWORD)
+            for pwd in passwords:
+                ice.password = pwd
+                try:
+                    panel = ice.userpanel()
+                except IceRiverError:
+                    continue
+                cand.source = "iceriver"
+                cand.iceriver_password = pwd
+                cand.model = panel_model(panel)
                 return cand
 
         # Locked dashd (v0.23, explicit creds only): anonymous
