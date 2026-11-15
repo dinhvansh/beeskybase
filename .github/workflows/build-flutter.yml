@@ -99,7 +99,8 @@ jobs:
       - name: Zip the runner folder
         shell: pwsh
         run: |
-          $name = "BeeSkyFlutter-${{ github.ref_name }}-win64"
+          $refName = $env:GITHUB_REF_NAME -replace "[^A-Za-z0-9._-]", "-"
+          $name = "BeeSkyFlutter-$refName-win64"
           Compress-Archive `
             -Path "app_flutter/build/windows/x64/runner/Release/*" `
             -DestinationPath "$name.zip"
@@ -118,6 +119,7 @@ jobs:
             $names = $archive.Entries | ForEach-Object { $_.FullName }
             $names | ForEach-Object { Write-Host "zip entry: $_" }
             foreach ($need in @("beesky_app.exe", "beesky.exe",
+                                "beesky-agent.exe", "beesky-agentw.exe",
                                 "flutter_windows.dll")) {
               if ($names -notcontains $need) {
                 Write-Error "zip is missing $need"; exit 1
@@ -192,7 +194,8 @@ jobs:
       - name: Zip the runner folder
         shell: pwsh
         run: |
-          $name = "BeeSkyAgentFlutter-${{ github.ref_name }}-win64"
+          $refName = $env:GITHUB_REF_NAME -replace "[^A-Za-z0-9._-]", "-"
+          $name = "BeeSkyAgentFlutter-$refName-win64"
           Compress-Archive `
             -Path "app_agent_flutter/build/windows/x64/runner/Release/*" `
             -DestinationPath "$name.zip"
