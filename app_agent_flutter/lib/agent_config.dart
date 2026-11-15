@@ -4,7 +4,7 @@ import 'dart:io';
 /// The product version this app reports (header pill — the Tk
 /// window takes it from the Python package; here it mirrors the
 /// package version, pinned by the release process).
-const String agentAppVersion = '0.40.2';
+const String agentAppVersion = '0.41.0';
 
 /// The agent config file — a Dart mirror of the Python core's
 /// `beesky/agent_config.py`, which stays the spec and the owner of
@@ -87,8 +87,8 @@ class AgentConfig {
   /// A string field the way from_dict resolves it: an ABSENT key
   /// keeps the dataclass default ('root' for user/password), a
   /// present one is coerced (present-null -> '').
-  static String _strField(Map<String, dynamic> data, String name,
-          String fallback) =>
+  static String _strField(
+          Map<String, dynamic> data, String name, String fallback) =>
       data.containsKey(name) ? _asString(data[name]) : fallback;
 
   static double _asDouble(Object? v, double fallback) {
@@ -191,7 +191,7 @@ String defaultConfigPath({Map<String, String>? env, bool? isWindows}) {
   final win = isWindows ?? Platform.isWindows;
   final override = e['BEESKY_AGENT_CONFIG'];
   if (override != null && override.isNotEmpty) return override;
-  final sep = Platform.pathSeparator;
+  final sep = win ? r'\' : '/';
   if (win) {
     final appdata = e['APPDATA'];
     if (appdata != null && appdata.isNotEmpty) {

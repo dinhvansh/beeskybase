@@ -205,7 +205,7 @@ void main() {
     await _pumpPage(tester, bridge: bridge, store: store);
 
     expect(_field(tester, 1).obscureText, isTrue);
-    await tester.tap(find.byType(Checkbox));
+    await tester.tap(find.byTooltip('Hiện token'));
     await tester.pump();
     expect(_field(tester, 1).obscureText, isFalse);
   });

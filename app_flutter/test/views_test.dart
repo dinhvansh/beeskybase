@@ -322,7 +322,7 @@ void main() {
 
       await tester.tap(find.text('Cài đặt'));
       await tester.pumpAndSettle();
-      expect(find.text('BeeSky v0.39.0'), findsWidgets);
+      expect(find.text('BeeSky v0.41.0'), findsWidgets);
       // The credential count lives on the Tài khoản tab now.
       await tester.tap(find.text('Tài khoản'));
       await tester.pumpAndSettle();
@@ -379,8 +379,7 @@ void main() {
       final bridge = SidecarBridge(exePath: missing);
       await pumpHome(tester, bridge: bridge, tmp: tmp);
 
-      expect(find.text('Chưa có ruột quét (thiếu beesky.exe)'),
-          findsOneWidget);
+      expect(find.text('Thiếu bộ quét'), findsNWidgets(2));
       expect(find.text(missingSidecarMessage), findsWidgets);
       expect(find.textContaining('ProcessException'), findsNothing);
       expect(find.textContaining('cannot find the file'), findsNothing);

@@ -429,16 +429,6 @@ Widget viewHeader(String title, String subtitle) {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'BeeSky / $title',
-          style: const TextStyle(
-            color: BeeSkyColors.muted,
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.4,
-          ),
-        ),
-        const SizedBox(height: 6),
         Text(title,
             style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
         const SizedBox(height: 3),

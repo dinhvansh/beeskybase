@@ -633,6 +633,8 @@ void registerGridWidgetTests() {
     await _pumpHome(tester, tmp: tmp);
     await _runScan(tester);
 
+    await tester.tap(find.text('Hiển thị'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Tổng quan'));
     await tester.pumpAndSettle();
     // Overview chrome: colour-metric + cell-size controls appear.
@@ -831,6 +833,8 @@ void registerGridWidgetTests() {
     await _runScan(tester);
     expect(find.text('UPTIME'), findsNothing);
 
+    await tester.tap(find.text('Hiển thị'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Cột'));
     await tester.pumpAndSettle();
     // DATA-GAP columns are tagged, never hidden.

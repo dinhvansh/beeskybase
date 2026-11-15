@@ -37,7 +37,7 @@
 ; .github/workflows/build-windows.yml — never by hand)
 
 #define MyAppName "BeeSky"
-#define MyAppVersion "0.40.2"
+#define MyAppVersion "0.41.0"
 #define MyAppPublisher "BeeSkyBase"
 #define MyAppExeName "beesky-gui.exe"
 
@@ -97,31 +97,28 @@ Source: "..\dist\flutter-agent\*"; DestDir: "{app}\agent"; \
 Source: "..\docs\agent-app.md"; DestDir: "{app}\agent\docs"; Flags: ignoreversion; Components: agent
 
 [Icons]
-; The face of the tool: the windowed GUI (unchanged in v0.31 —
-; the Flutter faces get their own shortcuts alongside).
-Name: "{autoprograms}\BeeSky"; Filename: "{app}\beesky-gui.exe"; \
-  WorkingDir: "{app}"; IconFilename: "{app}\beesky-gui.exe"; \
+; The redesigned native UI is primary; keep Tk as the compatibility option.
+Name: "{autoprograms}\BeeSky"; Filename: "{app}\beesky_app.exe"; \
+  WorkingDir: "{app}"; IconFilename: "{app}\beesky_app.exe"; \
   Comment: "BeeSky - Quét & chẩn đoán máy đào"; Components: main
-Name: "{autodesktop}\BeeSky"; Filename: "{app}\beesky-gui.exe"; \
-  WorkingDir: "{app}"; IconFilename: "{app}\beesky-gui.exe"; \
+Name: "{autodesktop}\BeeSky"; Filename: "{app}\beesky_app.exe"; \
+  WorkingDir: "{app}"; IconFilename: "{app}\beesky_app.exe"; \
   Comment: "BeeSky - Quét & chẩn đoán máy đào"; \
   Tasks: desktopicon; Components: main
-Name: "{autoprograms}\BeeSky Flutter"; Filename: "{app}\beesky_app.exe"; \
-  WorkingDir: "{app}"; IconFilename: "{app}\beesky_app.exe"; \
-  Comment: "BeeSky (Flutter) - Quét & chẩn đoán máy đào"; Components: main
+Name: "{autoprograms}\BeeSky (Compatibility)"; Filename: "{app}\beesky-gui.exe"; \
+  WorkingDir: "{app}"; IconFilename: "{app}\beesky-gui.exe"; \
+  Comment: "BeeSky (Compatibility) - Quét & chẩn đoán máy đào"; Components: main
 ; Power users: a console that stays open (/k) with beesky on PATH.
 Name: "{autoprograms}\BeeSky Console"; Filename: "{cmd}"; Parameters: "/k"; \
   WorkingDir: "{userdocs}"; IconFilename: "{app}\beesky.exe"; \
   Comment: "BeeSky console - try: beesky scan 192.168.1.0/24"
-; The agent: bare beesky-agent.exe opens the (Tk) config window,
-; exactly as in the standalone installer; the Flutter face is
-; alongside it.
-Name: "{autoprograms}\BeeSky Agent"; Filename: "{app}\agent\beesky-agent.exe"; \
-  WorkingDir: "{app}\agent"; IconFilename: "{app}\agent\beesky-agent.exe"; \
-  Comment: "BeeSky Agent - Cấu hình agent tại trại"; Components: agent
-Name: "{autoprograms}\BeeSky Agent (Flutter)"; Filename: "{app}\agent\beesky_agent_app.exe"; \
+; Match the standalone Agent installer: native UI first, Tk fallback.
+Name: "{autoprograms}\BeeSky Agent"; Filename: "{app}\agent\beesky_agent_app.exe"; \
   WorkingDir: "{app}\agent"; IconFilename: "{app}\agent\beesky_agent_app.exe"; \
-  Comment: "BeeSky Agent (Flutter) - Cấu hình agent tại trại"; Components: agent
+  Comment: "BeeSky Agent - Cấu hình agent tại xưởng"; Components: agent
+Name: "{autoprograms}\BeeSky Agent (Compatibility)"; Filename: "{app}\agent\beesky-agent.exe"; \
+  WorkingDir: "{app}\agent"; IconFilename: "{app}\agent\beesky-agent.exe"; \
+  Comment: "BeeSky Agent (Compatibility) - Cấu hình agent tại xưởng"; Components: agent
 
 [Registry]
 ; Append {app} to the user PATH (only if not already there — see

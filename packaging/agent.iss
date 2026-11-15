@@ -38,7 +38,7 @@
 ; .github/workflows/build-windows.yml — never by hand)
 
 #define MyAppName "BeeSky Agent"
-#define MyAppVersion "0.40.2"
+#define MyAppVersion "0.41.0"
 #define MyAppPublisher "BeeSkyBase"
 #define MyAppExeName "beesky-agent.exe"
 
@@ -79,16 +79,16 @@ Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 [Icons]
 ; No arguments = the config window. The agent loop itself is started
 ; by the Scheduled Task the window can create, not by a shortcut.
-Name: "{autoprograms}\BeeSky Agent"; Filename: "{app}\beesky-agent.exe"; \
-  WorkingDir: "{app}"; IconFilename: "{app}\beesky-agent.exe"; \
-  Comment: "BeeSky Agent - Cấu hình agent tại trại"
-Name: "{autodesktop}\BeeSky Agent"; Filename: "{app}\beesky-agent.exe"; \
-  WorkingDir: "{app}"; IconFilename: "{app}\beesky-agent.exe"; \
-  Comment: "BeeSky Agent - Cấu hình agent tại trại"; \
-  Tasks: desktopicon
-Name: "{autoprograms}\BeeSky Agent (Flutter)"; Filename: "{app}\beesky_agent_app.exe"; \
+Name: "{autoprograms}\BeeSky Agent"; Filename: "{app}\beesky_agent_app.exe"; \
   WorkingDir: "{app}"; IconFilename: "{app}\beesky_agent_app.exe"; \
-  Comment: "BeeSky Agent (Flutter) - Cấu hình agent tại trại"
+  Comment: "BeeSky Agent - Cấu hình agent tại xưởng"
+Name: "{autodesktop}\BeeSky Agent"; Filename: "{app}\beesky_agent_app.exe"; \
+  WorkingDir: "{app}"; IconFilename: "{app}\beesky_agent_app.exe"; \
+  Comment: "BeeSky Agent - Cấu hình agent tại xưởng"; \
+  Tasks: desktopicon
+Name: "{autoprograms}\BeeSky Agent (Compatibility)"; Filename: "{app}\beesky-agent.exe"; \
+  WorkingDir: "{app}"; IconFilename: "{app}\beesky-agent.exe"; \
+  Comment: "BeeSky Agent (Compatibility) - Cấu hình agent tại xưởng"
 
 [Code]
 { --- Optional agent pairing page (v0.31) --------------------------

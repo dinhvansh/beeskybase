@@ -30,7 +30,12 @@ class AgentConfigPage extends StatefulWidget {
   final AgentBridge bridge;
   final AgentConfigStore store;
   final bool embedded;
-  const AgentConfigPage({super.key, required this.bridge, required this.store, this.embedded=false});
+  const AgentConfigPage({
+    super.key,
+    required this.bridge,
+    required this.store,
+    this.embedded = false,
+  });
 
   @override
   State<AgentConfigPage> createState() => _AgentConfigPageState();
@@ -72,8 +77,12 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
     // 2 s here (divergence D7 — status changes once per cycle).
     _timer = Timer.periodic(const Duration(seconds: 2), (_) {
       final mtime = store.statusModified();
-      if ((mtime != _statusMtime || _displayRunning != bridge.running) && mounted) {
-        setState(() { _displayRunning=bridge.running; _refreshStatusCard(); });
+      if ((mtime != _statusMtime || _displayRunning != bridge.running) &&
+          mounted) {
+        setState(() {
+          _displayRunning = bridge.running;
+          _refreshStatusCard();
+        });
       }
     });
   }
@@ -81,7 +90,13 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
   @override
   void dispose() {
     _timer?.cancel();
-    for (final c in [_cloudCtrl, _keyCtrl, _siteCtrl, _targetCtrl, _intervalCtrl]) {
+    for (final c in [
+      _cloudCtrl,
+      _keyCtrl,
+      _siteCtrl,
+      _targetCtrl,
+      _intervalCtrl,
+    ]) {
       c.dispose();
     }
     super.dispose();
@@ -89,7 +104,7 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
 
   Future<void> _init() async {
     if (!store.exists()) {
-      _cloudCtrl.text='https://mine.beeskybase.com';
+      _cloudCtrl.text = 'https://mine.beeskybase.com';
       // First run: pre-fill the scan target with this machine's
       // own subnet, via the sidecar's sysinfo (D5).
       final target = await bridge.sysinfoDefaultTarget();
@@ -108,7 +123,7 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
       if (mounted) setState(() {});
     }
     _refreshStatusCard();
-    _filling=false;
+    _filling = false;
     await _refreshAutostart();
     if (mounted) setState(() {});
   }
@@ -163,41 +178,77 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
   }
 
   void _connectionChanged() {
-    if(_filling || !mounted) return;
-    setState(() { _connection=null; _siteCtrl.clear(); });
+    if (_filling || !mounted) return;
+    setState(() {
+      _connection = null;
+      _siteCtrl.clear();
+    });
   }
 
   Future<bool> _checkConnection() async {
-    if(_checking) return false;
-    final (cfg,error)=_currentConfig();
-    if(error != null) { setState(()=>_statusLine='Chưa kiểm tra được: $error');return false; }
-    final cloud=_cloudCtrl.text, token=_keyCtrl.text;
-    setState(() { _checking=true; _statusLine='Đang kiểm tra token với Mine…'; });
+    if (_checking) return false;
+    final (cfg, error) = _currentConfig();
+    if (error != null) {
+      setState(() => _statusLine = 'Chưa kiểm tra được: $error');
+      return false;
+    }
+    final cloud = _cloudCtrl.text, token = _keyCtrl.text;
+    setState(() {
+      _checking = true;
+      _statusLine = 'Đang kiểm tra token với Mine…';
+    });
     try {
-      final connection=await bridge.connectionInfo(configPath:store.path,
-        cloudUrl:cfg!.cloudUrl,key:cfg.hasProtectedKey?null:cfg.key);
-      if(!mounted || cloud != _cloudCtrl.text || token != _keyCtrl.text) return false;
-      setState(() { _connection=connection; _siteCtrl.text=connection.siteName;
-        _statusLine='Đã xác nhận: ${connection.agentName} · ${connection.siteName} · ${connection.organizationName}'; });
+      final connection = await bridge.connectionInfo(
+        configPath: store.path,
+        cloudUrl: cfg!.cloudUrl,
+        key: cfg.hasProtectedKey ? null : cfg.key,
+      );
+      if (!mounted || cloud != _cloudCtrl.text || token != _keyCtrl.text)
+        return false;
+      setState(() {
+        _connection = connection;
+        _siteCtrl.text = connection.siteName;
+        _statusLine =
+            'Đã xác nhận: ${connection.agentName} · ${connection.siteName} · ${connection.organizationName}';
+      });
       return true;
-    } on FormatException catch(e) {
-      if(mounted) setState(() { _connection=null;_siteCtrl.clear();_statusLine=e.message.toString(); });
+    } on FormatException catch (e) {
+      if (mounted)
+        setState(() {
+          _connection = null;
+          _siteCtrl.clear();
+          _statusLine = e.message.toString();
+        });
       return false;
-    } catch(_) {
-      if(mounted) setState(()=>_statusLine='Không kiểm tra được token. Kiểm tra kết nối rồi thử lại.');
+    } catch (_) {
+      if (mounted)
+        setState(
+          () => _statusLine =
+              'Không kiểm tra được token. Kiểm tra kết nối rồi thử lại.',
+        );
       return false;
-    } finally { if(mounted) setState(()=>_checking=false); }
+    } finally {
+      if (mounted) setState(() => _checking = false);
+    }
   }
 
   Future<void> _toggleAgent() async {
-    if(bridge.running) {
-      final outcome=await bridge.stopAgent();
-      if(mounted) setState(() { _displayRunning=bridge.running;_statusLine=outcome.message; });
+    if (bridge.running) {
+      final outcome = await bridge.stopAgent();
+      if (mounted)
+        setState(() {
+          _displayRunning = bridge.running;
+          _statusLine = outcome.message;
+        });
       return;
     }
-    if(!await _checkConnection() || !mounted || !_saveConfig()) return;
-    final outcome=await bridge.startAgent(store.path);
-    if(mounted) setState(() { _displayRunning=bridge.running;_statusLine=outcome.message; });
+    if (!await _checkConnection() || !mounted || !_saveConfig()) return;
+    final outcome = await bridge.startAgent(store.path);
+    if (mounted)
+      setState(() {
+        _displayRunning = bridge.running;
+        _statusLine = outcome.message;
+      });
   }
 
   bool _saveConfig() {
@@ -208,8 +259,9 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
     }
     final missing = cfg!.missingFields();
     if (missing.isNotEmpty) {
-      setState(() =>
-          _statusLine = 'Chưa lưu được — còn thiếu: ${missing.join(', ')}');
+      setState(
+        () => _statusLine = 'Chưa lưu được — còn thiếu: ${missing.join(', ')}',
+      );
       return false;
     }
     try {
@@ -229,7 +281,7 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
   // -- test cycle -----------------------------------------------------
 
   Future<void> _startTest() async {
-    if(!await _checkConnection() || !mounted) return;
+    if (!await _checkConnection() || !mounted) return;
     if (_testing) return;
     final (cfg, error) = _currentConfig();
     if (error != null) {
@@ -275,8 +327,10 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
 
   Future<void> _openLog() async {
     if (!store.logExists()) {
-      setState(() => _statusLine =
-          'Chưa có file log tại ${store.logPath} — agent chưa chạy.');
+      setState(
+        () => _statusLine =
+            'Chưa có file log tại ${store.logPath} — agent chưa chạy.',
+      );
       return;
     }
     final error = await bridge.openFile(store.logPath);
@@ -300,7 +354,8 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
 
   Future<void> _toggleAutostart() async {
     final installed = await bridge.taskInstalled();
-    if(!installed && (!await _checkConnection() || !mounted || !_saveConfig())) return;
+    if (!installed && (!await _checkConnection() || !mounted || !_saveConfig()))
+      return;
     final outcome = installed
         ? await bridge.removeTask()
         : await bridge.installTask(store.path);
@@ -349,8 +404,10 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
 
   Widget _fieldLabel(String text) => Padding(
         padding: const EdgeInsets.only(bottom: 5),
-        child: Text(text,
-            style: const TextStyle(color: BeeSkyColors.muted, fontSize: 13)),
+        child: Text(
+          text,
+          style: const TextStyle(color: BeeSkyColors.muted, fontSize: 13),
+        ),
       );
 
   Widget _labeledField(String label, Widget field, {String? hint}) {
@@ -364,9 +421,10 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
           if (hint != null)
             Padding(
               padding: const EdgeInsets.only(top: 4),
-              child: Text(hint,
-                  style: const TextStyle(
-                      color: BeeSkyColors.muted, fontSize: 12)),
+              child: Text(
+                hint,
+                style: const TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+              ),
             ),
         ],
       ),
@@ -380,9 +438,10 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title,
-                style: const TextStyle(
-                    fontSize: 15, fontWeight: FontWeight.w700)),
+            Text(
+              title,
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 14),
             ...children,
           ],
@@ -394,135 +453,235 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
   @override
   Widget build(BuildContext context) {
     final cloudWarning = insecureCloudWarning(_cloudCtrl.text);
-    return Scaffold(
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
+    final connection = _card('Kết nối cloud', [
+      _labeledField(
+        'Cloud URL:',
+        TextField(controller: _cloudCtrl),
+        hint: cloudWarning,
+      ),
+      Padding(
+        padding: const EdgeInsets.only(bottom: 12),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header: logo + titles + version pill.
-            if(!widget.embedded) Row(
-              children: [
-                Image.asset('assets/beesky-logo.png', width: 40, height: 40),
-                const SizedBox(width: 10),
-                const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('BeeSky Agent',
-                        style: TextStyle(
-                            fontSize: 20, fontWeight: FontWeight.w800)),
-                      Text('Cấu hình agent tại xưởng',
-                        style: TextStyle(color: BeeSkyColors.muted)),
-                  ],
+            _fieldLabel('Token Agent:'),
+            TextField(
+              controller: _keyCtrl,
+              obscureText: !_showKey,
+              decoration: InputDecoration(
+                hintText: 'Dán token từ Mine',
+                suffixIcon: IconButton(
+                  tooltip: _showKey ? 'Ẩn token' : 'Hiện token',
+                  icon: Icon(
+                    _showKey
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                    size: 18,
+                  ),
+                  onPressed: () => setState(() => _showKey = !_showKey),
                 ),
-                const Spacer(),
-                _pill('dim', 'v$agentAppVersion'),
-              ],
-            ),
-
-            // Card 1: cloud connection.
-            _card('Kết nối cloud', [
-              _labeledField(
-                'Cloud URL:',
-                TextField(controller: _cloudCtrl),
-                hint: cloudWarning == null ? null : '⚠ $cloudWarning',
               ),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _fieldLabel('Token Agent:'),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _keyCtrl,
-                            obscureText: !_showKey,
+            ),
+            if (_keyProtected)
+              const Padding(
+                padding: EdgeInsets.only(top: 4),
+                child: Text(
+                  _protectedKeyHint,
+                  style: TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+                ),
+              ),
+          ],
+        ),
+      ),
+      _labeledField(
+        'Xưởng được cấp quyền:',
+        TextField(
+          controller: _siteCtrl,
+          readOnly: true,
+          decoration: const InputDecoration(
+            hintText: 'Tự nhận sau khi kiểm tra token',
+          ),
+        ),
+        hint: _connection == null
+            ? 'Xưởng được quyết định bởi token trên Mine.'
+            : '${_connection!.organizationName} · ${_connection!.agentName}',
+      ),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: OutlinedButton.icon(
+          onPressed: _checking || _testing ? null : _checkConnection,
+          icon: _checking
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.verified_user_outlined, size: 18),
+          label: Text(_checking ? 'Đang kiểm tra…' : 'Kiểm tra token'),
+        ),
+      ),
+      const SizedBox(height: 10),
+      const Text(
+        _keyNote,
+        style: TextStyle(color: BeeSkyColors.muted, fontSize: 12.5),
+      ),
+    ]);
+    final scan = _card('Quét tại xưởng', [
+      _labeledField(
+        'Dải IP quét:',
+        TextField(controller: _targetCtrl),
+        hint:
+            'vd 192.168.1.10-192.168.1.60 — nhiều dải cách nhau bằng dấu phẩy',
+      ),
+      _labeledField(
+        'Chu kỳ quét (giây):',
+        Align(
+          alignment: Alignment.centerLeft,
+          child: SizedBox(
+            width: 120,
+            child: TextField(controller: _intervalCtrl),
+          ),
+        ),
+      ),
+    ]);
+    final status = _card('Trạng thái chạy ngầm', [
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          _pill(_statusView.tone, _statusView.pillText),
+          OutlinedButton(
+            onPressed: () => setState(_refreshStatusCard),
+            child: const Text('Làm mới'),
+          ),
+          OutlinedButton(onPressed: _openLog, child: const Text('Xem log')),
+        ],
+      ),
+      const SizedBox(height: 10),
+      Text(
+        _statusView.bodyText,
+        style: const TextStyle(color: BeeSkyColors.muted, fontSize: 12.5),
+      ),
+    ]);
+    return Scaffold(
+      body: Column(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1120),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (!widget.embedded)
+                        Row(
+                          children: [
+                            Image.asset(
+                              'assets/beesky-logo.png',
+                              width: 40,
+                              height: 40,
+                            ),
+                            const SizedBox(width: 10),
+                            const Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'BeeSky Agent',
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                Text(
+                                  'Cấu hình agent tại xưởng',
+                                  style: TextStyle(color: BeeSkyColors.muted),
+                                ),
+                              ],
+                            ),
+                            const Spacer(),
+                            _pill('dim', 'v$agentAppVersion'),
+                          ],
+                        ),
+                      LayoutBuilder(
+                        builder: (context, size) {
+                          if (size.maxWidth < 900)
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [connection, scan, status],
+                            );
+                          return Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                flex: 3,
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [connection, scan],
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                flex: 2,
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    status,
+                                    _card('Kết nối đúng xưởng', [
+                                      const Text(
+                                        '01  Tạo token trong mục Agent trên Mine.\n\n02  Dán token và kiểm tra xưởng được cấp quyền.\n\n03  Chọn dải IP rồi bắt đầu Agent.',
+                                        style: TextStyle(
+                                          color: BeeSkyColors.muted,
+                                          fontSize: 12,
+                                          height: 1.6,
+                                        ),
+                                      ),
+                                    ]),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                      if (_autostartHint.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: Text(
+                            _autostartHint,
+                            style: const TextStyle(
+                              color: BeeSkyColors.muted,
+                              fontSize: 12,
+                            ),
                           ),
                         ),
-                        Checkbox(
-                          value: _showKey,
-                          onChanged: (v) =>
-                              setState(() => _showKey = v ?? false),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: Text(
+                          _statusLine,
+                          style: const TextStyle(
+                            color: BeeSkyColors.muted,
+                            fontSize: 11,
+                          ),
                         ),
-                        const Text('Hiện token'),
-                      ],
-                    ),
-                    if (_keyProtected)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 4),
-                        child: Text(_protectedKeyHint,
-                            style: TextStyle(
-                                color: BeeSkyColors.muted, fontSize: 12)),
                       ),
-                  ],
-                ),
-              ),
-              _labeledField(
-                'Xưởng được cấp quyền:',
-                TextField(controller: _siteCtrl, readOnly: true,
-                  decoration: const InputDecoration(hintText:'Tự nhận sau khi kiểm tra token')),
-                hint: _connection == null ? 'Xưởng được quyết định bởi token trên Mine.'
-                  : '${_connection!.organizationName} · ${_connection!.agentName}',
-              ),
-              Align(alignment: Alignment.centerLeft,child:OutlinedButton.icon(
-                onPressed:_checking || _testing ? null : _checkConnection,
-                icon:_checking ? const SizedBox(width:16,height:16,child:CircularProgressIndicator(strokeWidth:2)) : const Icon(Icons.verified_user_outlined,size:18),
-                label:Text(_checking?'Đang kiểm tra…':'Kiểm tra token'))),
-              const SizedBox(height:10),
-              const Text(_keyNote,
-                  style: TextStyle(color: BeeSkyColors.muted, fontSize: 12.5)),
-            ]),
-
-            // Card 2: farm scan.
-            _card('Quét tại xưởng', [
-              _labeledField(
-                'Dải IP quét:',
-                TextField(controller: _targetCtrl),
-                hint: 'vd 192.168.1.10-192.168.1.60 — nhiều dải cách nhau bằng dấu phẩy',
-              ),
-              _labeledField(
-                'Chu kỳ quét (giây):',
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: SizedBox(
-                    width: 120,
-                    child: TextField(controller: _intervalCtrl),
+                    ],
                   ),
                 ),
               ),
-            ]),
-
-            // Card 3: background run status.
-            _card('Trạng thái chạy ngầm', [
-              Row(
-                children: [
-                  _pill(_statusView.tone, _statusView.pillText),
-                  const Spacer(),
-                  OutlinedButton(
-                    onPressed: () =>
-                        setState(_refreshStatusCard),
-                    child: const Text('Làm mới'),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton(
-                    onPressed: _openLog,
-                    child: const Text('Xem log'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Text(_statusView.bodyText,
-                  style: const TextStyle(
-                      color: BeeSkyColors.muted, fontSize: 12.5)),
-            ]),
-
-            // Actions row + test pill (buttons left, pill right —
-            // the buttons Wrap inside the Expanded so a narrow
-            // window flows them instead of overflowing).
-            Padding(
-              padding: const EdgeInsets.only(top: 16),
+            ),
+          ),
+          Container(
+            decoration: const BoxDecoration(
+              color: BeeSkyColors.surface,
+              border: Border(top: BorderSide(color: BeeSkyColors.border)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -532,8 +691,11 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
                       runSpacing: 8,
                       children: [
                         FilledButton(
-                          onPressed: _checking || _testing ? null : _toggleAgent,
-                          child: Text(bridge.running ? 'Dừng Agent' : 'Bắt đầu Agent'),
+                          onPressed:
+                              _checking || _testing ? null : _toggleAgent,
+                          child: Text(
+                            bridge.running ? 'Dừng Agent' : 'Bắt đầu Agent',
+                          ),
                         ),
                         OutlinedButton(
                           onPressed: _saveConfig,
@@ -546,9 +708,11 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
                         OutlinedButton(
                           onPressed:
                               _autostartAvailable ? _toggleAutostart : null,
-                          child: Text(_autostartInstalled
-                              ? 'Tắt tự khởi động'
-                              : 'Bật tự khởi động'),
+                          child: Text(
+                            _autostartInstalled
+                                ? 'Tắt tự khởi động'
+                                : 'Bật tự khởi động',
+                          ),
                         ),
                       ],
                     ),
@@ -558,21 +722,8 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
                 ],
               ),
             ),
-            if (_autostartHint.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(_autostartHint,
-                    style: const TextStyle(color: BeeSkyColors.muted)),
-              ),
-
-            // Footer status line.
-            Padding(
-              padding: const EdgeInsets.only(top: 10),
-              child: Text(_statusLine,
-                  style: const TextStyle(color: BeeSkyColors.muted)),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

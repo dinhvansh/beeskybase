@@ -1,29 +1,20 @@
 import 'package:flutter/material.dart';
 
-/// BeeSky Cloud Light — the v0.39 redesign tokens (docs/redesign-mapping.md).
-///
-/// The SAME file as the main Flutter app's lib/theme.dart, so all
-/// three faces of the product (Tk, main Flutter app, this agent app)
-/// share one design system. "BeeSky Cloud Light × Linear × Modern
-/// Windows 11 Fluent UI": warm white background, white surfaces,
-/// thin #E0E5D9 borders, soft yellow highlights, dark text.
-///
-/// Contrast rule: pure brand yellow (#FFE000) is a FILL/BORDER
-/// color only — never small text on white; accent-as-text call
-/// sites use [BeeSkyColors.accentInk] instead.
+/// Shared Mine desktop palette: cool neutral surfaces, semantic status colors,
+/// compact controls and brand yellow reserved for primary actions.
 class BeeSkyColors {
-  // Prompt table, 1:1.
-  static const brand = Color(0xFFFFE000); // Brand Primary
-  static const brandHover = Color(0xFFF5D200); // Brand Hover
-  static const text = Color(0xFF202A28); // Text Primary
-  static const muted = Color(0xFF7B8877); // Text Secondary
-  static const bg = Color(0xFFF7F8F4); // App Background
+  // Keep both native applications aligned with the cloud shell.
+  static const brand = Color(0xFFFACC15); // Brand Primary
+  static const brandHover = Color(0xFFEAB308); // Brand Hover
+  static const text = Color(0xFF18202E); // Text Primary
+  static const muted = Color(0xFF64748B); // Text Secondary
+  static const bg = Color(0xFFF6F7F9); // App Background
   static const sidebarBg = Color(0xFFFFFFFF); // Sidebar Background
   static const surface = Color(0xFFFFFFFF); // Surface
-  static const border = Color(0xFFE0E5D9); // Border
-  static const activeNav = Color(0xFFFFF1B7); // Active Navigation
+  static const border = Color(0xFFDCE1E8); // Border
+  static const activeNav = Color(0xFFE8EBF0); // Active Navigation
   static const ok = Color(0xFF16A34A); // Success
-  static const warn = Color(0xFFF59E0B); // Warning
+  static const warn = Color(0xFFB77908); // Warning
   static const bad = Color(0xFFDC2626); // Error
   static const info = Color(0xFF2563EB); // Info
 
@@ -34,12 +25,12 @@ class BeeSkyColors {
   static const panelGlass = surface;
   static const glassBorder = border;
   static const rimLight = surface; // no rim light on light cards
-  static const ghostFill = Color(0xFFEFF2EA);
+  static const ghostFill = Color(0xFFF1F3F6);
   static const entryFill = surface;
   static const entryBorder = border;
   static const tableWell = surface;
   static const tableHeading = bg;
-  static const tableZebra = Color(0xFFFAFBF8);
+  static const tableZebra = Color(0xFFFAFBFC);
   static const accent = brand;
   static const accentText = Color(0xFF141414);
   static const accentHover = brandHover;
@@ -57,9 +48,9 @@ class BeeSkyColors {
 
 /// 4px spacing scale; radii per the prompt: cards 10–12,
 /// buttons 8–9, inputs 8.
-const double radiusCard = 12;
-const double radiusWidget = 8;
-const double radiusPill = 999;
+const double radiusCard = 8;
+const double radiusWidget = 6;
+const double radiusPill = 6;
 
 /// Numeric values: tabular figures so columns don't jitter.
 /// IPs / technical identifiers: monospace fallback stack.
@@ -88,8 +79,11 @@ ThemeData buildBeeSkyTheme() {
   const fontFallback = ['Inter', 'Segoe UI', 'Roboto'];
   return base.copyWith(
     scaffoldBackgroundColor: BeeSkyColors.bg,
+    visualDensity: VisualDensity.compact,
+    splashFactory: InkRipple.splashFactory,
+    materialTapTargetSize: MaterialTapTargetSize.padded,
     colorScheme: base.colorScheme.copyWith(
-      primary: BeeSkyColors.accent,
+      primary: BeeSkyColors.accentInk,
       onPrimary: BeeSkyColors.accentText,
       surface: BeeSkyColors.surface,
       onSurface: BeeSkyColors.text,
@@ -98,6 +92,7 @@ ThemeData buildBeeSkyTheme() {
     textTheme: base.textTheme.apply(
       bodyColor: BeeSkyColors.text,
       displayColor: BeeSkyColors.text,
+      fontFamily: 'Segoe UI',
       fontFamilyFallback: fontFallback,
     ),
     appBarTheme: const AppBarTheme(
@@ -133,8 +128,9 @@ ThemeData buildBeeSkyTheme() {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(radiusWidget),
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-        textStyle: const TextStyle(fontWeight: FontWeight.w700),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        textStyle: const TextStyle(
+            fontFamily: 'Segoe UI', fontWeight: FontWeight.w700),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
@@ -145,7 +141,7 @@ ThemeData buildBeeSkyTheme() {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(radiusWidget),
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       ),
     ),
     textButtonTheme: TextButtonThemeData(
@@ -195,9 +191,7 @@ ThemeData buildBeeSkyTheme() {
   );
 }
 
-/// A light card: white surface, 1px thin border, one soft shadow,
-/// 12px corners. (v0.39: the dark "glass" card — translucent panel,
-/// rim light, heavy shadow — is retired with the dark theme.)
+/// Shared flat surface retained under its legacy name for existing screens.
 class GlassCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
@@ -214,13 +208,6 @@ class GlassCard extends StatelessWidget {
         color: BeeSkyColors.panelGlass,
         borderRadius: BorderRadius.circular(radiusCard),
         border: Border.all(color: BeeSkyColors.glassBorder),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x0F202A28),
-            blurRadius: 8,
-            offset: Offset(0, 2),
-          ),
-        ],
       ),
       child: Padding(padding: padding, child: child),
     );

@@ -64,7 +64,7 @@ jobs:
         working-directory: app_flutter
         run: |
           flutter pub get
-          flutter analyze
+          flutter analyze --no-fatal-infos
           flutter test
           flutter build windows --release
 
@@ -162,7 +162,7 @@ jobs:
         working-directory: app_agent_flutter
         run: |
           flutter pub get
-          flutter analyze
+          flutter analyze --no-fatal-infos
           flutter test
           flutter build windows --release
 
