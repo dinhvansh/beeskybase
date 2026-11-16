@@ -1,5 +1,33 @@
 # BeeSky — ASIC miner LAN scanner & repair diagnostics
 
+## Current applications and source
+
+The current Windows release is **v0.44.1**. Download the Scanner
+(`BeeSkySetup-0.44.1.exe`) or standalone Agent (`BeeSkyAgentSetup-0.44.1.exe`)
+from [Releases](https://github.com/dinhvansh/beeskybase/releases/tag/v0.44.1).
+The immutable `v0.44.1` tag identifies the source used to build those binaries;
+later source commits do not change an existing installer.
+
+- **Scanner:** `app_flutter/`, with the Python engine in `beesky/`.
+- **Agent:** `app_agent_flutter/`, with background monitoring and signed whole-app
+  updates. See [Agent 0.43](docs/agent-043.md) and [Agent 0.44](docs/agent-044.md).
+- **Cloud:** `cloud_service/` is the Django/PostgreSQL service for accounts,
+  organizations, workshops, telemetry, placement and maintenance. See
+  [backend and supported APIs](docs/cloud-backend.md) and
+  [deployment](docs/cloud-deployment.md). The local service uses port **8793**.
+- **Legacy preview:** `python -m tools.serve_preview` uses port **8790** and a
+  separate SQLite backend. It is distinct from the production Cloud service.
+
+Use `main` as the integration branch after the Cloud/desktop integration PR is
+merged. Start further changes from the latest remote `main`, and submit a pull
+request before merging. Release tags identify shipped versions independently of
+branch names. The sections below include historical CLI and preview notes;
+the linked application documents describe the current service contracts.
+
+Cloud remote miner commands remain disabled (`control_available: false`), and
+MFA is not implemented. Automated tests use isolated databases and simulated
+miners; physical-device compatibility still requires verification at the farm.
+
 BeeSky is a small, dependency-free tool for ASIC repair shops. It scans a local
 network for miners, reads their health over whichever API the firmware
 exposes — the classic **cgminer RPC API (TCP 4028)**, the **VNish/HashCore
