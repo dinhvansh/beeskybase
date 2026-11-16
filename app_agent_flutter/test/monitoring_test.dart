@@ -114,19 +114,18 @@ void main() {
       (t) async {
     final bridge = PendingTaskBridge();
     await open(t, bridge);
-    await t.ensureVisible(find.byType(SwitchListTile));
-    await t.tap(find.byType(SwitchListTile));
+    await t.ensureVisible(find.byType(Switch));
+    await t.tap(find.byType(Switch));
     await t.pump();
     await t.pump();
     expect(bridge.installs, 1);
-    expect(t.widget<SwitchListTile>(find.byType(SwitchListTile)).onChanged,
-        isNull);
+    expect(t.widget<Switch>(find.byType(Switch)).onChanged, isNull);
     expect(t.widget<FilledButton>(find.byType(FilledButton)).onPressed, isNull);
     bridge.taskInstalledState = true;
     bridge.result.complete(const TaskOutcome(true, 'Đã bật tự khởi động.'));
     await t.pump();
     await t.pump();
-    expect(t.widget<SwitchListTile>(find.byType(SwitchListTile)).value, isTrue);
+    expect(t.widget<Switch>(find.byType(Switch)).value, isTrue);
     expect(
         t.widget<FilledButton>(find.byType(FilledButton)).onPressed, isNotNull);
   });

@@ -2,7 +2,7 @@ name: beesky_agent_app
 description: "BeeSky Agent — Kết nối và giám sát xưởng."
 publish_to: "none"
 # Product version and native Agent build number.
-version: 0.44.0+14
+version: 0.44.1+15
 
 environment:
   sdk: ">=3.5.0 <4.0.0"

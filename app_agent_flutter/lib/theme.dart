@@ -214,3 +214,46 @@ class GlassCard extends StatelessWidget {
     );
   }
 }
+
+/// Compact desktop switch: keep Flutter's keyboard/semantics and a generous
+/// click target while reducing the Material 3 track to roughly 32 x 20 px.
+class BeeSkySwitch extends StatelessWidget {
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+  final String? semanticLabel;
+  const BeeSkySwitch(
+      {super.key,
+      required this.value,
+      required this.onChanged,
+      this.semanticLabel});
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+        label: semanticLabel,
+        child: MouseRegion(
+            cursor: onChanged == null
+                ? SystemMouseCursors.basic
+                : SystemMouseCursors.click,
+            child: SizedBox(
+              width: 40,
+              height: 32,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                excludeFromSemantics: true,
+                onTap: onChanged == null ? null : () => onChanged!(!value),
+                child: Center(
+                    child: Transform.scale(
+                        scale: .62,
+                        child: Switch(
+                            value: value,
+                            onChanged: onChanged,
+                            materialTapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
+                            activeTrackColor: BeeSkyColors.accentInk,
+                            activeThumbColor: BeeSkyColors.surface,
+                            inactiveTrackColor: BeeSkyColors.border,
+                            inactiveThumbColor: BeeSkyColors.muted))),
+              ),
+            )),
+      );
+}

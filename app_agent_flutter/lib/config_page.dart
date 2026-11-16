@@ -859,22 +859,43 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
       ),
     ]);
     final startup = _card('Khởi động & cấu hình', [
-      SwitchListTile.adaptive(
-        contentPadding: EdgeInsets.zero,
-        title: const Text('Tự khởi động cùng Windows',
-            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-        subtitle: Text(
-            _changingAutostart
-                ? 'Đang cập nhật…'
-                : _autostartInstalled
-                    ? 'Đã bật · chạy khi đăng nhập'
-                    : 'Chưa bật',
-            style: const TextStyle(fontSize: 12)),
-        value: _autostartInstalled,
-        onChanged: _busy || !_autostartAvailable || bridge.runtimeUncertain
+      MergeSemantics(
+          child: InkWell(
+        canRequestFocus: false,
+        excludeFromSemantics: true,
+        borderRadius: BorderRadius.circular(6),
+        onTap: _busy || !_autostartAvailable || bridge.runtimeUncertain
             ? null
-            : (_) => _toggleAutostart(),
-      ),
+            : _toggleAutostart,
+        child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(children: [
+              Expanded(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    const Text('Tự khởi động cùng Windows',
+                        style: TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 2),
+                    Text(
+                        _changingAutostart
+                            ? 'Đang cập nhật…'
+                            : _autostartInstalled
+                                ? 'Đã bật · chạy khi đăng nhập'
+                                : 'Chưa bật',
+                        style: const TextStyle(
+                            fontSize: 12, color: BeeSkyColors.muted)),
+                  ])),
+              const SizedBox(width: 12),
+              BeeSkySwitch(
+                  value: _autostartInstalled,
+                  onChanged:
+                      _busy || !_autostartAvailable || bridge.runtimeUncertain
+                          ? null
+                          : (_) => _toggleAutostart()),
+            ])),
+      )),
       const SizedBox(height: 8),
       const Text(
           'Đóng cửa sổ, Agent vẫn tiếp tục chạy. Dùng Dừng Agent khi muốn ngừng quét.',

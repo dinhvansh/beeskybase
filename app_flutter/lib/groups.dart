@@ -461,7 +461,8 @@ class _GroupEditorDialogState extends State<_GroupEditorDialog> {
               const SizedBox(height: 6),
               Row(
                 children: [
-                  Switch(
+                  BeeSkySwitch(
+                    semanticLabel: 'Tự quét khi app đang mở',
                     value: _autoscan,
                     onChanged: (v) => setState(() => _autoscan = v),
                   ),

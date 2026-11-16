@@ -3237,7 +3237,8 @@ class _HomePageState extends State<HomePage> {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              Switch(
+              BeeSkySwitch(
+                semanticLabel: 'Nghe IP Report',
                 value: _settings.ipReportEnabled,
                 onChanged: widget.bridge.sidecarMissing
                     ? null

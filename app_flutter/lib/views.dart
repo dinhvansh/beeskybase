@@ -1552,10 +1552,9 @@ class _SettingsViewState extends State<SettingsView> {
             height: 40,
             child: Row(
               children: [
-                Switch(
+                BeeSkySwitch(
+                  semanticLabel: 'Nghe IP Report',
                   value: _ipReport,
-                  materialTapTargetSize:
-                      MaterialTapTargetSize.shrinkWrap,
                   onChanged: (v) => setState(() => _ipReport = v),
                 ),
                 const SizedBox(width: 8),

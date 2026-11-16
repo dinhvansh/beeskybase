@@ -184,18 +184,16 @@ void main() {
     final store = MockConfigStore.demo();
     await _pumpPage(tester, bridge: bridge, store: store);
 
-    expect(tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
-        isFalse);
-    await tester.ensureVisible(find.byType(SwitchListTile));
-    await tester.tap(find.byType(SwitchListTile));
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+    await tester.ensureVisible(find.byType(Switch));
+    await tester.tap(find.byType(Switch));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(bridge.taskInstalledState, isTrue);
     expect(find.text('Đã bật tự khởi động khi đăng nhập Windows.'),
         findsOneWidget);
-    expect(tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
-        isTrue);
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
   });
 
   testWidgets('first run: no config -> sysinfo prefill, blank form',
