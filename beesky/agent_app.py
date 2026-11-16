@@ -751,6 +751,32 @@ def main(argv: list[str] | None = None) -> int:
         return run_config_gui()
     mode, rest = argv[0], argv[1:]
     try:
+        if mode == 'version':
+            from . import __version__
+            print(json.dumps({'version': __version__}))
+            return 0
+        if mode in ('update-check', 'update-prepare', 'update-install'):
+            parser = argparse.ArgumentParser(prog='beesky-agent ' + mode)
+            parser.add_argument('--config')
+            if mode == 'update-prepare':
+                parser.add_argument('--ui-pid', type=int, required=True)
+            if mode == 'update-install':
+                parser.add_argument('--job', required=True)
+            args = parser.parse_args(rest)
+            from . import agent_updates
+            try:
+                config = _config_path_for(args)
+                if mode == 'update-install':
+                    return 0 if agent_updates.install_update(config, args.job) else 1
+                result = (agent_updates.check_update(config) if mode == 'update-check' else
+                          agent_updates.prepare_update(config, args.ui_pid,
+                              progress=lambda data: print(json.dumps(data, ensure_ascii=False), flush=True)))
+            except (OSError, ValueError, RuntimeError):
+                error = sys.exc_info()[1]
+                result = {'ok': False, 'ready': False, 'message': str(error) if isinstance(error, ValueError)
+                          else 'Chưa cập nhật được Agent. Kiểm tra mạng và quyền ghi thư mục ứng dụng rồi thử lại.'}
+            print(json.dumps(result, ensure_ascii=False), flush=True)
+            return 0 if result['ok'] else 1
         if mode == 'network':
             argparse.ArgumentParser(prog='beesky-agent network').parse_args(rest)
             from .core.discover import default_scan_target

@@ -31,3 +31,5 @@ output/playwright/
 /cloud_service/.env.production
 *.dump
 *.dump.partial
+update-signing-key.pem
+*.dpapi

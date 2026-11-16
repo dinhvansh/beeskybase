@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'agent_bridge.dart';
 import 'agent_config.dart';
 import 'theme.dart';
+import 'agent_updates.dart';
 
 const String _protectedKeyHint =
     'Token đã được bảo vệ trên máy này — để trống để giữ nguyên, nhập mới để thay.';
@@ -22,11 +23,13 @@ class AgentConfigPage extends StatefulWidget {
   final AgentBridge bridge;
   final AgentConfigStore store;
   final bool embedded;
+  final AgentUpdater? updater;
   const AgentConfigPage({
     super.key,
     required this.bridge,
     required this.store,
     this.embedded = false,
+    this.updater,
   });
 
   @override
@@ -44,12 +47,24 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
   String? _connectionError;
   bool _refreshing = false, _changingRun = false;
   bool _changingAutostart = false;
+  bool _updating = false;
+  late final AgentUpdater _updater;
+  final _updateKey = GlobalKey<AgentUpdatePanelState>();
+  AgentUpdateInfo? _updateInfo;
+  String? _updateMessage;
+  bool _updateError = false;
+  double? _updateProgress;
   String? _targetError, _intervalError;
   AgentStatus? _lastStatus;
   double _savedInterval = 30;
   bool get _busy =>
-      _filling || _checking || _testing || _changingRun || _changingAutostart;
-  bool get _editable => !_busy && !bridge.running;
+      _filling ||
+      _checking ||
+      _testing ||
+      _changingRun ||
+      _changingAutostart ||
+      _updating;
+  bool get _editable => !_busy && !bridge.running && !bridge.runtimeUncertain;
   bool _keyProtected = false;
   bool _testing = false;
   bool _checking = false, _filling = true;
@@ -69,6 +84,10 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
   @override
   void initState() {
     super.initState();
+    _updater = widget.updater ??
+        (bridge.isMock
+            ? MockAgentUpdater()
+            : ProcessAgentUpdater(bridge.agentExePath));
     _statusLine = 'Dán token từ Mine để kết nối xưởng.';
     _cloudCtrl.addListener(_connectionChanged);
     _keyCtrl.addListener(_connectionChanged);
@@ -268,10 +287,23 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
 
   Future<void> _toggleAgent() async {
     if (_busy) return;
+    if (bridge.runtimeUncertain) {
+      await _refreshRuntime();
+      return;
+    }
     setState(() => _changingRun = true);
     try {
       await bridge.refreshRunning(store.path);
       TaskOutcome outcome;
+      if (bridge.runtimeUncertain) {
+        if (mounted)
+          setState(() {
+            _refreshStatusCard();
+            _statusLine =
+                'Chưa xác nhận được tiến trình. Làm mới trạng thái trước khi thay đổi Agent.';
+          });
+        return;
+      }
       if (bridge.running) {
         outcome = await bridge.stopAgent();
       } else {
@@ -297,7 +329,7 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
   }
 
   bool _saveConfig() {
-    if (bridge.running) {
+    if (bridge.running || bridge.runtimeUncertain) {
       setState(() => _statusLine = 'Dừng Agent trước khi thay đổi cấu hình.');
       return false;
     }
@@ -339,7 +371,8 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
   // -- test cycle -----------------------------------------------------
 
   Future<void> _startTest() async {
-    if (_busy || bridge.running || !_validateScan()) return;
+    if (_busy || bridge.running || bridge.runtimeUncertain || !_validateScan())
+      return;
     setState(() => _testing = true);
     try {
       if (!await _checkConnection() || !mounted) return;
@@ -399,6 +432,25 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
         now: DateTime.now(),
         startedAt: bridge.startedAt,
         interval: _savedInterval);
+    if (bridge.runtimeUncertain)
+      _statusView = const StatusView('warn', 'Chưa xác nhận trạng thái',
+          'Tiến trình chưa phản hồi. Bấm Làm mới để kiểm tra; cấu hình đang được giữ nguyên.');
+  }
+
+  bool get _unsavedChanges {
+    if (!store.exists()) return _keyCtrl.text.isNotEmpty;
+    try {
+      final cfg = store.load();
+      final cloud = cfg.cloudUrl == 'https://cloud.beeskybase.com'
+          ? 'https://mine.beeskybase.com'
+          : cfg.cloudUrl;
+      return _cloudCtrl.text.trim() != cloud ||
+          _targetCtrl.text.trim() != cfg.target ||
+          _intervalCtrl.text.trim() != formatInterval(cfg.interval) ||
+          _keyCtrl.text.trim() != cfg.key;
+    } catch (_) {
+      return true;
+    }
   }
 
   Future<void> _refreshRuntime() async {
@@ -817,8 +869,9 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
                     : 'Chưa bật',
             style: const TextStyle(fontSize: 12)),
         value: _autostartInstalled,
-        onChanged:
-            _busy || !_autostartAvailable ? null : (_) => _toggleAutostart(),
+        onChanged: _busy || !_autostartAvailable || bridge.runtimeUncertain
+            ? null
+            : (_) => _toggleAutostart(),
       ),
       const SizedBox(height: 8),
       const Text(
@@ -826,6 +879,26 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
           style:
               TextStyle(color: BeeSkyColors.muted, fontSize: 12, height: 1.6)),
       if (_autostartHint.isNotEmpty) Text(_autostartHint),
+      AgentUpdatePanel(
+          key: _updateKey,
+          updater: _updater,
+          config: store.path,
+          enabled: !_busy && !bridge.runtimeUncertain,
+          unsavedChanges: _unsavedChanges,
+          onBusy: (value) {
+            if (mounted) setState(() => _updating = value);
+          },
+          onInfo: (info) {
+            if (mounted) setState(() => _updateInfo = info);
+          },
+          onFeedback: (message, error, progress) {
+            if (mounted)
+              setState(() {
+                _updateMessage = message;
+                _updateError = error;
+                _updateProgress = progress;
+              });
+          }),
       ExpansionTile(
           tilePadding: EdgeInsets.zero,
           childrenPadding: const EdgeInsets.only(bottom: 8),
@@ -880,6 +953,60 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
                             _pill('dim', 'v$agentAppVersion'),
                           ],
                         ),
+                      if (_updateInfo?.available == true)
+                        Padding(
+                            padding: const EdgeInsets.only(top: 12),
+                            child: Material(
+                                color: BeeSkyColors.surface,
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(6),
+                                    side: const BorderSide(
+                                        color: BeeSkyColors.border)),
+                                child: Padding(
+                                    padding: const EdgeInsets.all(12),
+                                    child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.stretch,
+                                        children: [
+                                          Wrap(
+                                              alignment:
+                                                  WrapAlignment.spaceBetween,
+                                              crossAxisAlignment:
+                                                  WrapCrossAlignment.center,
+                                              spacing: 12,
+                                              runSpacing: 8,
+                                              children: [
+                                                Text(
+                                                    _updateMessage ??
+                                                        'Agent ${_updateInfo!.latest} đã sẵn sàng.',
+                                                    style: TextStyle(
+                                                        color: _updateError
+                                                            ? BeeSkyColors.bad
+                                                            : BeeSkyColors.text,
+                                                        fontSize: 13,
+                                                        fontWeight:
+                                                            FontWeight.w600)),
+                                                TextButton.icon(
+                                                    onPressed: !_busy &&
+                                                            !bridge
+                                                                .runtimeUncertain
+                                                        ? () => _updateKey
+                                                            .currentState
+                                                            ?.requestUpdate()
+                                                        : null,
+                                                    icon: const Icon(
+                                                        Icons.system_update_alt,
+                                                        size: 17),
+                                                    label: const Text(
+                                                        'Cập nhật Agent')),
+                                              ]),
+                                          if (_updating)
+                                            Padding(
+                                                padding: const EdgeInsets.only(
+                                                    top: 8),
+                                                child: LinearProgressIndicator(
+                                                    value: _updateProgress))
+                                        ])))),
                       LayoutBuilder(
                         builder: (context, size) {
                           if (size.maxWidth < 900)
@@ -973,9 +1100,11 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
                         label: Text(
                           _changingRun
                               ? 'Đang xử lý…'
-                              : bridge.running
-                                  ? 'Dừng Agent'
-                                  : 'Bắt đầu Agent',
+                              : bridge.runtimeUncertain
+                                  ? 'Kiểm tra trạng thái'
+                                  : bridge.running
+                                      ? 'Dừng Agent'
+                                      : 'Bắt đầu Agent',
                         ),
                       ),
                       OutlinedButton.icon(

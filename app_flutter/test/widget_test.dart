@@ -42,7 +42,7 @@ void main() {
       expect(find.text('Cài đặt'), findsOneWidget);
       // v0.32: all five views are real — no "SAU" tag remains.
       expect(find.text('SAU'), findsNothing);
-      expect(find.text('BeeSky v0.43.0'), findsOneWidget);
+      expect(find.text('BeeSky v0.44.0'), findsOneWidget);
       expect(find.text('Dữ liệu mẫu'), findsNWidgets(2));
 
       // v0.24: the app OPENS on network groups (the HashCore home

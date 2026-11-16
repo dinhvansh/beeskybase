@@ -1,5 +1,10 @@
 # BeeSky signed self-update channel
 
+Agent 0.44.0 enables the configured signed channel and adds whole-application
+updates in the native UI. See [agent-044.md](agent-044.md) for the installer
+handoff, verification and restart policy. The CLI-only single-executable
+mechanism documented below remains separate.
+
 > Tóm tắt: chủ repo chạy `tools/make_update_key.py` MỘT lần, bỏ
 > private key vào GitHub secret `UPDATE_SIGNING_KEY`, commit file
 > public key. Từ đó mỗi bản release tự ký `update-manifest.json`;

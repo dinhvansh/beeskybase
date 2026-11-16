@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import json
 import math
+from pathlib import Path
 import sys
 import time
 import urllib.error
@@ -369,6 +370,10 @@ class AgentService:
         if not res["ok"] or not res["update_available"]:
             return
         latest = res["latest"]
+        # Installed native Agent updates Flutter and both engines as one unit.
+        # Keep legacy single-exe opt-in only for CLI-only deployments.
+        native_app = getattr(sys, 'frozen', False) and (Path(sys.executable).parent / 'beesky_agent_app.exe').is_file()
+        apply_single_exe = self.auto_update and not native_app
         if latest != self._update_reported:
             self._update_reported = latest
             stamp = time.time()
@@ -381,17 +386,17 @@ class AgentService:
                 "type": "UPDATE_AVAILABLE", "severity": "info",
                 "detail": (f"BeeSky {latest} is available (this agent "
                            f"runs {res['current']})"
-                           + ("; --auto-update is on, applying it"
-                              if self.auto_update else
+                           + ("; mở BeeSky Agent để cập nhật ứng dụng" if native_app else
+                              "; --auto-update is on, applying it" if apply_single_exe else
                               "; run `beesky update` to install")),
                 "data": {"current": res["current"], "latest": latest,
-                         "auto_update": self.auto_update},
+                         "auto_update": apply_single_exe},
             }
             print(f"EVENT UPDATE_AVAILABLE [info] BeeSky {latest} "
                   f"(running {res['current']})", flush=True)
             self._pending_events.append(event)
             self._deliver_events()
-        if not self.auto_update:
+        if not apply_single_exe:
             return
         argv = ([sys.executable] + sys.argv[1:]
                 if getattr(sys, "frozen", False) else

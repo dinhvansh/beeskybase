@@ -53,6 +53,7 @@ abstract class AgentBridge {
       required String cloudUrl,
       required String? key});
   bool get running;
+  bool get runtimeUncertain;
   DateTime? get startedAt;
   Future<bool> refreshRunning(String configPath);
   Future<TaskOutcome> startAgent(String configPath);
@@ -90,6 +91,9 @@ class ProcessAgentBridge implements AgentBridge {
   final String _agentExe;
   final String? _beeskyExe;
   bool _running = false;
+  bool _runtimeUncertain = false;
+  @override
+  bool get runtimeUncertain => _runtimeUncertain;
   String? _configPath;
   DateTime? _startedAt;
 
@@ -105,8 +109,19 @@ class ProcessAgentBridge implements AgentBridge {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
     try {
       final file = File(configPath).absolute;
+      final filename = file.uri.pathSegments.last;
+      final dot = filename.lastIndexOf('.');
+      final stem = dot > 0 && dot < filename.length - 1
+          ? filename.substring(0, dot)
+          : filename;
       final name =
-          file.path.replaceFirst(RegExp(r'\.[^\\/]*$'), '.runtime.json');
+          '${file.parent.path}${Platform.pathSeparator}$stem.runtime.json';
+      if (!await File(name).exists()) {
+        _runtimeUncertain = false;
+        _running = false;
+        _startedAt = null;
+        return false;
+      }
       final info =
           jsonDecode(await File(name).readAsString()) as Map<String, dynamic>;
       final port = info['port'], token = info['token'], pid = info['pid'];
@@ -128,13 +143,21 @@ class ProcessAgentBridge implements AgentBridge {
       _running = response.statusCode == 200 &&
           data['pid'] == pid &&
           data['instance'] == token;
+      _runtimeUncertain = !_running;
       final started = data['startedAt'];
       _startedAt = _running && started is num && started.isFinite
           ? DateTime.fromMillisecondsSinceEpoch((started * 1000).round())
           : null;
+    } on SocketException catch (error) {
+      if ([10061, 1225, 111, 61].contains(error.osError?.errorCode)) {
+        _runtimeUncertain = false;
+        _running = false;
+        _startedAt = null;
+      } else {
+        _runtimeUncertain = true;
+      }
     } catch (_) {
-      _running = false;
-      _startedAt = null;
+      _runtimeUncertain = true;
     } finally {
       client.close(force: true);
     }
@@ -146,18 +169,14 @@ class ProcessAgentBridge implements AgentBridge {
       {required String configPath,
       required String cloudUrl,
       required String? key}) async {
-    Process? process;
     try {
-      process = await Process.start(
-          _agentExe, ['connection', '--config', configPath]);
-      final output = process.stdout.transform(utf8.decoder).join();
-      final errorDrain = process.stderr.drain<void>();
-      process.stdin.write(
-          jsonEncode({'cloud_url': cloudUrl, if (key != null) 'key': key}));
-      await process.stdin.close();
-      await process.exitCode.timeout(const Duration(seconds: 20));
-      final data = jsonDecode((await output).trim()) as Map<String, dynamic>;
-      await errorDrain;
+      final result = await runAgentProcess(
+          _agentExe, ['connection', '--config', configPath],
+          timeout: const Duration(seconds: 20),
+          input:
+              jsonEncode({'cloud_url': cloudUrl, if (key != null) 'key': key}));
+      final data =
+          jsonDecode((result.stdout as String).trim()) as Map<String, dynamic>;
       if (data['ok'] != true)
         throw FormatException(
             data['message'] as String? ?? 'Không xác nhận được token.');
@@ -167,23 +186,18 @@ class ProcessAgentBridge implements AgentBridge {
       rethrow;
     } catch (_) {
       throw const FormatException(
-          'Không kết nối được Cloud. Kiểm tra mạng và cập nhật tool nếu đang dùng bản cũ.');
-    } finally {
-      process?.kill();
+          'Không kết nối được Cloud. Kiểm tra mạng và địa chỉ Mine rồi thử lại.');
     }
   }
 
   Future<TaskOutcome> _runtimeCommand(String mode, String configPath) async {
     _configPath = configPath;
-    Process? process;
     try {
-      process = await Process.start(_agentExe, [mode, '--config', configPath]);
-      final output = process.stdout.transform(utf8.decoder).join();
-      final errors = process.stderr.drain<void>();
-      await process.stdin.close();
-      await process.exitCode.timeout(const Duration(seconds: 40));
-      final result = jsonDecode((await output).trim()) as Map<String, dynamic>;
-      await errors;
+      final process = await runAgentProcess(
+          _agentExe, [mode, '--config', configPath],
+          timeout: const Duration(seconds: 40));
+      final result =
+          jsonDecode((process.stdout as String).trim()) as Map<String, dynamic>;
       await refreshRunning(configPath);
       return TaskOutcome(result['ok'] == true,
           result['message'] as String? ?? 'Agent đã cập nhật trạng thái.');
@@ -193,8 +207,6 @@ class ProcessAgentBridge implements AgentBridge {
     } catch (_) {
       return const TaskOutcome(false,
           'Không mở được bộ chạy Agent. Cài lại BeeSky Agent bản mới và kiểm tra nhật ký.');
-    } finally {
-      process?.kill();
     }
   }
 
@@ -442,6 +454,8 @@ class MockAgentBridge implements AgentBridge {
 
   @override
   bool running = false;
+  @override
+  bool runtimeUncertain = false;
   @override
   DateTime? startedAt;
   @override

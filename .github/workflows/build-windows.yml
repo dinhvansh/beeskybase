@@ -325,16 +325,16 @@ jobs:
       # Tag builds only, and only when the owner configured the
       # UPDATE_SIGNING_KEY secret — otherwise this whole update
       # channel stays off and the release is unchanged.
-      - name: Build + sign update manifest (tags, key configured)
-        if: steps.updatecheck.outputs.has_update_key == 'true' && startsWith(github.ref, 'refs/tags/')
+      - name: Sign and verify full Agent update (key configured)
+        if: steps.updatecheck.outputs.has_update_key == 'true'
         shell: bash
         env:
           UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
         run: |
           set -euo pipefail
           openssl version
-          VER="${GITHUB_REF_NAME#v}"
-          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          VER="$(python -c 'import beesky; print(beesky.__version__)')"
+          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VER}"
           PUBLISHED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           INSTALLER="$(basename "$(ls dist/BeeSkySetup-*.exe | head -n 1)")"
           AGENT_INSTALLER="$(basename "$(ls dist/BeeSkyAgentSetup-*.exe | head -n 1)")"
@@ -363,6 +363,7 @@ jobs:
           print(json.dumps(manifest, indent=2))
           PYEOF
           KEY_FILE="$RUNNER_TEMP/update-signing-key.pem"
+          trap 'rm -f "$KEY_FILE" "$RUNNER_TEMP/update-pub.pem"' EXIT
           printf '%s\n' "$UPDATE_SIGNING_KEY" > "$KEY_FILE"
           openssl dgst -sha256 -sign "$KEY_FILE" \
             -out dist/update-manifest.sig dist/update-manifest.json
@@ -371,6 +372,8 @@ jobs:
           openssl pkey -in "$KEY_FILE" -pubout -out "$RUNNER_TEMP/update-pub.pem"
           openssl dgst -sha256 -verify "$RUNNER_TEMP/update-pub.pem" \
             -signature dist/update-manifest.sig dist/update-manifest.json
+          python -c "from pathlib import Path; from beesky.core.updater import verify_signature; assert verify_signature(Path('dist/update-manifest.json').read_bytes(), Path('dist/update-manifest.sig').read_bytes()), 'Release signing key does not match the compiled client key'"
+          python tools/verify_agent_update.py "$KEY_FILE"
           rm -f "$KEY_FILE" "$RUNNER_TEMP/update-pub.pem"
           ls -l dist/update-manifest.json dist/update-manifest.sig
 

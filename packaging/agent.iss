@@ -1,6 +1,6 @@
 ; Standalone Agent: persistent background runtime and native configuration UI.
 #define MyAppName "BeeSky Agent"
-#define MyAppVersion "0.43.0"
+#define MyAppVersion "0.44.0"
 #define MyAppPublisher "BeeSkyBase"
 #define MyAppExeName "beesky-agent.exe"
 
@@ -57,3 +57,24 @@ Name: "{autoprograms}\BeeSky Agent (Compatibility)"; Filename: "{app}\beesky-age
 [UninstallRun]
 Filename: "{app}\beesky-agent.exe"; Parameters: "stop --config ""{userappdata}\BeeSky\agent-config.json"""; Flags: runhidden; RunOnceId: "StopBeeSkyAgent042"
 Filename: "{app}\beesky-agent.exe"; Parameters: "remove-task --if-exe-dir ""{app}"""; Flags: runhidden; RunOnceId: "RemoveBeeSkyAgentStartup042"
+
+[Run]
+Filename: "{app}\beesky_agent_app.exe"; Description: "Open BeeSky Agent"; Flags: postinstall nowait skipifsilent
+
+[Code]
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  Engine, ConfigFile, RuntimeFile: String;
+  ResultCode: Integer;
+begin
+  Result := '';
+  Engine := ExpandConstant('{app}\beesky-agent.exe');
+  ConfigFile := ExpandConstant('{param:BEESKYCONFIG|}');
+  if ConfigFile = '' then
+    ConfigFile := ExpandConstant('{userappdata}\BeeSky\agent-config.json');
+  RuntimeFile := ChangeFileExt(ConfigFile, '.runtime.json');
+  if FileExists(Engine) and FileExists(RuntimeFile) then begin
+    if (not Exec(Engine, 'stop --config "' + ConfigFile + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode)) or (ResultCode <> 0) then
+      Result := 'Cannot stop BeeSky Agent. Stop the Agent and try again.';
+  end;
+end;
