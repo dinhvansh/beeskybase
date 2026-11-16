@@ -5,6 +5,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('scanner keeps Agent separate', (tester) async {
+    tester.view.physicalSize = const Size(1366, 768);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(BeeSkyApp(bridge: MockBridge()));
+    await tester.pumpAndSettle();
+    expect(find.text('Chế độ Agent'), findsNothing);
+    expect(find.text('Nhóm mạng'), findsWidgets);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets(
     'sidebar + chips layout: empty state first, scan fills the table, '
     'detail panel opens on the first row',
@@ -23,7 +34,7 @@ void main() {
 
       // Sidebar: brand + tagline, the active view, the roadmap views
       // greyed with a "SAU" tag each, version + mock status at the foot.
-      expect(find.text('QUẢN LÝ MÁY ĐÀO'), findsOneWidget);
+      expect(find.text('MINE SCANNER'), findsOneWidget);
       expect(find.text('Bản đồ nhiệt'), findsOneWidget);
       expect(find.text('Điện năng'), findsOneWidget);
       expect(find.text('Lịch sử sửa'), findsOneWidget);
@@ -31,8 +42,8 @@ void main() {
       expect(find.text('Cài đặt'), findsOneWidget);
       // v0.32: all five views are real — no "SAU" tag remains.
       expect(find.text('SAU'), findsNothing);
-      expect(find.text('BeeSky v0.39.0'), findsOneWidget);
-      expect(find.text('Ruột quét: dữ liệu mẫu'), findsOneWidget);
+      expect(find.text('BeeSky v0.44.1'), findsOneWidget);
+      expect(find.text('Dữ liệu mẫu'), findsNWidgets(2));
 
       // v0.24: the app OPENS on network groups (the HashCore home
       // screen) — the mock shell seeds two demo groups: the main

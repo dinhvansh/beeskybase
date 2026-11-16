@@ -1,0 +1,74 @@
+# BeeSky Cloud — bản duyệt giao diện
+
+## Xưởng 3D (Three.js)
+
+### Engine bố trí, tầng và toàn màn hình
+
+- **Toàn màn hình** mở vùng 3D có đủ camera, tầng và công cụ; **Thu nhỏ** trở về trang. Trình duyệt không hỗ trợ Fullscreen API vẫn có chế độ mở rộng trong trang.
+- **Thêm tầng**, đặt tên và kích thước sàn theo ô lưới; chọn tầng từ dropdown. Có đổi tên và xóa tầng trống, không xóa tầng đang có kệ hoặc tầng cuối cùng.
+- **Khám phá**: xoay/zoom camera, rê chuột xem IP/model/serial/nhiệt độ/trạng thái/tầng xưởng/vị trí; bấm máy mở chi tiết.
+- **Di chuyển máy**: kéo từng máy vào ô trống, dùng hoàn tác máy như trước.
+- **Bố trí kệ**: kéo cả kệ trên sàn (gợi ý dùng góc Từ trên), bám lưới 0,5; chọn kệ, xoay 90°, nhập tọa độ hoặc chuyển tầng qua **Vị trí & tầng**. Có **Hoàn tác kệ**; Esc hủy kéo, R xoay khi canvas có focus. Máy giữ nguyên ô khi kệ di chuyển/chuyển tầng.
+- Engine kiểm tra va chạm và biên sàn trước khi cập nhật. Mọi thao tác bị từ chối giữ nguyên dữ liệu. Mỗi xưởng/tầng có bố trí riêng. Tọa độ không phải kích thước đo thực tế.
+
+Logic độc lập ở `warehouse-engine.js`, cảnh Three.js ở `rack3d/scene.js`, adapter UI ở `rack-3d.js`. Chạy kiểm tra bố trí bằng `node --test tests/warehouse-engine.test.cjs` (8 ca: giữ máy khi di chuyển/undo, va chạm, biên, xoay, chuyển tầng, cách ly xưởng, undo lỗi thời, cấu hình tầng).
+
+Đã thử trên trình duyệt: Fullscreen API và thu nhỏ, hover chi tiết, kéo kệ trên sàn, chặn va chạm, Esc hủy, xoay/undo, tạo tầng và chuyển kệ bằng biểu mẫu trong toàn màn hình; kéo/undo máy sau thay đổi engine; bàn phím 2D; desktop 1366×768, mobile 390×844 và sáng/tối. Không thấy lỗi console trong các luồng đã thử. Vẫn là dữ liệu mẫu và chỉ lưu trong phiên.
+
+Mở `/#/farms?farm=bt`, chọn **Sắp xếp vị trí** rồi kéo máy sang ô trống cùng rack hoặc rack khác trong cùng xưởng. Có **Hoàn tác**, Esc hủy kéo và góc nhìn phối cảnh / mặt trước / từ trên. Có thể kéo máy chưa xếp từ thanh bên hoặc bấm **Chọn vị trí** rồi chọn ô trống. Ô đã có máy không nhận thả. Chuyển sang **2D** để thao tác bằng bàn phím hoặc dùng biểu mẫu vị trí.
+
+Tìm IP/model/serial/tên rack rồi chọn kết quả để đưa camera tới máy. 2D và 3D dùng chung dữ liệu, không tạo bản sao máy. Vị trí vẫn chỉ lưu trong phiên bản duyệt, tải lại trang sẽ khôi phục mẫu.
+
+Three.js được đóng gói cục bộ trong `rack-scene.js`, chỉ tải khi mở xưởng 3D, không cần CDN. Sửa cảnh trong `rack3d/scene.js`; cài và build bằng `npm ci --prefix cloud-preview/rack3d` rồi `npm run build --prefix cloud-preview/rack3d`. Adapter là `rack-3d.js`, giao diện là `rack-3d.css`. Cảnh đứng yên chỉ render khi tương tác/resize; giải phóng WebGL khi đổi trang. Mất WebGL có đường về 2D.
+
+Tham khảo hướng không gian và camera: [Warehouse Journey 3D](https://github.com/hiobuy/warehouse-journey-3d), [Smart Warehouse](https://github.com/Xxcool/smart-warehouse). Cảnh BeeSky dựng bằng hình học riêng, không sao chép model hoặc asset của hai repo.
+
+Đã kiểm tra trình duyệt: kéo 3D trong cùng rack và giữa rack, không trùng ID, hoàn tác, chặn ô có máy, Esc hủy, kéo máy chưa xếp vào 3D; tìm máy và camera định vị; sáng/tối, desktop 1366×768 và mobile 390×844 (không tràn ngang). Build thành công, không có lỗi console trong các luồng đã kiểm tra. Chưa có lưu vị trí backend.
+
+Prototype local để duyệt trước khi triển khai backend nhiều khách hàng. Không phải hệ thống đăng nhập thật; không gửi email, không kết nối máy đào và không lưu mật khẩu. Dữ liệu và các thay đổi mẫu chỉ tồn tại trong bộ nhớ trang, tải lại sẽ khôi phục bản mẫu.
+
+Chạy từ repository:
+
+```text
+python -m http.server 8790 --bind 127.0.0.1 --directory cloud-preview
+```
+
+Mở http://127.0.0.1:8790/#/overview hoặc http://127.0.0.1:8790/#/signup.
+
+Các liên kết ở thanh trên cùng cho phép duyệt đăng nhập, đăng ký, tài khoản mới và dashboard mẫu. “Vào dashboard” khôi phục tổ chức và các xưởng mẫu sau khi đã thử onboarding.
+
+Đã kiểm tra trên trình duyệt: đăng ký mẫu → màn xác thực → tạo xưởng đầu tiên; mời thành viên mẫu; dashboard desktop; menu mobile ở chiều rộng 390px và nội dung không tràn ngang. Kiểm tra cú pháp JavaScript bằng `node --check cloud-preview/app.js`.
+
+Kế hoạch backend và các tiêu chí bảo mật: `docs/cloud-accounts-plan.md`. Phương án Django/PostgreSQL trong kế hoạch là đề xuất để triển khai sau khi duyệt, chưa thay stack cloud hiện tại.
+
+
+## Cập nhật bản duyệt: Agent, Workflow action và Tác vụ — 11/11/2026
+
+Đã triển khai trong `cloud-preview/operations.js` và `operations.css`:
+
+- Agent theo xưởng, chế độ giám sát/điều khiển, thêm/sửa cấu hình và dải IPv4 cho tác vụ quét. Mặc định agent mới chỉ giám sát. Chưa cấp mã kết nối thật.
+- Workflow dạng chuỗi: kích hoạt → phạm vi xưởng/rack/model → nhiều action có thể thêm, bỏ, đổi thứ tự. Kích hoạt theo điều kiện, lịch hoặc phát hiện máy mới.
+- Action: khởi động máy, khởi động trình đào, dừng/tiếp tục đào, đổi pool, làm mát, bật/tắt board, gửi API/Webhook HTTPS.
+- Lưu bản nháp, mô phỏng chỉ số/thời gian giữ/cooldown; chi tiết từng máy và từng action tại Tác vụ. Action đầu chờ Agent thì các action sau chờ bước trước; không tạo kết quả thành công giả.
+- Dropdown dùng component chung. Đã duyệt trên Chrome ở 1366×768 và 390×844; không tràn ngang tại các màn Agent và builder đã kiểm tra. Sidebar có vùng cuộn để tới các mục quản lý.
+- Đã thử tạo/sửa Agent và dải IP; lưu workflow, đổi action/thứ tự, mô phỏng điều kiện đạt và chưa đủ thời gian. Đã sửa lỗi mất ngày mặc định khi đổi sang lịch tuần. Tài khoản mới có 0 Agent và 0 Workflow mẫu.
+
+Giới hạn: toàn bộ cấu hình nằm trong bộ nhớ trang; tải lại sẽ khôi phục fixture. Chưa có xác thực, phân quyền server, cách ly tenant thực tế, hàng đợi, lịch thực thi, gửi webhook hoặc lệnh xuống máy. Đây là bản duyệt giao diện trước backend; không dùng để vận hành xưởng thật.
+
+Bước tiếp theo sau duyệt: triển khai tài khoản/tenant và quyền theo xưởng ở server; lưu cấu hình; nhật ký thay đổi; giao thức Agent với mã riêng từng xưởng, thu hồi/luân chuyển mã; hàng đợi lệnh có thời hạn và xác nhận kết quả; webhook có chữ ký và chặn đích nội bộ/SSRF. Agent thực thi triển khai ở giai đoạn sau.
+
+
+## React Flow và MCP (cập nhật)
+
+Workflow hiện dùng React 19 và @xyflow/react 12: canvas kéo khối, zoom/pan, khớp khung, sắp xếp lại, chọn khối để sửa bằng inspector; giữ schema và mô phỏng tuần tự cũ. Dây nối biểu diễn thứ tự action, chưa hỗ trợ nhánh tùy ý. Vị trí khối lưu cùng bản nháp trong bộ nhớ. Dropdown tiếp tục dùng component chung.
+
+Source: `flow-editor/editor.jsx`, `flow-editor/editor.css`, bridge `flow-bridge.js`. Bundle JS/CSS đã có sẵn để server static chạy offline, không tải thư viện từ CDN. Build lại: `npm ci --prefix cloud-preview/flow-editor` rồi `npm run build --prefix cloud-preview/flow-editor`. Lệnh build tự cập nhật query hash asset trong index.html để tránh cache trộn phiên bản.
+
+Mục AI & MCP trong bản duyệt mô tả trạng thái kết nối, chưa nối backend. Backend thật có endpoint MCP chỉ đọc tại `/mcp`; xem `docs/mcp-reporting.md`. Endpoint không được bật quyền mặc định, chưa thay thế hệ thống tenant cần triển khai.
+
+
+## Giao diện sáng / tối
+
+Nút mặt trăng / mặt trời ở thanh trên đổi theme cho dashboard, form, dialog, dropdown, rack và React Flow. Trang đăng nhập/đăng ký cũng có nút đổi theme. Mặc định theo hệ điều hành; sau khi chọn sẽ lưu `beesky-color-theme` trong localStorage, độc lập với dữ liệu tài khoản mẫu. Nếu browser không cho lưu thì vẫn đổi được theme trong phiên hiện tại. Đổi theme không remount canvas hoặc xóa form đang chỉnh.
+
+Source: `theme.js` chạy trước paint, `theme.css` chứa token/override sáng; React Flow nhận sự kiện theme để đổi edge/background và colorMode. Đã kiểm tra Chrome 1366×768 và 390×844, lưu theme tối qua reload, dropdown sáng, rack sáng, đăng nhập sáng, đổi qua lại trong workflow đang sửa vẫn giữ ngưỡng nhập. Không ghi nhận lỗi console trong phiên kiểm tra cuối.

@@ -238,19 +238,20 @@ def main() -> int:
               not updater.verify_signature(manifest_a, sig_a))
         updater.UPDATE_RSA_N_HEX = n_hex
 
-        # --- CLI wiring (repo build has NO key compiled in)
+        # --- CLI wiring: compiled key must never trust the throwaway fixture key
         proc = subprocess.run(
             [sys.executable, "-m", "beesky", "update", "--check",
              "--url-base", base_a],
             cwd=REPO, capture_output=True, text=True, timeout=60)
-        check("cli: `update --check` reports the unconfigured channel",
-              proc.returncode == 0 and "not configured" in proc.stdout,
+        check("cli: check reports disabled state or rejects the untrusted fixture",
+              (proc.returncode == 2 and "FAILED" in proc.stderr) if saved_n else
+              (proc.returncode == 0 and "not configured" in proc.stdout),
               proc.stdout.strip().splitlines()[-1] if proc.stdout else "")
         proc = subprocess.run(
-            [sys.executable, "-m", "beesky", "update"],
+            [sys.executable, "-m", "beesky", "update", "--url-base", base_a],
             cwd=REPO, capture_output=True, text=True, timeout=60)
         check("cli: bare `update` refuses cleanly (exit 2) when "
-              "unconfigured", proc.returncode == 2
+              "untrusted or unconfigured", proc.returncode == 2
               and "refused" in proc.stdout)
     finally:
         updater.UPDATE_RSA_N_HEX = saved_n

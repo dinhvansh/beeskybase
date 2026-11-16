@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light"><title>{{ title }} · BeeSky Mine</title></head>
+<body style="margin:0;padding:0;background-color:#f3f5f7;color:#18202e;font-family:Arial,Helvetica,sans-serif;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">{{ preheader }}</div>
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#f3f5f7;"><tr><td align="center" style="padding:40px 16px;">
+<table role="presentation" width="560" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:560px;">
+<tr><td style="padding:0 8px 24px;font-size:23px;font-weight:bold;letter-spacing:-1px;color:#18202e;">BeeSky <span style="font-weight:normal;color:#64748b;">Mine</span></td></tr>
+<tr><td style="background-color:#ffffff;border:1px solid #e1e6ed;border-top:4px solid #facc15;border-radius:12px;padding:36px 28px;">
+<p style="margin:0 0 16px;color:#687589;font-size:11px;letter-spacing:1.5px;">TÀI KHOẢN BEESKY MINE</p>
+<h1 style="margin:0 0 24px;color:#18202e;font-size:27px;line-height:1.25;letter-spacing:-.5px;">{{ title }}</h1>
+<p style="margin:0 0 16px;font-size:15px;line-height:1.7;color:#344054;">Xin chào{% if name %} {{ name }}{% endif %},</p>
+<p style="margin:0 0 24px;font-size:15px;line-height:1.7;color:#475467;">{{ intro }}</p>
+{% if action_url %}<table role="presentation" cellspacing="0" cellpadding="0" border="0"><tr><td bgcolor="#facc15" style="border-radius:7px;text-align:center;"><a href="{{ action_url }}" style="display:inline-block;padding:16px 24px;border:1px solid #facc15;border-radius:7px;font-size:15px;line-height:20px;font-weight:bold;color:#18202e;text-decoration:none;">{{ action_label }}</a></td></tr></table>
+<p style="margin:24px 0 0;font-size:13px;line-height:1.7;color:#667085;">Liên kết có hiệu lực trong <strong style="color:#344054;">{{ ttl }}</strong> và chỉ sử dụng một lần.</p>
+{% endif %}
+{% if body %}<p style="margin:0 0 24px;font-size:14px;line-height:1.8;color:#475467;overflow-wrap:anywhere;word-break:break-word;">{{ body|linebreaksbr }}</p>{% endif %}
+{% if action_url %}<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:28px;"><tr><td style="border-top:1px solid #e7ebf0;padding-top:24px;">
+<p style="margin:0 0 10px;font-size:12px;line-height:1.7;color:#667085;">Nếu nút không hoạt động, sao chép đường dẫn này vào trình duyệt:</p>
+<a href="{{ action_url }}" style="font-size:12px;line-height:1.8;color:#285fca;word-break:break-all;overflow-wrap:anywhere;">{{ action_url }}</a>
+</td></tr></table>{% endif %}
+<p style="margin:28px 0 0;font-size:12px;line-height:1.7;color:#667085;">{{ safety_note }}</p>
+</td></tr>
+<tr><td align="center" style="padding:24px 12px;color:#8490a2;font-size:11px;line-height:1.8;">BeeSky Mine · Không gian vận hành của bạn.<br>Đây là email tự động. Vui lòng không trả lời email này.<br><a href="{{ public_url }}" style="color:#667085;text-decoration:underline;">Mở BeeSky Mine</a></td></tr>
+</table></td></tr></table></body></html>

@@ -50,6 +50,8 @@ something a stray ``http_proxy`` should reroute.
 from __future__ import annotations
 
 import json
+import math
+from pathlib import Path
 import sys
 import time
 import urllib.error
@@ -96,9 +98,23 @@ def _post_json(url: str, payload: dict, key: str, timeout: float =
                  "User-Agent": "BeeSky-Agent/0.6",
                  "Authorization": f"Bearer {key}"})
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    with opener.open(request, timeout=timeout) as response:
-        response.read()
-        return response.status
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            response.read()
+            return response.status
+    except urllib.error.HTTPError as error:
+        message = f'Cloud trả HTTP {error.code}'
+        try:
+            if 'json' in error.headers.get('Content-Type',''):
+                body = json.loads(error.read(4096))
+                text = body.get('detail') if isinstance(body,dict) else body
+                if isinstance(text,list):text = ' '.join(str(item) for item in text)
+                if isinstance(text,str):message += ': '+text[:300]
+        except (ValueError,OSError):
+            pass
+        finally:
+            error.close()
+        raise ValueError(redact(message,key)) from None
 
 
 def _get_json(url: str, key: str, timeout: float = POST_TIMEOUT_S) -> dict:
@@ -109,8 +125,12 @@ def _get_json(url: str, key: str, timeout: float = POST_TIMEOUT_S) -> dict:
                  "User-Agent": "BeeSky-Agent/0.6",
                  "Authorization": f"Bearer {key}"})
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    with opener.open(request, timeout=timeout) as response:
-        body = response.read()
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            body = response.read()
+    except urllib.error.HTTPError as error:
+        error.close()
+        raise
     data = json.loads(body.decode("utf-8", errors="replace"))
     if not isinstance(data, dict):
         raise ValueError("cloud reply is not a JSON object")
@@ -162,6 +182,9 @@ class AgentService:
         # agent-status.json through it. None = no reporting (the
         # `beesky agent` command line behaves exactly as before).
         self._status_hook = status_hook
+        self._clock_offset = 0.0
+        self._clock_checked_at = None
+        self._last_delivery_error = None
 
     def _fail(self, message: str) -> None:
         """A failure line on stderr, with the agent key scrubbed."""
@@ -181,14 +204,28 @@ class AgentService:
     # cloud delivery
     # ------------------------------------------------------------------
 
+    def _cloud_now(self):
+        now = time.monotonic()
+        if self._clock_checked_at is None or now-self._clock_checked_at>3600:
+            self._clock_checked_at=now
+            try:
+                before=time.time()
+                info=_get_json(f'{self.cloud_url}/api/agent/connection',self._key)
+                remote=info.get('serverTime')
+                if isinstance(remote,(int,float)) and not isinstance(remote,bool) and math.isfinite(remote):
+                    self._clock_offset=float(remote)-(before+time.time())/2
+            except Exception:
+                pass  # Legacy/local Cloud may not expose this endpoint.
+        return time.time()+self._clock_offset
+
     def _deliver_events(self) -> None:
         """Try to flush the pending-event queue; keep it on failure."""
         if not self._pending_events:
             return
         try:
             _post_json(f"{self.cloud_url}/api/ingest/events",
-                       {"site": self.site, "ts": time.time(),
-                        "events": self._pending_events}, self._key)
+                       {"site": self.site, "ts": self._cloud_now(),
+                        "events": [{**event, **({"ts":event["ts"]+self._clock_offset} if isinstance(event.get("ts"),(int,float)) else {})} for event in self._pending_events]}, self._key)
         except Exception as exc:  # noqa: BLE001 — retried next pass
             self._fail(f"agent: cloud events POST failed ({exc}); "
                        f"{len(self._pending_events)} event(s) kept "
@@ -199,11 +236,13 @@ class AgentService:
     def _deliver_snapshot(self, records: list[dict]) -> bool:
         try:
             _post_json(f"{self.cloud_url}/api/ingest",
-                       {"site": self.site, "ts": time.time(),
+                       {"site": self.site, "ts": self._cloud_now(),
                         "interval": self.interval,
                         "miners": records}, self._key)
+            self._last_delivery_error=None
             return True
         except Exception as exc:  # noqa: BLE001 — next pass supersedes it
+            self._last_delivery_error=redact(str(exc),self._key)
             self._fail(f"agent: cloud snapshot POST failed ({exc}); "
                        "will retry with the next pass")
             return False
@@ -331,6 +370,10 @@ class AgentService:
         if not res["ok"] or not res["update_available"]:
             return
         latest = res["latest"]
+        # Installed native Agent updates Flutter and both engines as one unit.
+        # Keep legacy single-exe opt-in only for CLI-only deployments.
+        native_app = getattr(sys, 'frozen', False) and (Path(sys.executable).parent / 'beesky_agent_app.exe').is_file()
+        apply_single_exe = self.auto_update and not native_app
         if latest != self._update_reported:
             self._update_reported = latest
             stamp = time.time()
@@ -343,17 +386,17 @@ class AgentService:
                 "type": "UPDATE_AVAILABLE", "severity": "info",
                 "detail": (f"BeeSky {latest} is available (this agent "
                            f"runs {res['current']})"
-                           + ("; --auto-update is on, applying it"
-                              if self.auto_update else
+                           + ("; mở BeeSky Agent để cập nhật ứng dụng" if native_app else
+                              "; --auto-update is on, applying it" if apply_single_exe else
                               "; run `beesky update` to install")),
                 "data": {"current": res["current"], "latest": latest,
-                         "auto_update": self.auto_update},
+                         "auto_update": apply_single_exe},
             }
             print(f"EVENT UPDATE_AVAILABLE [info] BeeSky {latest} "
                   f"(running {res['current']})", flush=True)
             self._pending_events.append(event)
             self._deliver_events()
-        if not self.auto_update:
+        if not apply_single_exe:
             return
         argv = ([sys.executable] + sys.argv[1:]
                 if getattr(sys, "frozen", False) else
@@ -411,19 +454,18 @@ class AgentService:
         self._run_commands(records)
         self._maybe_update_check()
         self._emit_status(
-            delivered, len(records),
+            delivered, len(present),
             None if delivered else
-            "cloud snapshot POST failed (see agent.log); "
-            "will retry with the next pass")
+            self._last_delivery_error or "Không gửi được bản quét; Agent sẽ thử lại ở vòng kế tiếp.")
         return events
 
-    def run(self, once: bool = False) -> None:
+    def run(self, once: bool = False, stop_event=None) -> None:
         """Pass loop until Ctrl+C (or a single pass with *once*)."""
         mode = "single pass" if once else f"every {self.interval:g}s"
         print(f"BeeSky agent: site {self.site!r} -> {self.cloud_url} "
               f"({mode})", flush=True)
         try:
-            while True:
+            while stop_event is None or not stop_event.is_set():
                 started = time.monotonic()
                 self.run_pass()
                 stamp = time.strftime("%H:%M:%S")
@@ -436,6 +478,9 @@ class AgentService:
                     break
                 delay = self.interval - (time.monotonic() - started)
                 if delay > 0:
-                    time.sleep(delay)
+                    if stop_event is not None:
+                        stop_event.wait(delay)
+                    else:
+                        time.sleep(delay)
         except KeyboardInterrupt:
             print("\nagent stopped")

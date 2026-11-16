@@ -227,8 +227,7 @@ class _HomePageState extends State<HomePage> {
   // deep fetch per device per session, keyed by IP.
   late final HistoryStore _historyStore =
       widget.historyStore ?? HistoryStore.appDefault();
-  late final NoteStore _noteStore =
-      widget.noteStore ?? NoteStore.appDefault();
+  late final NoteStore _noteStore = widget.noteStore ?? NoteStore.appDefault();
   Map<String, List<HistorySample>> _history = {};
   Map<String, String> _notes = {};
   int _detailTab = 0;
@@ -263,6 +262,8 @@ class _HomePageState extends State<HomePage> {
   // Groups screen smalls (v0.34, docs/settings-mapping.md §3):
   // the search query and the combined-mode toggle.
   String _groupsQuery = '';
+  bool? _sidebarExpanded;
+  bool _gridOptionsOpen = false;
   bool _combinedMode = false;
 
   void _goView(_View view) {
@@ -541,8 +542,7 @@ class _HomePageState extends State<HomePage> {
                   'Nhóm được giữ lại sẽ nhận toàn bộ dải quét và '
                   'tài khoản riêng của nhóm bị gộp; nhóm bị gộp '
                   'sẽ bị xóa.',
-                  style: TextStyle(
-                      color: BeeSkyColors.muted, fontSize: 12.5),
+                  style: TextStyle(color: BeeSkyColors.muted, fontSize: 12.5),
                 ),
                 const SizedBox(height: 12),
                 const Text('Giữ nhóm:'),
@@ -584,8 +584,7 @@ class _HomePageState extends State<HomePage> {
               child: const Text('Hủy'),
             ),
             FilledButton(
-              onPressed: () =>
-                  Navigator.of(ctx).pop(mergeGroups(keep, other)),
+              onPressed: () => Navigator.of(ctx).pop(mergeGroups(keep, other)),
               child: const Text('Gộp nhóm'),
             ),
           ],
@@ -596,10 +595,7 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _groups = [
         for (final g in _groups)
-          if (g.id == merged.id)
-            merged
-          else if (g.id != other.id)
-            g,
+          if (g.id == merged.id) merged else if (g.id != other.id) g,
       ];
       if (_activeGroup?.id == other.id) _activeGroup = merged;
       if (_activeGroup?.id == merged.id) _activeGroup = merged;
@@ -967,8 +963,7 @@ class _HomePageState extends State<HomePage> {
       // way), and the detail panel follows if it shows this miner.
       final fresh = event.record;
       if (fresh != null) {
-        final decorated =
-            fresh.withNote(_notes[deviceKeyFor(fresh)] ?? '');
+        final decorated = fresh.withNote(_notes[deviceKeyFor(fresh)] ?? '');
         final idx = _records.indexWhere((r) => r.ip == fresh.ip);
         if (idx >= 0) {
           final next = [..._records];
@@ -1220,10 +1215,10 @@ class _HomePageState extends State<HomePage> {
     ];
     if (selected.isEmpty) return;
     final detailed = _selected;
-    final source = (detailed != null &&
-            selected.any((r) => r.ip == detailed.ip))
-        ? detailed
-        : selected.first;
+    final source =
+        (detailed != null && selected.any((r) => r.ip == detailed.ip))
+            ? detailed
+            : selected.first;
     final targets = [
       for (final r in selected)
         if (r.ip != source.ip) r.ip,
@@ -1241,8 +1236,7 @@ class _HomePageState extends State<HomePage> {
     final insp = await _inspectOf(source);
     if (!mounted) return;
     if (insp == null || insp.error != null || !insp.pools.supported) {
-      final reason =
-          insp?.error ?? insp?.pools.reason ?? 'chưa đọc được pool';
+      final reason = insp?.error ?? insp?.pools.reason ?? 'chưa đọc được pool';
       setState(
         () => _status = 'Chép cấu hình pool: máy nguồn '
             '${source.ip} không đọc được pool ($reason).',
@@ -1252,8 +1246,7 @@ class _HomePageState extends State<HomePage> {
     }
     final slots = [
       for (final p in insp.pools.pools)
-        if (p.url != null && p.user != null)
-          {'url': p.url!, 'user': p.user!},
+        if (p.url != null && p.user != null) {'url': p.url!, 'user': p.user!},
     ];
     if (slots.isEmpty) {
       _showSnack('Máy nguồn ${source.ip} không báo pool nào để chép.');
@@ -1285,8 +1278,7 @@ class _HomePageState extends State<HomePage> {
             const SizedBox(width: 8),
             Text(
               '· đang xử lý $_opsCurrentIp',
-              style: const TextStyle(
-                  color: BeeSkyColors.muted, fontSize: 12.5),
+              style: const TextStyle(color: BeeSkyColors.muted, fontSize: 12.5),
             ),
           ],
           const SizedBox(width: 12),
@@ -1462,15 +1454,51 @@ class _HomePageState extends State<HomePage> {
           hint: g.targets,
           run: () => _scanGroup(g),
         ),
-      (label: 'Mở Nhóm mạng', hint: 'Màn hình chính', run: () => _goView(_View.groups)),
-      (label: 'Mở Máy đào', hint: 'Bảng máy đào', run: () => _goView(_View.miners)),
-      (label: 'Mở Bản đồ nhiệt', hint: 'Nhiệt độ theo máy', run: () => _goView(_View.heat)),
-      (label: 'Mở Điện năng', hint: 'Công suất + tiền điện', run: () => _goView(_View.energy)),
-      (label: 'Mở Lịch sử sửa', hint: 'Phiếu sửa đã xuất', run: () => _goView(_View.repairs)),
-      (label: 'Mở Sự kiện', hint: 'Thay đổi giữa các lần quét', run: () => _goView(_View.events)),
-      (label: 'Mở Cài đặt', hint: 'Cài đặt, timeout, nhật ký', run: () => _goView(_View.settings)),
-      (label: 'Tài khoản máy đào', hint: 'Bộ đăng nhập theo hãng', run: _editCreds),
-      (label: 'Xuất phiếu sửa', hint: 'Phiếu cho máy có vấn đề', run: _exportTickets),
+      (
+        label: 'Mở Nhóm mạng',
+        hint: 'Màn hình chính',
+        run: () => _goView(_View.groups)
+      ),
+      (
+        label: 'Mở Máy đào',
+        hint: 'Bảng máy đào',
+        run: () => _goView(_View.miners)
+      ),
+      (
+        label: 'Mở Bản đồ nhiệt',
+        hint: 'Nhiệt độ theo máy',
+        run: () => _goView(_View.heat)
+      ),
+      (
+        label: 'Mở Điện năng',
+        hint: 'Công suất + tiền điện',
+        run: () => _goView(_View.energy)
+      ),
+      (
+        label: 'Mở Lịch sử sửa',
+        hint: 'Phiếu sửa đã xuất',
+        run: () => _goView(_View.repairs)
+      ),
+      (
+        label: 'Mở Sự kiện',
+        hint: 'Thay đổi giữa các lần quét',
+        run: () => _goView(_View.events)
+      ),
+      (
+        label: 'Mở Cài đặt',
+        hint: 'Cài đặt, timeout, nhật ký',
+        run: () => _goView(_View.settings)
+      ),
+      (
+        label: 'Tài khoản máy đào',
+        hint: 'Bộ đăng nhập theo hãng',
+        run: _editCreds
+      ),
+      (
+        label: 'Xuất phiếu sửa',
+        hint: 'Phiếu cho máy có vấn đề',
+        run: _exportTickets
+      ),
     ];
     return commands;
   }
@@ -1505,8 +1533,7 @@ class _HomePageState extends State<HomePage> {
           final result = widget.bridge.isMock
               ? await widget.bridge.scan(
                   group.targets,
-                  eventsState:
-                      _eventStore.stateFilePathFor(group.targets),
+                  eventsState: _eventStore.stateFilePathFor(group.targets),
                   timeout: _settings.probeTimeoutS,
                   workers: _settings.scanWorkers,
                 )
@@ -1514,8 +1541,7 @@ class _HomePageState extends State<HomePage> {
                   group.name,
                   credsFile: await _credsFileForScan(),
                   groupsFile: _groupsFile?.path,
-                  eventsState:
-                      _eventStore.stateFilePathFor(group.targets),
+                  eventsState: _eventStore.stateFilePathFor(group.targets),
                   timeout: _settings.probeTimeoutS,
                   workers: _settings.scanWorkers,
                 );
@@ -1527,8 +1553,8 @@ class _HomePageState extends State<HomePage> {
         } catch (e) {
           // One group's failure must not kill the whole pass.
           if (mounted) {
-            setState(() => _status =
-                'Nhóm ${group.name} quét lỗi ($e) — vẫn quét tiếp.');
+            setState(() =>
+                _status = 'Nhóm ${group.name} quét lỗi ($e) — vẫn quét tiếp.');
           }
         }
         if (!mounted) return;
@@ -1555,19 +1581,22 @@ class _HomePageState extends State<HomePage> {
     // for the whole window — table fonts and labels grow, the
     // fixed-pixel chrome does not (docs/settings-mapping.md D-S1).
     final content = Scaffold(
-      body: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _sidebar(),
+      body: LayoutBuilder(builder: (context, size) {
+        final expanded = _sidebarExpanded ?? size.maxWidth >= 1180;
+        return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          _sidebar(compact: !expanded),
           Expanded(
-            child: switch (_view) {
+              child: Column(children: [
+            _shellBar(expanded),
+            Expanded(
+                child: switch (_view) {
               _View.groups => _groupsColumn(),
               _View.miners => _minersColumn(),
               _ => _auxColumn(_view),
-            },
-          ),
-        ],
-      ),
+            }),
+          ])),
+        ]);
+      }),
     );
     return Shortcuts(
       shortcuts: const {
@@ -1876,8 +1905,7 @@ class _HomePageState extends State<HomePage> {
   List<StoreFileInfo> _storeFileInfos() {
     int? sizeOf(String name) {
       final dir = _settingsStore.primaryDir;
-      final file =
-          File('${dir.path}${Platform.pathSeparator}$name');
+      final file = File('${dir.path}${Platform.pathSeparator}$name');
       if (file.existsSync()) {
         try {
           return file.lengthSync();
@@ -1889,16 +1917,16 @@ class _HomePageState extends State<HomePage> {
     }
 
     return [
-      StoreFileInfo('Nhóm mạng (beesky-groups.json)',
-          sizeOf('beesky-groups.json')),
-      StoreFileInfo('Tài khoản (beesky-creds.json)',
-          sizeOf('beesky-creds.json')),
+      StoreFileInfo(
+          'Nhóm mạng (beesky-groups.json)', sizeOf('beesky-groups.json')),
+      StoreFileInfo(
+          'Tài khoản (beesky-creds.json)', sizeOf('beesky-creds.json')),
       StoreFileInfo('Lịch sử thao tác (beesky-ops-history.json)',
           sizeOf('beesky-ops-history.json')),
-      StoreFileInfo('Nhật ký sự kiện (beesky-events.json)',
-          sizeOf('beesky-events.json')),
-      StoreFileInfo('IP Report (beesky-ipreports.json)',
-          sizeOf('beesky-ipreports.json')),
+      StoreFileInfo(
+          'Nhật ký sự kiện (beesky-events.json)', sizeOf('beesky-events.json')),
+      StoreFileInfo(
+          'IP Report (beesky-ipreports.json)', sizeOf('beesky-ipreports.json')),
     ];
   }
 
@@ -1921,27 +1949,28 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _minersColumn() {
-    final column = Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _header(),
-        _scanBar(),
-        if (_scanned) _gridToolbar(),
-        if (_scanned && _records.isNotEmpty) _selectionBar(),
-        if (_runningTask != null) _opsProgressBar(),
+    return LayoutBuilder(builder: (context, size) {
+      // Keep the table usable when display options, large text or a short
+      // laptop window would otherwise push it below the viewport.
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: size.maxHeight * .62),
+            child: SingleChildScrollView(
+                primary: false,
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _header(),
+                      _scanBar(),
+                      if (_scanned) _gridToolbar(),
+                      if (_scanned && _records.isNotEmpty) _selectionBar(),
+                      if (_runningTask != null) _opsProgressBar(),
+                    ]))),
         if (_busy) const LinearProgressIndicator(minHeight: 3),
         Expanded(child: _content()),
         _statusLine(),
-      ],
-    );
-    // The grid hotkey layer used to live here (v0.25) as its own
-    // Shortcuts + Focus(autofocus: true). v0.34 moved it to build():
-    // a second autofocus Focus at the top level stole primary focus,
-    // so Ctrl+A/F/R/Esc never reached this column — one focus, one
-    // shortcuts map, at the top (grid intents are view-guarded
-    // there). Handlers step aside while a text field owns the
-    // keyboard (see _editingText).
-    return column;
+      ]);
+    });
   }
 
   // ------------------------------------------------------------------
@@ -1952,7 +1981,7 @@ class _HomePageState extends State<HomePage> {
 
   Widget _gridToolbar() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 12, 18, 0),
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
       child: Wrap(
         spacing: 10,
         runSpacing: 8,
@@ -1963,8 +1992,15 @@ class _HomePageState extends State<HomePage> {
             child: TextField(
               controller: _searchCtrl,
               focusNode: _searchFocus,
-              decoration: const InputDecoration(
-                hintText: 'Tìm theo IP / MAC, Pool hoặc Worker',
+              decoration: InputDecoration(
+                hintText: 'Tìm IP, model, pool, worker…',
+                prefixIcon: const Icon(Icons.search, size: 18),
+                suffixIcon: _searchCtrl.text.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'Xóa tìm kiếm',
+                        icon: const Icon(Icons.close, size: 16),
+                        onPressed: () => setState(() => _searchCtrl.clear())),
                 contentPadding:
                     EdgeInsets.symmetric(horizontal: 12, vertical: 9),
               ),
@@ -1980,73 +2016,81 @@ class _HomePageState extends State<HomePage> {
             style: _ghostBtnStyle,
           ),
           _groupByMenu(),
-          _segmented<GridViewMode>(
-            value: _grid.viewMode,
-            options: const [
-              (GridViewMode.metric, 'Số liệu'),
-              (GridViewMode.pools, 'Pools'),
-              (GridViewMode.custom, 'Tùy chỉnh'),
-            ],
-            onChanged: (v) {
-              setState(() => _grid.viewMode = v);
-              _saveGrid();
-            },
-          ),
-          _segmented<GridViewType>(
-            value: _grid.viewType,
-            options: const [
-              (GridViewType.normal, 'Thoải mái'),
-              (GridViewType.compact, 'Gọn'),
-              (GridViewType.overview, 'Tổng quan'),
-            ],
-            onChanged: (v) {
-              setState(() => _grid.viewType = v);
-              _saveGrid();
-            },
-          ),
-          if (_grid.viewType == GridViewType.overview) ...[
-            _segmented<OverviewColorMode>(
-              value: _grid.overviewColor,
-              options: const [
-                (OverviewColorMode.temperature, 'Màu: Nhiệt độ'),
-                (OverviewColorMode.hashrate, 'Màu: Hashrate'),
-              ],
-              onChanged: (v) {
-                setState(() => _grid.overviewColor = v);
-                _saveGrid();
-              },
-            ),
-            _segmented<OverviewCellSize>(
-              value: _grid.overviewSize,
-              options: const [
-                (OverviewCellSize.small, 'Ô S'),
-                (OverviewCellSize.medium, 'Ô M'),
-                (OverviewCellSize.large, 'Ô L'),
-              ],
-              onChanged: (v) {
-                setState(() => _grid.overviewSize = v);
-                _saveGrid();
-              },
-            ),
-          ],
           OutlinedButton.icon(
-            onPressed: _busy ? null : _editColumns,
-            icon: const Icon(Icons.view_column_outlined, size: 16),
-            label: const Text('Cột'),
+            onPressed: () =>
+                setState(() => _gridOptionsOpen = !_gridOptionsOpen),
+            icon: const Icon(Icons.tune, size: 16),
+            label: Text(_gridOptionsOpen ? 'Ẩn hiển thị' : 'Hiển thị'),
             style: _ghostBtnStyle,
           ),
-          OutlinedButton.icon(
-            onPressed: _openOpsHistory,
-            icon: const Icon(Icons.history, size: 16),
-            label: const Text('Lịch sử tác vụ'),
-            style: _ghostBtnStyle,
-          ),
-          OutlinedButton.icon(
-            onPressed: _busy ? null : _openPresetsCenter,
-            icon: const Icon(Icons.bookmarks_outlined, size: 16),
-            label: const Text('Trung tâm mẫu'),
-            style: _ghostBtnStyle,
-          ),
+          IconButton(
+              onPressed: _openOpsHistory,
+              tooltip: 'Lịch sử tác vụ',
+              icon: const Icon(Icons.history, size: 19)),
+          IconButton(
+              onPressed: _busy ? null : _openPresetsCenter,
+              tooltip: 'Trung tâm mẫu',
+              icon: const Icon(Icons.bookmarks_outlined, size: 19)),
+          if (_gridOptionsOpen)
+            SizedBox(
+                width: double.infinity,
+                child: Wrap(spacing: 8, runSpacing: 8, children: [
+                  _segmented<GridViewMode>(
+                    value: _grid.viewMode,
+                    options: const [
+                      (GridViewMode.metric, 'Số liệu'),
+                      (GridViewMode.pools, 'Pools'),
+                      (GridViewMode.custom, 'Tùy chỉnh'),
+                    ],
+                    onChanged: (v) {
+                      setState(() => _grid.viewMode = v);
+                      _saveGrid();
+                    },
+                  ),
+                  _segmented<GridViewType>(
+                    value: _grid.viewType,
+                    options: const [
+                      (GridViewType.normal, 'Thoải mái'),
+                      (GridViewType.compact, 'Gọn'),
+                      (GridViewType.overview, 'Tổng quan'),
+                    ],
+                    onChanged: (v) {
+                      setState(() => _grid.viewType = v);
+                      _saveGrid();
+                    },
+                  ),
+                  if (_grid.viewType == GridViewType.overview) ...[
+                    _segmented<OverviewColorMode>(
+                      value: _grid.overviewColor,
+                      options: const [
+                        (OverviewColorMode.temperature, 'Màu: Nhiệt độ'),
+                        (OverviewColorMode.hashrate, 'Màu: Hashrate'),
+                      ],
+                      onChanged: (v) {
+                        setState(() => _grid.overviewColor = v);
+                        _saveGrid();
+                      },
+                    ),
+                    _segmented<OverviewCellSize>(
+                      value: _grid.overviewSize,
+                      options: const [
+                        (OverviewCellSize.small, 'Ô S'),
+                        (OverviewCellSize.medium, 'Ô M'),
+                        (OverviewCellSize.large, 'Ô L'),
+                      ],
+                      onChanged: (v) {
+                        setState(() => _grid.overviewSize = v);
+                        _saveGrid();
+                      },
+                    ),
+                  ],
+                  OutlinedButton.icon(
+                    onPressed: _busy ? null : _editColumns,
+                    icon: const Icon(Icons.view_column_outlined, size: 16),
+                    label: const Text('Cột'),
+                    style: _ghostBtnStyle,
+                  ),
+                ])),
         ],
       ),
     );
@@ -2094,8 +2138,8 @@ class _HomePageState extends State<HomePage> {
   }) {
     return Container(
       decoration: BoxDecoration(
-        color: BeeSkyColors.ghostFill,
-        border: Border.all(color: BeeSkyColors.glassBorder),
+        color: BeeSkyColors.surface,
+        border: Border.all(color: BeeSkyColors.border),
         borderRadius: BorderRadius.circular(radiusWidget),
       ),
       child: Row(
@@ -2111,9 +2155,8 @@ class _HomePageState extends State<HomePage> {
                   vertical: 8,
                 ),
                 decoration: BoxDecoration(
-                  color: v == value
-                      ? BeeSkyColors.activeNav
-                      : Colors.transparent,
+                  color:
+                      v == value ? BeeSkyColors.activeNav : Colors.transparent,
                   borderRadius: BorderRadius.circular(radiusWidget),
                 ),
                 child: Text(
@@ -2121,8 +2164,7 @@ class _HomePageState extends State<HomePage> {
                   style: TextStyle(
                     fontSize: 12.5,
                     fontWeight: v == value ? FontWeight.w700 : FontWeight.w400,
-                    color:
-                        v == value ? BeeSkyColors.text : BeeSkyColors.muted,
+                    color: v == value ? BeeSkyColors.text : BeeSkyColors.muted,
                   ),
                 ),
               ),
@@ -2186,15 +2228,11 @@ class _HomePageState extends State<HomePage> {
             ),
             _miniButton(
               'Quét lại',
-              _runningTask == null
-                  ? () => _startOps(OpsTaskType.rescan)
-                  : null,
+              _runningTask == null ? () => _startOps(OpsTaskType.rescan) : null,
             ),
             _miniButton(
               'Khởi động lại',
-              _runningTask == null
-                  ? () => _startOps(OpsTaskType.reboot)
-                  : null,
+              _runningTask == null ? () => _startOps(OpsTaskType.reboot) : null,
             ),
             _miniButton(
               'Đổi pool',
@@ -2350,7 +2388,7 @@ class _HomePageState extends State<HomePage> {
           borderRadius: BorderRadius.circular(radiusWidget),
         ),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        textStyle: const TextStyle(fontSize: 12),
+        textStyle: const TextStyle(fontFamily: 'BeeSkySans', fontSize: 12),
       ),
       child: Text(label),
     );
@@ -2360,9 +2398,8 @@ class _HomePageState extends State<HomePage> {
     return OutlinedButton(
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
-        backgroundColor: active
-            ? BeeSkyColors.activeNav
-            : BeeSkyColors.ghostFill,
+        backgroundColor:
+            active ? BeeSkyColors.activeNav : BeeSkyColors.ghostFill,
         foregroundColor: BeeSkyColors.text,
         side: BorderSide(
           color: active ? BeeSkyColors.accentInk : BeeSkyColors.glassBorder,
@@ -2371,7 +2408,7 @@ class _HomePageState extends State<HomePage> {
           borderRadius: BorderRadius.circular(radiusWidget),
         ),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        textStyle: const TextStyle(fontSize: 12),
+        textStyle: const TextStyle(fontFamily: 'BeeSkySans', fontSize: 12),
       ),
       child: Text(label),
     );
@@ -2483,108 +2520,124 @@ class _HomePageState extends State<HomePage> {
   // Sidebar
   // ------------------------------------------------------------------
 
-  Widget _sidebar() {
+  Widget _sidebar({bool compact = false}) {
+    final items = <(IconData, String, _View)>[
+      (Icons.hub_outlined, 'Nhóm mạng', _View.groups),
+      (Icons.memory_outlined, 'Máy đào', _View.miners),
+      (Icons.grid_view_outlined, 'Bản đồ nhiệt', _View.heat),
+      (Icons.bolt_outlined, 'Điện năng', _View.energy),
+      (Icons.build_outlined, 'Lịch sử sửa', _View.repairs),
+      (Icons.notifications_none_outlined, 'Sự kiện', _View.events),
+      (Icons.settings_outlined, 'Cài đặt', _View.settings),
+    ];
+    final (dot, label) = _sidecarStatus();
     return Container(
-      width: 188,
+      width: compact ? 64 : 208,
       decoration: const BoxDecoration(
-        color: BeeSkyColors.sidebarBg,
-        border: Border(right: BorderSide(color: BeeSkyColors.border)),
-      ),
-      padding: const EdgeInsets.fromLTRB(14, 20, 12, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Image.asset('assets/beesky-logo.png', width: 40, height: 40),
-              const SizedBox(width: 10),
-              const Expanded(
+          color: BeeSkyColors.sidebarBg,
+          border: Border(right: BorderSide(color: BeeSkyColors.border))),
+      padding: EdgeInsets.fromLTRB(compact ? 8 : 12, 20, compact ? 8 : 12, 12),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Padding(
+            padding: EdgeInsets.symmetric(horizontal: compact ? 6 : 10),
+            child: Row(children: [
+              Image.asset('assets/beesky-logo.png', width: 32, height: 32),
+              if (!compact) ...[
+                const SizedBox(width: 10),
+                const Expanded(
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                      Text('BeeSky',
+                          style: TextStyle(
+                              fontSize: 21,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: -.7)),
+                      Text('MINE SCANNER',
+                          style: TextStyle(
+                              fontSize: 9,
+                              color: BeeSkyColors.muted,
+                              letterSpacing: 1.6)),
+                    ])),
+              ],
+            ])),
+        const SizedBox(height: 24),
+        Expanded(
+            child: SingleChildScrollView(
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'BeeSky',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    Text(
-                      'QUẢN LÝ MÁY ĐÀO',
-                      style: TextStyle(
-                        color: BeeSkyColors.muted,
-                        // 9px/0 spacing: DejaVu (Linux) renders the
-                        // caps wider than Segoe UI — 10px/1.6 clipped
-                        // at the 188px sidebar (v0.39).
-                        fontSize: 9,
-                        letterSpacing: 0,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
-          _navSection('QUẢN LÝ'),
-          // The app opens on network groups — the HashCore home
-          // screen (v0.24); the miners table is one click away.
-          _navItem(
-            Icons.device_hub,
-            'Nhóm mạng',
-            active: _view == _View.groups,
-            onTap: () => setState(() => _view = _View.groups),
-          ),
-          _navItem(
-            Icons.memory,
-            'Máy đào',
-            active: _view == _View.miners,
-            onTap: () => setState(() => _view = _View.miners),
-          ),
-          const SizedBox(height: 14),
-          _navSection('THEO DÕI'),
-          // All seven views are implemented (v0.32 closed the last
-          // "SAU" tags) — these are live screens, grouped below the
-          // two primary ones.
-          _navItem(
-            Icons.grid_on,
-            'Bản đồ nhiệt',
-            active: _view == _View.heat,
-            onTap: () => _goView(_View.heat),
-          ),
-          _navItem(
-            Icons.bolt,
-            'Điện năng',
-            active: _view == _View.energy,
-            onTap: () => _goView(_View.energy),
-          ),
-          _navItem(
-            Icons.build,
-            'Lịch sử sửa',
-            active: _view == _View.repairs,
-            onTap: () => _goView(_View.repairs),
-          ),
-          _navItem(
-            Icons.notifications_none,
-            'Sự kiện',
-            active: _view == _View.events,
-            onTap: () => _goView(_View.events),
-          ),
-          const SizedBox(height: 14),
-          _navSection('HỆ THỐNG'),
-          _navItem(
-            Icons.settings,
-            'Cài đặt',
-            active: _view == _View.settings,
-            onTap: () => _goView(_View.settings),
-          ),
-          const Spacer(),
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+              for (var i = 0; i < items.length; i++) ...[
+                if (i == 2 || i == 6) const SizedBox(height: 16),
+                if (!compact && (i == 0 || i == 2 || i == 6))
+                  _navSection(i == 0
+                      ? 'KHÁM PHÁ'
+                      : i == 2
+                          ? 'VẬN HÀNH'
+                          : 'KẾT NỐI'),
+                _navItem(items[i].$1, items[i].$2,
+                    compact: compact,
+                    active: _view == items[i].$3,
+                    onTap: () => _goView(items[i].$3)),
+              ],
+            ]))),
+        const Divider(height: 24),
+        if (compact)
+          Center(
+              child: Tooltip(
+                  message: label,
+                  child: Container(
+                      width: 8,
+                      height: 8,
+                      decoration:
+                          BoxDecoration(color: dot, shape: BoxShape.circle))))
+        else
           _sidebarFooter(),
-        ],
-      ),
+      ]),
     );
+  }
+
+  Widget _shellBar(bool expanded) {
+    const names = {
+      _View.groups: 'Nhóm mạng',
+      _View.miners: 'Máy đào',
+      _View.heat: 'Bản đồ nhiệt',
+      _View.energy: 'Điện năng',
+      _View.repairs: 'Lịch sử sửa',
+      _View.events: 'Sự kiện',
+      _View.settings: 'Cài đặt',
+    };
+    return Container(
+        height: 52,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: const BoxDecoration(
+            color: BeeSkyColors.surface,
+            border: Border(bottom: BorderSide(color: BeeSkyColors.border))),
+        child: Row(children: [
+          IconButton(
+              tooltip: expanded ? 'Thu gọn menu' : 'Mở rộng menu',
+              icon: Icon(expanded ? Icons.menu_open : Icons.menu, size: 20),
+              onPressed: () => setState(() => _sidebarExpanded = !expanded)),
+          const SizedBox(width: 8),
+          const Text('BeeSky Mine',
+              style: TextStyle(color: BeeSkyColors.muted, fontSize: 12)),
+          const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 10),
+              child: Icon(Icons.chevron_right,
+                  size: 14, color: BeeSkyColors.muted)),
+          Expanded(
+              child: Text('Scanner / ${names[_view]}',
+                  style: const TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.w600),
+                  overflow: TextOverflow.ellipsis)),
+          Tooltip(
+              message: 'Tìm chức năng · Ctrl+K',
+              child: IconButton(
+                  onPressed: _hotPalette,
+                  icon: const Icon(Icons.search, size: 20))),
+          const SizedBox(width: 8),
+          _connectionPill(),
+        ]));
   }
 
   /// Small letter-spaced caption above a sidebar nav section
@@ -2604,55 +2657,51 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _navItem(
-    IconData icon,
-    String label, {
-    bool active = false,
-    VoidCallback? onTap,
-  }) {
-    final row = Container(
-      height: 38,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      decoration: BoxDecoration(
-        // Cloud Light (v0.39): the active item gets the soft
-        // yellow #FFF1B7 fill with dark text — pure brand yellow
-        // as text on white fails contrast, so the label stays
-        // Text Primary and only the fill is yellow.
-        color: active ? BeeSkyColors.activeNav : Colors.transparent,
-        borderRadius: BorderRadius.circular(radiusWidget),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            icon,
-            size: 18,
-            color: active ? BeeSkyColors.text : BeeSkyColors.muted,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                color: active ? BeeSkyColors.text : BeeSkyColors.muted,
-                fontSize: 13,
-                fontWeight: active ? FontWeight.w600 : FontWeight.w400,
-              ),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ),
-    );
+  Widget _navItem(IconData icon, String label,
+      {bool active = false, bool compact = false, VoidCallback? onTap}) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: onTap == null
-          ? row
-          : InkWell(
-              onTap: onTap,
-              borderRadius: BorderRadius.circular(radiusWidget),
-              child: row,
-            ),
-    );
+        padding: const EdgeInsets.only(bottom: 4),
+        child: Tooltip(
+            message: compact ? label : '',
+            child: Semantics(
+                selected: active,
+                button: true,
+                label: compact ? label : null,
+                child: Material(
+                    color: active ? BeeSkyColors.activeNav : Colors.transparent,
+                    borderRadius: BorderRadius.circular(radiusWidget),
+                    child: InkWell(
+                        onTap: onTap,
+                        borderRadius: BorderRadius.circular(radiusWidget),
+                        child: Container(
+                            height: 38,
+                            padding: EdgeInsets.symmetric(
+                                horizontal: compact ? 0 : 10),
+                            child: Row(
+                                mainAxisAlignment: compact
+                                    ? MainAxisAlignment.center
+                                    : MainAxisAlignment.start,
+                                children: [
+                                  Icon(icon,
+                                      size: 18,
+                                      color: active
+                                          ? BeeSkyColors.text
+                                          : BeeSkyColors.muted),
+                                  if (!compact) ...[
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                        child: Text(label,
+                                            style: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: active
+                                                    ? FontWeight.w600
+                                                    : FontWeight.w400,
+                                                color: active
+                                                    ? BeeSkyColors.text
+                                                    : BeeSkyColors.muted),
+                                            overflow: TextOverflow.ellipsis))
+                                  ],
+                                ])))))));
   }
 
   /// (dot colour, label) for the sidebar footer: mock mode, sidecar
@@ -2660,14 +2709,14 @@ class _HomePageState extends State<HomePage> {
   /// sysinfo probe still in flight / failed.
   (Color, String) _sidecarStatus() {
     if (widget.bridge.isMock) {
-      return (BeeSkyColors.warn, 'Ruột quét: dữ liệu mẫu');
+      return (BeeSkyColors.warn, 'Dữ liệu mẫu');
     }
     if (widget.bridge.sidecarMissing) {
-      return (BeeSkyColors.bad, 'Chưa có ruột quét (thiếu beesky.exe)');
+      return (BeeSkyColors.bad, 'Thiếu bộ quét');
     }
-    if (_sysinfo != null) return (BeeSkyColors.ok, 'Ruột quét: đã nối');
-    if (_sysinfoFailed) return (BeeSkyColors.bad, 'Ruột quét: không nối được');
-    return (BeeSkyColors.muted, 'Ruột quét: đang kiểm tra…');
+    if (_sysinfo != null) return (BeeSkyColors.ok, 'Bộ quét sẵn sàng');
+    if (_sysinfoFailed) return (BeeSkyColors.bad, 'Chưa kết nối bộ quét');
+    return (BeeSkyColors.muted, 'Đang kiểm tra bộ quét…');
   }
 
   Widget _sidebarFooter() {
@@ -2722,78 +2771,38 @@ class _HomePageState extends State<HomePage> {
     final check = _scanned ? fleetStatusCount(_records, 'CHECK') : null;
     final error = _scanned ? fleetStatusCount(_records, 'ERROR') : null;
     final maxTemp = fleetMaxTempC(_records);
-    return Container(
-      padding: const EdgeInsets.fromLTRB(18, 12, 18, 10),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: BeeSkyColors.border)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _breadcrumb('Máy đào'),
-          const SizedBox(height: 4),
-          Row(
-            children: [
-              const Text(
-                'Máy đào',
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
-              ),
-              // Scoped to a group: the header names it (the scan
-              // bar's "Quét ngay" then runs AS a group scan).
-              if (_activeGroup != null) ...[
-                const SizedBox(width: 10),
-                _chip('Nhóm: ${_activeGroup!.name}'),
-              ],
-              const Spacer(),
-              _connectionPill(),
-            ],
-          ),
-          const SizedBox(height: 3),
-          Text(
-            _headerSub,
-            style: const TextStyle(color: BeeSkyColors.muted, fontSize: 12),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              _chip(_scanned ? 'Tổng ${_records.length} máy' : 'Tổng — máy'),
-              const SizedBox(width: 8),
-              _chip('OK ${ok ?? '—'}', dot: BeeSkyColors.ok),
-              const SizedBox(width: 8),
-              _chip('Cần kiểm tra ${check ?? '—'}', dot: BeeSkyColors.warn),
-              const SizedBox(width: 8),
-              _chip('Lỗi ${error ?? '—'}', dot: BeeSkyColors.bad),
-              const SizedBox(width: 8),
+    return Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Text('Máy đào',
+                style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -.5)),
+            if (_activeGroup != null) ...[
+              const SizedBox(width: 12),
               Flexible(
-                child: _chip(
-                  _scanned ? fleetRateTotalsText(_records) : 'Hashrate —',
-                  shrink: true,
-                ),
-              ),
-              const SizedBox(width: 8),
-              _chip(
-                maxTemp == null
-                    ? 'Max — °C'
-                    : 'Max ${maxTemp.toStringAsFixed(0)} °C',
-              ),
+                  child: _chip('Nhóm: ${_activeGroup!.name}', shrink: true))
             ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// Breadcrumb for the Cloud Light topbar (v0.39): "BeeSky / <page>".
-  Widget _breadcrumb(String page) {
-    return Text(
-      'BeeSky / $page',
-      style: const TextStyle(
-        color: BeeSkyColors.muted,
-        fontSize: 11,
-        fontWeight: FontWeight.w600,
-        letterSpacing: 0.4,
-      ),
-    );
+          ]),
+          const SizedBox(height: 4),
+          Text(_headerSub,
+              style: const TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 12),
+          Wrap(spacing: 8, runSpacing: 6, children: [
+            _chip(_scanned ? 'Tổng ${_records.length} máy' : 'Tổng — máy'),
+            _chip('OK ${ok ?? '—'}', dot: BeeSkyColors.ok),
+            _chip('Cần kiểm tra ${check ?? '—'}', dot: BeeSkyColors.warn),
+            _chip('Lỗi ${error ?? '—'}', dot: BeeSkyColors.bad),
+            _chip(_scanned ? fleetRateTotalsText(_records) : 'Hashrate —'),
+            _chip(maxTemp == null
+                ? 'Max — °C'
+                : 'Max ${maxTemp.toStringAsFixed(0)} °C'),
+          ]),
+        ]));
   }
 
   /// Compact connection indicator at the topbar's right — the same
@@ -2834,8 +2843,8 @@ class _HomePageState extends State<HomePage> {
       height: 26,
       padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: BoxDecoration(
-        color: BeeSkyColors.ghostFill,
-        border: Border.all(color: BeeSkyColors.glassBorder),
+        color: BeeSkyColors.surface,
+        border: Border.all(color: BeeSkyColors.border),
         borderRadius: BorderRadius.circular(radiusPill),
       ),
       child: Row(
@@ -2861,7 +2870,8 @@ class _HomePageState extends State<HomePage> {
 
   static final ButtonStyle _scanBtnStyle = FilledButton.styleFrom(
     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-    textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+    textStyle: const TextStyle(
+        fontFamily: 'BeeSkySans', fontSize: 13, fontWeight: FontWeight.w700),
   );
 
   static final ButtonStyle _ghostBtnStyle = OutlinedButton.styleFrom(
@@ -2872,7 +2882,7 @@ class _HomePageState extends State<HomePage> {
       borderRadius: BorderRadius.circular(radiusWidget),
     ),
     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-    textStyle: const TextStyle(fontSize: 13),
+    textStyle: const TextStyle(fontFamily: 'BeeSkySans', fontSize: 13),
   );
 
   Widget _scanBar() {
@@ -2881,7 +2891,7 @@ class _HomePageState extends State<HomePage> {
     // carry hints instead of floating labels (the values — a subnet,
     // "root" — speak for themselves).
     return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 14, 18, 0),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
@@ -2899,7 +2909,9 @@ class _HomePageState extends State<HomePage> {
               child: TextField(
                 controller: _targetCtrl,
                 decoration: const InputDecoration(
-                  hintText: 'Mục tiêu: 192.168.1.0/24, 192.168.0.10-60, …',
+                  labelText: 'Dải IP quét',
+                  hintText: '192.168.1.0/24',
+                  prefixIcon: Icon(Icons.lan_outlined, size: 17),
                   contentPadding: fieldPad,
                 ),
               ),
@@ -2936,7 +2948,7 @@ class _HomePageState extends State<HomePage> {
 
   Widget _content() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 14, 18, 8),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -2995,15 +3007,13 @@ class _HomePageState extends State<HomePage> {
     );
     final anyStats = _groups.any((g) => g.lastScan != null);
     return Container(
-      padding: const EdgeInsets.fromLTRB(18, 12, 18, 10),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: BeeSkyColors.border)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _breadcrumb('Nhóm mạng'),
-          const SizedBox(height: 4),
           Row(
             children: [
               const Expanded(
@@ -3029,8 +3039,7 @@ class _HomePageState extends State<HomePage> {
           ),
           const SizedBox(height: 3),
           const Text(
-            'Mỗi nhóm là một dải mạng của trại, có tài khoản riêng '
-            'và lịch tự quét riêng.',
+            'Quét theo dải IP, dùng tài khoản và lịch quét riêng cho từng nhóm.',
             style: TextStyle(color: BeeSkyColors.muted, fontSize: 12),
           ),
           const SizedBox(height: 10),
@@ -3065,8 +3074,7 @@ class _HomePageState extends State<HomePage> {
                 OutlinedButton.icon(
                   onPressed: _busy
                       ? null
-                      : () => setState(
-                          () => _combinedMode = !_combinedMode),
+                      : () => setState(() => _combinedMode = !_combinedMode),
                   icon: const Icon(Icons.view_comfy, size: 16),
                   label: Text(_combinedMode ? 'Xem từng nhóm' : 'Xem gộp'),
                   style: _ghostBtnStyle,
@@ -3094,7 +3102,7 @@ class _HomePageState extends State<HomePage> {
   Widget _groupsContent() {
     if (_groups.isEmpty) {
       return Padding(
-        padding: const EdgeInsets.fromLTRB(18, 14, 18, 8),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
         child: _groupsEmptyState(),
       );
     }
@@ -3103,7 +3111,7 @@ class _HomePageState extends State<HomePage> {
     // union spec.
     if (_combinedMode && _groups.length >= 2) {
       return Padding(
-        padding: const EdgeInsets.fromLTRB(18, 14, 18, 8),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
         child: ListView(
           children: [
             _combinedCard(_combinedGroup),
@@ -3119,7 +3127,7 @@ class _HomePageState extends State<HomePage> {
     }
     final visible = _visibleGroups;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 14, 18, 8),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
       child: visible.isEmpty
           ? Center(
               child: Text(
@@ -3177,8 +3185,7 @@ class _HomePageState extends State<HomePage> {
             ),
             const SizedBox(width: 12),
             FilledButton.icon(
-              onPressed:
-                  _busy ? null : () => _scanCombined(combined),
+              onPressed: _busy ? null : () => _scanCombined(combined),
               icon: const Icon(Icons.radar, size: 15),
               label: const Text('Quét gộp'),
               style: _scanBtnStyle,
@@ -3225,12 +3232,13 @@ class _HomePageState extends State<HomePage> {
               Expanded(
                 child: Text(
                   statusText,
-                  style: const TextStyle(
-                      color: BeeSkyColors.muted, fontSize: 12),
+                  style:
+                      const TextStyle(color: BeeSkyColors.muted, fontSize: 12),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              Switch(
+              BeeSkySwitch(
+                semanticLabel: 'Nghe IP Report',
                 value: _settings.ipReportEnabled,
                 onChanged: widget.bridge.sidecarMissing
                     ? null
@@ -3244,8 +3252,7 @@ class _HomePageState extends State<HomePage> {
               height: 132,
               child: ListView.builder(
                 itemCount: _ipReports.length,
-                itemBuilder: (context, i) =>
-                    _ipReportRow(_ipReports[i]),
+                itemBuilder: (context, i) => _ipReportRow(_ipReports[i]),
               ),
             ),
           ],
@@ -3281,8 +3288,8 @@ class _HomePageState extends State<HomePage> {
                 ),
                 Text(
                   '${report.whenText} — ${report.text.isEmpty ? '(không có nội dung gói tin — chỉ biết địa chỉ gửi)' : report.text}',
-                  style: const TextStyle(
-                      color: BeeSkyColors.muted, fontSize: 12),
+                  style:
+                      const TextStyle(color: BeeSkyColors.muted, fontSize: 12),
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
@@ -3322,7 +3329,7 @@ class _HomePageState extends State<HomePage> {
             ),
             const SizedBox(height: 6),
             const Text(
-              'Tạo nhóm để gom các dải IP của trại — mỗi nhóm quét '
+              'Tạo nhóm để gom các dải IP của xưởng — mỗi nhóm quét '
               'và đăng nhập theo cách riêng của nó.',
               style: TextStyle(color: BeeSkyColors.muted),
             ),
@@ -3359,123 +3366,83 @@ class _HomePageState extends State<HomePage> {
 
   Widget _groupCard(NetGroup group) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: GlassCard(
-        padding: const EdgeInsets.all(14),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
+        padding: const EdgeInsets.only(bottom: 10),
+        child: GlassCard(
+            padding: const EdgeInsets.all(16),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                      color: BeeSkyColors.ghostFill,
+                      borderRadius: BorderRadius.circular(8)),
+                  child: const Icon(Icons.hub_outlined,
+                      size: 20, color: BeeSkyColors.muted)),
+              const SizedBox(width: 14),
+              Expanded(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    Row(children: [
                       Flexible(
-                        child: Text(
-                          group.name,
+                          child: Text(group.name,
+                              style: const TextStyle(
+                                  fontSize: 15, fontWeight: FontWeight.w600),
+                              overflow: TextOverflow.ellipsis)),
+                      if (group.isNew) ...[const SizedBox(width: 8), _newTag()]
+                    ]),
+                    const SizedBox(height: 5),
+                    Text(group.targets,
+                        style:
+                            monoStyle(fontSize: 12, color: BeeSkyColors.muted),
+                        overflow: TextOverflow.ellipsis),
+                    if (group.description.isNotEmpty)
+                      Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(group.description,
+                              style: const TextStyle(
+                                  fontSize: 12, color: BeeSkyColors.muted),
+                              overflow: TextOverflow.ellipsis)),
+                    const SizedBox(height: 10),
+                    Wrap(spacing: 14, runSpacing: 6, children: [
+                      Text(
+                          group.lastScan == null
+                              ? 'Chưa quét'
+                              : group.lastScan!.summaryText,
+                          style: const TextStyle(fontSize: 12)),
+                      Text(group.autoscanText,
                           style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      // HashCore's "new" tag for a never-scanned group.
-                      if (group.isNew) ...[
-                        const SizedBox(width: 8),
-                        _newTag(),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    group.description.isEmpty
-                        ? 'Không có mô tả'
-                        : group.description,
-                    style: const TextStyle(
-                      color: BeeSkyColors.muted,
-                      fontSize: 12,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    group.targets,
-                    style: const TextStyle(
-                      color: BeeSkyColors.muted,
-                      fontSize: 12,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    group.lastScan == null
-                        ? 'Chưa quét'
-                        : group.lastScan!.summaryText,
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    group.autoscanText,
-                    style: const TextStyle(
-                      color: BeeSkyColors.muted,
-                      fontSize: 12,
-                    ),
-                  ),
-                  if (group.creds.isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      'Tài khoản riêng: ${group.creds.length} bộ',
-                      style: const TextStyle(
-                        color: BeeSkyColors.muted,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                FilledButton.icon(
-                  onPressed: _busy ? null : () => _scanGroup(group),
-                  icon: const Icon(Icons.radar, size: 15),
-                  label: const Text('Quét nhóm'),
-                  style: _scanBtnStyle,
-                ),
-                const SizedBox(height: 6),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    OutlinedButton(
+                              fontSize: 12, color: BeeSkyColors.muted)),
+                      if (group.creds.isNotEmpty)
+                        Text('Tài khoản riêng: ${group.creds.length} bộ',
+                            style: const TextStyle(
+                                fontSize: 12, color: BeeSkyColors.muted)),
+                    ]),
+                  ])),
+              const SizedBox(width: 12),
+              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                OutlinedButton.icon(
+                    onPressed: _busy ? null : () => _scanGroup(group),
+                    icon: const Icon(Icons.radar, size: 16),
+                    label: const Text('Quét nhóm'),
+                    style: _ghostBtnStyle),
+                const SizedBox(height: 4),
+                Row(mainAxisSize: MainAxisSize.min, children: [
+                  TextButton(
                       onPressed:
                           _busy ? null : () => _editGroup(existing: group),
-                      style: _ghostBtnStyle,
-                      child: const Text('Sửa'),
-                    ),
-                    if (group.lastScan != null)
-                      TextButton(
-                        onPressed: _busy
-                            ? null
-                            : () => _resetGroupStats(group),
-                        child: const Text('Đặt lại'),
-                      ),
-                    IconButton(
-                      icon: const Icon(Icons.delete_outline, size: 19),
-                      tooltip: 'Xóa nhóm',
+                      child: const Text('Sửa')),
+                  if (group.lastScan != null)
+                    TextButton(
+                        onPressed: _busy ? null : () => _resetGroupStats(group),
+                        child: const Text('Đặt lại')),
+                  IconButton(
                       onPressed: _busy ? null : () => _deleteGroup(group),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
+                      tooltip: 'Xóa nhóm',
+                      icon: const Icon(Icons.delete_outline, size: 18)),
+                ]),
+              ]),
+            ])));
   }
 
   Widget _tableCard() {
@@ -3564,34 +3531,40 @@ class _HomePageState extends State<HomePage> {
         // Columns keep a readable minimum width; past that the
         // table scrolls horizontally instead of squeezing (a real
         // data grid's answer to 20+ columns).
-        var unit = constraints.maxWidth / totalFlex;
-        if (unit < 56) unit = 56;
+        var unit = (constraints.maxWidth - _checkColW - 31) / totalFlex;
+        if (unit < 38) unit = 38;
         // +31: the 14px side paddings header and rows share,
         // plus the row's 3px accent border (drawn inside the row,
         // it eats into the cells' width).
         final tableW = _checkColW + unit * totalFlex + 31;
-        return SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: SizedBox(
-            width: tableW,
-            child: Column(
-              children: [
-                _tableHeader(columns, unit, view),
-                const Divider(height: 1),
-                Expanded(
-                  child: ListView.builder(
-                    itemCount: items.length,
-                    itemBuilder: (context, i) {
-                      final (group, rec, idx) = items[i];
-                      if (group != null) return _groupHeaderRow(group);
-                      return _tableRow(rec!, idx, columns, unit);
-                    },
-                  ),
+        return Scrollbar(
+            controller: _gridHScroll,
+            thumbVisibility: true,
+            notificationPredicate: (notice) =>
+                notice.metrics.axis == Axis.horizontal,
+            child: SingleChildScrollView(
+              controller: _gridHScroll,
+              scrollDirection: Axis.horizontal,
+              child: SizedBox(
+                width: tableW,
+                child: Column(
+                  children: [
+                    _tableHeader(columns, unit, view),
+                    const Divider(height: 1),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: items.length,
+                        itemBuilder: (context, i) {
+                          final (group, rec, idx) = items[i];
+                          if (group != null) return _groupHeaderRow(group);
+                          return _tableRow(rec!, idx, columns, unit);
+                        },
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          ),
-        );
+              ),
+            ));
       },
     );
   }
@@ -4167,59 +4140,66 @@ class _HomePageState extends State<HomePage> {
     // for the device on show.
     if (_detailTab >= 2 && _detailTab <= 4) _maybeInspect(rec);
     return GlassCard(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Text(
-                  rec.model,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
+        padding: const EdgeInsets.all(16),
+        child: LayoutBuilder(builder: (context, size) {
+          final header = <Widget>[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(
+                    rec.model,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.close, size: 18),
-                tooltip: 'Đóng chi tiết',
-                visualDensity: VisualDensity.compact,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(
-                  minWidth: 28,
-                  minHeight: 28,
+                IconButton(
+                  icon: const Icon(Icons.close, size: 18),
+                  tooltip: 'Đóng chi tiết',
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 28,
+                    minHeight: 28,
+                  ),
+                  onPressed: () => setState(() => _selected = null),
                 ),
-                onPressed: () => setState(() => _selected = null),
+              ],
+            ),
+            Text(
+              '${rec.ip} • ${rec.sourceLabel}',
+              style: const TextStyle(color: BeeSkyColors.muted, fontSize: 12),
+            ),
+            const SizedBox(height: 10),
+            _detailTabBar(),
+            const SizedBox(height: 12),
+          ];
+          final footer = <Widget>[
+            if (_detailTab == 5) ...[
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: () => _saveNote(rec),
+                icon: const Icon(Icons.save, size: 16),
+                label: const Text('Lưu ghi chú'),
               ),
             ],
-          ),
-          Text(
-            '${rec.ip} • ${rec.sourceLabel}',
-            style: const TextStyle(color: BeeSkyColors.muted, fontSize: 12),
-          ),
-          const SizedBox(height: 10),
-          _detailTabBar(),
-          const SizedBox(height: 12),
-          Expanded(
-            child: SingleChildScrollView(child: _detailTabBody(rec)),
-          ),
-          // Sticky save action for the note tab (v0.39): the
-          // primary action stays at the panel bottom, reachable
-          // without scrolling.
-          if (_detailTab == 5) ...[
-            const SizedBox(height: 12),
-            FilledButton.icon(
-              onPressed: () => _saveNote(rec),
-              icon: const Icon(Icons.save, size: 16),
-              label: const Text('Lưu ghi chú'),
-            ),
-          ],
-        ],
-      ),
-    );
+          ];
+          if (size.maxHeight < 260)
+            return SingleChildScrollView(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [...header, _detailTabBody(rec), ...footer]));
+          return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ...header,
+                Expanded(
+                    child: SingleChildScrollView(child: _detailTabBody(rec))),
+                ...footer,
+              ]);
+        }));
   }
 
   Widget _detailTabBar() {
@@ -4271,8 +4251,7 @@ class _HomePageState extends State<HomePage> {
   // ------------------------------------------------------------------
 
   void _maybeInspect(MinerRecord rec) {
-    if (_inspectCache.containsKey(rec.ip) ||
-        _inspectLoading.contains(rec.ip)) {
+    if (_inspectCache.containsKey(rec.ip) || _inspectLoading.contains(rec.ip)) {
       return;
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -4281,8 +4260,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _ensureInspect(MinerRecord rec) async {
-    if (_inspectCache.containsKey(rec.ip) ||
-        _inspectLoading.contains(rec.ip)) {
+    if (_inspectCache.containsKey(rec.ip) || _inspectLoading.contains(rec.ip)) {
       return;
     }
     setState(() => _inspectLoading.add(rec.ip));
@@ -4319,59 +4297,56 @@ class _HomePageState extends State<HomePage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _kv('Hashrate', rec.rateText),
-            _kv('Chip sống', '${rec.chipsAlive} / ${rec.chipsTotal}'),
-            _kv(
-              'Nhiệt độ',
-              rec.maxTempC == null
-                  ? '—'
-                  : '${rec.maxTempC!.toStringAsFixed(0)} °C',
-            ),
-            _kv('Quạt', rec.fansRpm.isEmpty ? '—' : '${rec.fansText} RPM'),
-            _kv(
-              'Trạng thái',
-              rec.statusLabel,
-              valueColor: rec.statusLabel == 'OK'
-                  ? BeeSkyColors.ok
-                  : rec.statusLabel == 'ERROR'
-                      ? BeeSkyColors.bad
-                      : BeeSkyColors.warn,
-            ),
-            // Which saved login authenticated to this machine
-            // (v0.23) — only present when a creds-file set won.
-            if (rec.credLabel != null) _kv('Đăng nhập', rec.credLabel!),
-            const SizedBox(height: 4),
-            if (rec.issues.isEmpty)
-              const Text(
-                'Không phát hiện vấn đề.',
-                style: TextStyle(color: BeeSkyColors.muted),
-              )
-            else
-              for (final p in rec.issues) _issueBox(p),
-            if (rec.chains.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              // One line per board the machine ACTUALLY reports
-              // (len(chains) — never an assumed 3), each with that
-              // board's OWN temperature when the record carries one
-              // (steering 2026-11-11: "nhiệt độ máy có 4 hashboard
-              // thì sao" — a 4-board machine shows 4 lines).
-              for (final c in rec.chains)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  // A hot board's line (>= the 85 °C limit) takes the
-                  // same red treatment as its pill in the table's
-                  // NHIỆT cell, so table and panel agree.
-                  child: Text(
-                    'Board ${c.index + 1}: ${c.chipsAlive}/${c.chipsTotal} chip'
-                    '${c.tempC == null ? '' : ' • ${c.tempC!.toStringAsFixed(0)}°C'}',
-                    style: TextStyle(
-                      color:
-                          c.isHot ? BeeSkyColors.hotTemp : BeeSkyColors.muted,
-                      fontSize: 12,
-                      fontWeight: c.isHot ? FontWeight.w700 : FontWeight.w400,
-                    ),
-                  ),
+        _kv('Chip sống', '${rec.chipsAlive} / ${rec.chipsTotal}'),
+        _kv(
+          'Nhiệt độ',
+          rec.maxTempC == null ? '—' : '${rec.maxTempC!.toStringAsFixed(0)} °C',
+        ),
+        _kv('Quạt', rec.fansRpm.isEmpty ? '—' : '${rec.fansText} RPM'),
+        _kv(
+          'Trạng thái',
+          rec.statusLabel,
+          valueColor: rec.statusLabel == 'OK'
+              ? BeeSkyColors.ok
+              : rec.statusLabel == 'ERROR'
+                  ? BeeSkyColors.bad
+                  : BeeSkyColors.warn,
+        ),
+        // Which saved login authenticated to this machine
+        // (v0.23) — only present when a creds-file set won.
+        if (rec.credLabel != null) _kv('Đăng nhập', rec.credLabel!),
+        const SizedBox(height: 4),
+        if (rec.issues.isEmpty)
+          const Text(
+            'Không phát hiện vấn đề.',
+            style: TextStyle(color: BeeSkyColors.muted),
+          )
+        else
+          for (final p in rec.issues) _issueBox(p),
+        if (rec.chains.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          // One line per board the machine ACTUALLY reports
+          // (len(chains) — never an assumed 3), each with that
+          // board's OWN temperature when the record carries one
+          // (steering 2026-11-11: "nhiệt độ máy có 4 hashboard
+          // thì sao" — a 4-board machine shows 4 lines).
+          for (final c in rec.chains)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              // A hot board's line (>= the 85 °C limit) takes the
+              // same red treatment as its pill in the table's
+              // NHIỆT cell, so table and panel agree.
+              child: Text(
+                'Board ${c.index + 1}: ${c.chipsAlive}/${c.chipsTotal} chip'
+                '${c.tempC == null ? '' : ' • ${c.tempC!.toStringAsFixed(0)}°C'}',
+                style: TextStyle(
+                  color: c.isHot ? BeeSkyColors.hotTemp : BeeSkyColors.muted,
+                  fontSize: 12,
+                  fontWeight: c.isHot ? FontWeight.w700 : FontWeight.w400,
                 ),
-            ],
+              ),
+            ),
+        ],
       ],
     );
   }
@@ -4470,8 +4445,7 @@ class _HomePageState extends State<HomePage> {
               _inspectLoading.contains(rec.ip)
                   ? 'Đang đọc chi tiết board từ máy…'
                   : 'Đang chuẩn bị đọc chi tiết board…',
-              style: const TextStyle(
-                  color: BeeSkyColors.muted, fontSize: 12),
+              style: const TextStyle(color: BeeSkyColors.muted, fontSize: 12),
             ),
           )
         else if (insp.error != null)
@@ -4597,7 +4571,7 @@ class _HomePageState extends State<HomePage> {
             _kv(
               'Accepted / Rejected',
               '${insp.pools.pools[i].accepted} / '
-              '${insp.pools.pools[i].rejected ?? '—'}',
+                  '${insp.pools.pools[i].rejected ?? '—'}',
             ),
           const SizedBox(height: 6),
         ],
@@ -4636,8 +4610,8 @@ class _HomePageState extends State<HomePage> {
         children.add(_kv(
           'Fan $id',
           '${rpm == null ? '—' : formatCount(rpm)} RPM'
-          '${status != null ? ' • $status' : ''}'
-          '${maxRpm != null ? ' / tối đa ${formatCount(maxRpm)}' : ''}',
+              '${status != null ? ' • $status' : ''}'
+              '${maxRpm != null ? ' / tối đa ${formatCount(maxRpm)}' : ''}',
           valueColor: status == 'lost' ? BeeSkyColors.bad : null,
         ));
       }
@@ -4655,8 +4629,7 @@ class _HomePageState extends State<HomePage> {
     } else if (insp.error != null) {
       children.add(_sectionError(insp.error!));
     } else if (!insp.fans.supported) {
-      children.add(
-          _sectionError(insp.fans.reason ?? 'Không đọc được quạt.'));
+      children.add(_sectionError(insp.fans.reason ?? 'Không đọc được quạt.'));
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

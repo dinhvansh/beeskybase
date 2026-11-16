@@ -109,6 +109,7 @@ jobs:
         run: |
           python -m compileall beesky
           python -m beesky --help
+          python -m unittest discover -s tests -p "test_agent_*.py" -v
 
       - name: Mock test suite (Git Bash, non-blocking)
         continue-on-error: true
@@ -131,6 +132,14 @@ jobs:
 
       - name: Smoke check (frozen exe)
         run: .\dist\beesky.exe --help
+
+      - name: Verify frozen Agent survives UI exit and sends real local scans
+        shell: powershell
+        run: |
+          $env:BEESKY_TEST_AGENT_EXE = (Resolve-Path dist\beesky-agent.exe).Path
+          python -m unittest discover -s tests -p test_agent_runtime.py -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item Env:BEESKY_TEST_AGENT_EXE
 
       # `gui --help` is parsed by argparse and exits before any
       # window opens — a safe headless smoke for the windowed build.
@@ -210,12 +219,16 @@ jobs:
         working-directory: app_flutter
         run: |
           flutter pub get
+          flutter analyze --no-fatal-infos
+          flutter test
           flutter build windows --release
 
       - name: Build agent Flutter app
         working-directory: app_agent_flutter
         run: |
           flutter pub get
+          flutter analyze --no-fatal-infos
+          flutter test
           flutter build windows --release
 
       - name: Stage Flutter bundles for the installers
@@ -248,6 +261,10 @@ jobs:
 
       # The signer needs one concrete path, but the installer name
       # carries the version (BeeSkySetup-<version>.exe) — resolve it.
+      - name: Verify install and clean uninstall in isolated folders
+        shell: powershell
+        run: tools/verify_windows_installers.ps1
+
       - name: Locate installer for signing
         id: installerpath
         if: steps.signcheck.outputs.has_signing == 'true' && startsWith(github.ref, 'refs/tags/')
@@ -308,16 +325,16 @@ jobs:
       # Tag builds only, and only when the owner configured the
       # UPDATE_SIGNING_KEY secret — otherwise this whole update
       # channel stays off and the release is unchanged.
-      - name: Build + sign update manifest (tags, key configured)
-        if: steps.updatecheck.outputs.has_update_key == 'true' && startsWith(github.ref, 'refs/tags/')
+      - name: Sign and verify full Agent update (key configured)
+        if: steps.updatecheck.outputs.has_update_key == 'true'
         shell: bash
         env:
           UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
         run: |
           set -euo pipefail
           openssl version
-          VER="${GITHUB_REF_NAME#v}"
-          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          VER="$(python -c 'import beesky; print(beesky.__version__)')"
+          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VER}"
           PUBLISHED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           INSTALLER="$(basename "$(ls dist/BeeSkySetup-*.exe | head -n 1)")"
           AGENT_INSTALLER="$(basename "$(ls dist/BeeSkyAgentSetup-*.exe | head -n 1)")"
@@ -346,6 +363,7 @@ jobs:
           print(json.dumps(manifest, indent=2))
           PYEOF
           KEY_FILE="$RUNNER_TEMP/update-signing-key.pem"
+          trap 'rm -f "$KEY_FILE" "$RUNNER_TEMP/update-pub.pem"' EXIT
           printf '%s\n' "$UPDATE_SIGNING_KEY" > "$KEY_FILE"
           openssl dgst -sha256 -sign "$KEY_FILE" \
             -out dist/update-manifest.sig dist/update-manifest.json
@@ -354,6 +372,8 @@ jobs:
           openssl pkey -in "$KEY_FILE" -pubout -out "$RUNNER_TEMP/update-pub.pem"
           openssl dgst -sha256 -verify "$RUNNER_TEMP/update-pub.pem" \
             -signature dist/update-manifest.sig dist/update-manifest.json
+          python -c "from pathlib import Path; from beesky.core.updater import verify_signature; assert verify_signature(Path('dist/update-manifest.json').read_bytes(), Path('dist/update-manifest.sig').read_bytes()), 'Release signing key does not match the compiled client key'"
+          python tools/verify_agent_update.py "$KEY_FILE"
           rm -f "$KEY_FILE" "$RUNNER_TEMP/update-pub.pem"
           ls -l dist/update-manifest.json dist/update-manifest.sig
 

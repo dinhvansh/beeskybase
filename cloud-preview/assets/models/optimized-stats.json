@@ -1,0 +1,16 @@
+[
+  {
+    "name": "s19-pro-air",
+    "originalBytes": 3654552,
+    "optimizedBytes": 357968,
+    "originalTriangles": 89987,
+    "optimizedTriangles": 24501
+  },
+  {
+    "name": "s21-hydro",
+    "originalBytes": 7078540,
+    "optimizedBytes": 1044948,
+    "originalTriangles": 166106,
+    "optimizedTriangles": 72886
+  }
+]

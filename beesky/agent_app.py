@@ -71,6 +71,9 @@ USAGE = """\
 BeeSky Agent — agent tại trại (đẩy số liệu lên BeeSky Cloud)
 
   beesky-agent                 mở cửa sổ cấu hình
+  beesky-agent start           chạy ngầm độc lập với cửa sổ cấu hình
+  beesky-agent status          xem tiến trình đang chạy hay đã dừng
+  beesky-agent stop            dừng đúng tiến trình của cấu hình này
   beesky-agent run             chạy agent theo cấu hình đã lưu
                                (cờ dòng lệnh ghi đè từng trường)
   beesky-agent run --background
@@ -124,7 +127,7 @@ def build_service(cfg: AgentConfig, status_hook=None):
                         status_hook=status_hook)
 
 
-def test_ingest(cfg: AgentConfig) -> tuple[bool, str]:
+def test_ingest(cfg: AgentConfig, status_hook=None) -> tuple[bool, str]:
     """One real ingest cycle: scan once, push the snapshot.
 
     Returns (ok, human-readable verdict). This is the `test`
@@ -135,16 +138,21 @@ def test_ingest(cfg: AgentConfig) -> tuple[bool, str]:
     if missing:
         return False, ("chưa đủ cấu hình — còn thiếu: "
                        + ", ".join(missing))
-    service = build_service(cfg)
+    service = build_service(cfg, status_hook=status_hook)
     try:
         records = service._scan_fn()
     except Exception as exc:  # noqa: BLE001 — verdict, not a crash
+        service._emit_status(False, 0, f'Quét thất bại: {exc}')
         return False, f"quét thất bại: {exc}"
-    if service._deliver_snapshot(records):
-        return True, (f"đã đẩy snapshot {len(records)} máy "
+    from .agent import _is_error_record
+    miners = len({record['ip'] for record in records if not _is_error_record(record)})
+    delivered = service._deliver_snapshot(records)
+    error = None if delivered else service._last_delivery_error or 'Cloud chưa nhận bản quét. Kiểm tra mạng rồi thử lại.'
+    service._emit_status(delivered, miners, error)
+    if delivered:
+        return True, (f"đã đẩy snapshot {miners} máy "
                       f"lên {cfg.cloud_url} (site {cfg.site!r})")
-    return False, ("cloud không nhận snapshot — kiểm tra Cloud URL, "
-                   "agent key và đường mạng từ trại")
+    return False, error
 
 
 # ---------------------------------------------------------------------------
@@ -470,13 +478,21 @@ def _cmd_run(args: argparse.Namespace) -> int:
               flush=True)
     service = build_service(
         cfg, status_hook=make_status_hook(cfg, cfg_path))
-    service.run(once=args.once)
+    from .agent_lock import agent_run_lock
+    try:
+        with agent_run_lock(cfg_path):
+            from .agent_runtime import control_server
+            with control_server(cfg_path) as stopped:
+                service.run(once=args.once, stop_event=stopped)
+    except RuntimeError as error:
+        print(str(error),file=sys.stderr)
+        return 3
     return 0
 
 
 def _cmd_test(args: argparse.Namespace) -> int:
     cfg = _resolve(args)
-    ok, verdict = test_ingest(cfg)
+    ok, verdict = test_ingest(cfg, status_hook=make_status_hook(cfg, _config_path_for(args)))
     stamp = time.strftime("%H:%M:%S")
     print(f"TEST {'OK' if ok else 'FAIL'} [{stamp}]: {verdict}")
     return 0 if ok else 1
@@ -508,6 +524,13 @@ def _task_command_parts(config_path: str | Path | None = None,
         else Path(sys.executable)
     args: list[str] = []
     if getattr(sys, "frozen", False):
+        if exe.stem.lower() not in ('beesky-agent','beesky-agentw'):
+            # Agent mode can be opened inside the scanner's Tk process.
+            # Its executable is a GUI entry point, so tasks must use the
+            # installed agent engine rather than the hosting scanner.
+            name='beesky-agentw.exe' if windowed else 'beesky-agent.exe'
+            candidates=[exe.parent/name,exe.parent/'agent'/name]
+            exe=next((path for path in candidates if path.is_file()),candidates[-1])
         if windowed and exe.stem.lower() == "beesky-agent":
             exe = exe.with_name(exe.stem + "w" + exe.suffix)
         command = str(exe)
@@ -532,7 +555,7 @@ def agent_command(config_path: str | Path | None = None,
 
 def task_xml(config_path: str | Path | None = None,
              console: bool = False,
-             exe_path: str | Path | None = None) -> str:
+             exe_path: str | Path | None = None, system: bool = True) -> str:
     """The Task Scheduler XML for the v2 background task.
 
     Registered via ``schtasks /Create /XML`` (the flat /TR form
@@ -549,26 +572,21 @@ def task_xml(config_path: str | Path | None = None,
     command, arguments = _task_command_parts(
         cfg_path, windowed=not console, exe_path=exe_path)
     esc = xml.sax.saxutils.escape
+    if system:
+        principal = '<UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel>'
+        triggers = '<BootTrigger><Enabled>true</Enabled><Delay>PT30S</Delay></BootTrigger><LogonTrigger><Enabled>true</Enabled></LogonTrigger>'
+    else:
+        identity = subprocess.run(['whoami'],capture_output=True,text=True,check=True,
+            creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0)).stdout.strip()
+        principal = '<UserId>'+esc(identity)+'</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel>'
+        triggers = '<LogonTrigger><Enabled>true</Enabled><UserId>'+esc(identity)+'</UserId></LogonTrigger>'
     return f'''<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <Description>BeeSky Agent — quét máy đào tại trại, đẩy số liệu lên BeeSky Cloud. Chạy nền (ẩn) bằng beesky-agentw, tự khởi động lại khi lỗi; log + trạng thái nằm cạnh file cấu hình (agent.log, agent-status.json).</Description>
   </RegistrationInfo>
-  <Triggers>
-    <BootTrigger>
-      <Enabled>true</Enabled>
-      <Delay>PT30S</Delay>
-    </BootTrigger>
-    <LogonTrigger>
-      <Enabled>true</Enabled>
-    </LogonTrigger>
-  </Triggers>
-  <Principals>
-    <Principal id="Author">
-      <UserId>S-1-5-18</UserId>
-      <RunLevel>HighestAvailable</RunLevel>
-    </Principal>
-  </Principals>
+  <Triggers>{triggers}</Triggers>
+  <Principals><Principal id="Author">{principal}</Principal></Principals>
   <Settings>
     <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
     <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
@@ -620,7 +638,7 @@ _NON_WINDOWS_TASK_NOTE = (
 
 
 def install_task(config_path: str | Path | None = None,
-                 console: bool = False) -> tuple[bool, str]:
+                 console: bool = False, system: bool = False) -> tuple[bool, str]:
     """Create/update the background task from XML; (ok, message).
 
     The task runs as SYSTEM, so registration needs an elevated
@@ -635,7 +653,7 @@ def install_task(config_path: str | Path | None = None,
     xml_path = Path(tempfile.gettempdir()) / "beesky-agent-task.xml"
     try:
         # schtasks /XML expects the file in UTF-16 (as declared).
-        xml_path.write_text(task_xml(cfg_path, console=console),
+        xml_path.write_text(task_xml(cfg_path, console=console, system=system),
                             encoding="utf-16")
         result = subprocess.run(
             ["schtasks", "/Create", "/TN", TASK_NAME,
@@ -657,15 +675,30 @@ def install_task(config_path: str | Path | None = None,
     if not cfg_path.exists():
         note = (f"\nLưu ý: chưa có file cấu hình tại {cfg_path} — "
                 "mở app và Lưu cấu hình trước khi khởi động lại máy.")
-    return True, (f"Đã tạo Scheduled Task {TASK_NAME!r} (SYSTEM, "
+    return True, (f"Đã tạo Scheduled Task {TASK_NAME!r} ({'SYSTEM' if system else 'khi đăng nhập Windows'}, "
                   f"chạy ngầm, tự khởi động lại khi lỗi): {command}"
                   f"{note}")
 
 
-def remove_task() -> tuple[bool, str]:
+def remove_task(if_exe_dir: str | None = None) -> tuple[bool, str]:
     """Delete the background task; (ok, message)."""
     if not _is_windows():
         return False, _NON_WINDOWS_TASK_NOTE
+    if if_exe_dir:
+        # An uninstall may only remove a task whose executable is inside this app.
+        import xml.etree.ElementTree as ET
+        query = subprocess.run(['schtasks','/Query','/TN',TASK_NAME,'/XML'],capture_output=True,text=True)
+        if query.returncode != 0:
+            return True, 'Không có tác vụ khởi động cần gỡ.'
+        try:
+            root = ET.fromstring(query.stdout)
+            commands = [node.text for node in root.iter() if node.tag.rsplit('}',1)[-1]=='Command']
+            expected = Path(if_exe_dir).resolve()
+            if not commands or any(Path(command).resolve().parent != expected for command in commands):
+                return True, 'Giữ tác vụ Agent thuộc bản cài khác.'
+        except (ValueError, ET.ParseError, TypeError):
+            return False, 'Không xác định được tác vụ; giữ nguyên để tránh gỡ nhầm.'
+        subprocess.run(['schtasks','/End','/TN',TASK_NAME],capture_output=True)
     result = subprocess.run(
         ["schtasks", "/Delete", "/TN", TASK_NAME, "/F"],
         capture_output=True, text=True)
@@ -677,13 +710,13 @@ def remove_task() -> tuple[bool, str]:
 
 def _cmd_install_task(args: argparse.Namespace) -> int:
     ok, message = install_task(args.config,
-                               console=getattr(args, "console", False))
+                               console=getattr(args, "console", False), system=getattr(args, "system", False))
     print(message)
     return 0 if ok or not _is_windows() else 1
 
 
 def _cmd_remove_task(args: argparse.Namespace) -> int:
-    ok, message = remove_task()
+    ok, message = remove_task(getattr(args,"if_exe_dir",None))
     print(message)
     return 0 if ok or not _is_windows() else 1
 
@@ -718,6 +751,71 @@ def main(argv: list[str] | None = None) -> int:
         return run_config_gui()
     mode, rest = argv[0], argv[1:]
     try:
+        if mode == 'version':
+            from . import __version__
+            print(json.dumps({'version': __version__}))
+            return 0
+        if mode in ('update-check', 'update-prepare', 'update-install'):
+            parser = argparse.ArgumentParser(prog='beesky-agent ' + mode)
+            parser.add_argument('--config')
+            if mode == 'update-prepare':
+                parser.add_argument('--ui-pid', type=int, required=True)
+            if mode == 'update-install':
+                parser.add_argument('--job', required=True)
+            args = parser.parse_args(rest)
+            from . import agent_updates
+            try:
+                config = _config_path_for(args)
+                if mode == 'update-install':
+                    return 0 if agent_updates.install_update(config, args.job) else 1
+                result = (agent_updates.check_update(config) if mode == 'update-check' else
+                          agent_updates.prepare_update(config, args.ui_pid,
+                              progress=lambda data: print(json.dumps(data, ensure_ascii=False), flush=True)))
+            except (OSError, ValueError, RuntimeError):
+                error = sys.exc_info()[1]
+                result = {'ok': False, 'ready': False, 'message': str(error) if isinstance(error, ValueError)
+                          else 'Chưa cập nhật được Agent. Kiểm tra mạng và quyền ghi thư mục ứng dụng rồi thử lại.'}
+            print(json.dumps(result, ensure_ascii=False), flush=True)
+            return 0 if result['ok'] else 1
+        if mode == 'network':
+            argparse.ArgumentParser(prog='beesky-agent network').parse_args(rest)
+            from .core.discover import default_scan_target
+            print(json.dumps({'target': default_scan_target()}))
+            return 0
+        if mode in ('start', 'stop', 'status'):
+            parser = argparse.ArgumentParser(prog='beesky-agent ' + mode)
+            parser.add_argument('--config')
+            args = parser.parse_args(rest)
+            from .agent_runtime import launch_agent, stop_agent, runtime_status
+            try:
+                config = _config_path_for(args)
+                result = (launch_agent(config) if mode == 'start' else
+                          stop_agent(config) if mode == 'stop' else
+                          {'ok': True, **runtime_status(config)})
+            except (OSError, ValueError) as error:
+                from .agent_connection import ConnectionError
+                message = str(error) if isinstance(error, ConnectionError) else 'Không đọc hoặc ghi được cấu hình Agent. Kiểm tra quyền truy cập và lưu lại cấu hình.'
+                result = {'ok': False, 'running': False, 'message': message}
+            print(json.dumps(result, ensure_ascii=False))
+            return 0 if result['ok'] else 1
+        if mode == 'connection':
+            parser=argparse.ArgumentParser(prog='beesky-agent connection')
+            parser.add_argument('--config')
+            args=parser.parse_args(rest)
+            from .agent_connection import connection_info,ConnectionError
+            try:
+                payload=json.loads(sys.stdin.read(8193))
+                if not isinstance(payload,dict):raise ValueError()
+                cfg=_load_config(args.config)
+                data=connection_info(str(payload.get('cloud_url') or cfg.cloud_url),str(payload.get('key') or cfg.key))
+                print(json.dumps({'ok':True,**data},ensure_ascii=False))
+                return 0
+            except (ConnectionError,ValueError,OSError):
+                # No exception trace or echoed request: stdin can carry the token.
+                error=sys.exc_info()[1]
+                message=str(error) if isinstance(error,ConnectionError) else 'Không đọc được cấu hình kết nối agent.'
+                print(json.dumps({'ok':False,'message':message},ensure_ascii=False))
+                return 1
         if mode == "run":
             return _cmd_run(_run_parser("run").parse_args(rest))
         if mode == "test":
@@ -728,7 +826,10 @@ def main(argv: list[str] | None = None) -> int:
             parser.add_argument("--config", metavar="FILE",
                                   help="file cấu hình ghi vào tác vụ "
                                        "(mặc định: vị trí chuẩn)")
+            if mode == "remove-task":
+                parser.add_argument("--if-exe-dir")
             if mode == "install-task":
+                parser.add_argument("--system", action="store_true", help="Chạy trước khi đăng nhập; cần quyền quản trị")
                 parser.add_argument(
                     "--console", action="store_true",
                     help="tác vụ trỏ vào beesky-agent.exe (console, "

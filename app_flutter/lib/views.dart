@@ -287,7 +287,7 @@ class StoreFileInfo {
       ? Directory('$local${Platform.pathSeparator}BeeSky')
       : Directory(
           '${Directory.systemTemp.path}${Platform.pathSeparator}BeeSky');
-  return (exe.parent, fallback);
+  return (fallback, exe.parent);
 }
 
 class SettingsStore {
@@ -429,16 +429,6 @@ Widget viewHeader(String title, String subtitle) {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'BeeSky / $title',
-          style: const TextStyle(
-            color: BeeSkyColors.muted,
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.4,
-          ),
-        ),
-        const SizedBox(height: 6),
         Text(title,
             style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
         const SizedBox(height: 3),
@@ -1562,10 +1552,9 @@ class _SettingsViewState extends State<SettingsView> {
             height: 40,
             child: Row(
               children: [
-                Switch(
+                BeeSkySwitch(
+                  semanticLabel: 'Nghe IP Report',
                   value: _ipReport,
-                  materialTapTargetSize:
-                      MaterialTapTargetSize.shrinkWrap,
                   onChanged: (v) => setState(() => _ipReport = v),
                 ),
                 const SizedBox(width: 8),

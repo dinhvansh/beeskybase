@@ -112,7 +112,7 @@ class CredStore {
         ? Directory('$appData${Platform.pathSeparator}BeeSky')
         : Directory(
             '${Directory.systemTemp.path}${Platform.pathSeparator}BeeSky');
-    return CredStore(primaryDir: exeDir, fallbackDir: fallback);
+    return CredStore(primaryDir: fallback, fallbackDir: exeDir);
   }
 
   static const fileName = 'beesky-creds.json';

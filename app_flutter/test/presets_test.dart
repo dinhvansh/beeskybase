@@ -421,6 +421,8 @@ void main() {
       // The Pools view-mode segment (a second muted 'Pools'
       // label lives elsewhere on the screen — target the
       // segment by its semibold style).
+      await tester.tap(find.text('Hiển thị'));
+      await tester.pumpAndSettle();
       final poolsSegment = find.byWidgetPredicate((w) =>
           w is Text &&
           w.data == 'Pools' &&
@@ -537,7 +539,7 @@ void main() {
       final tmp = tempDir();
       addTearDown(() => deleteDir(tmp));
       await pumpHome(tester, tmp: tmp);
-      await tester.tap(find.text('Trung tâm mẫu'));
+      await tester.tap(find.byTooltip('Trung tâm mẫu'));
       await tester.pumpAndSettle();
       // The toolbar's own Bộ lọc button also carries the
       // label — both tabs just need to be there.

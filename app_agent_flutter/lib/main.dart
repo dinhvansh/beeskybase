@@ -10,9 +10,7 @@ void main() {
   runApp(BeeSkyAgentApp(bridge: bridge, store: store));
 }
 
-/// The standalone agent config app (Flutter, stage 2 — the Tk
-/// window in beesky/agent_gui.py remains the shipped fallback).
-/// No splash: like the Tk window, it opens straight onto the form.
+/// Standalone Agent setup and monitoring, backed by the shared Python engine.
 class BeeSkyAgentApp extends StatelessWidget {
   final AgentBridge bridge;
   final AgentConfigStore store;

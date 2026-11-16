@@ -243,7 +243,7 @@ class GroupStore {
         ? Directory('$appData${Platform.pathSeparator}BeeSky')
         : Directory(
             '${Directory.systemTemp.path}${Platform.pathSeparator}BeeSky');
-    return GroupStore(primaryDir: exeDir, fallbackDir: fallback);
+    return GroupStore(primaryDir: fallback, fallbackDir: exeDir);
   }
 
   static const fileName = 'beesky-groups.json';
@@ -461,7 +461,8 @@ class _GroupEditorDialogState extends State<_GroupEditorDialog> {
               const SizedBox(height: 6),
               Row(
                 children: [
-                  Switch(
+                  BeeSkySwitch(
+                    semanticLabel: 'Tự quét khi app đang mở',
                     value: _autoscan,
                     onChanged: (v) => setState(() => _autoscan = v),
                   ),

@@ -595,6 +595,7 @@ class BeeSkyApp:
             f"(quét {target} mỗi 30 giây)")
 
 
+
 def run_gui(default_target: str | None = None) -> int:
     root = tk.Tk()
     BeeSkyApp(root, default_target=default_target)

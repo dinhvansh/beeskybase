@@ -1,5 +1,33 @@
 # BeeSky — ASIC miner LAN scanner & repair diagnostics
 
+## Current applications and source
+
+The current Windows release is **v0.44.1**. Download the Scanner
+(`BeeSkySetup-0.44.1.exe`) or standalone Agent (`BeeSkyAgentSetup-0.44.1.exe`)
+from [Releases](https://github.com/dinhvansh/beeskybase/releases/tag/v0.44.1).
+The immutable `v0.44.1` tag identifies the source used to build those binaries;
+later source commits do not change an existing installer.
+
+- **Scanner:** `app_flutter/`, with the Python engine in `beesky/`.
+- **Agent:** `app_agent_flutter/`, with background monitoring and signed whole-app
+  updates. See [Agent 0.43](docs/agent-043.md) and [Agent 0.44](docs/agent-044.md).
+- **Cloud:** `cloud_service/` is the Django/PostgreSQL service for accounts,
+  organizations, workshops, telemetry, placement and maintenance. See
+  [backend and supported APIs](docs/cloud-backend.md) and
+  [deployment](docs/cloud-deployment.md). The local service uses port **8793**.
+- **Legacy preview:** `python -m tools.serve_preview` uses port **8790** and a
+  separate SQLite backend. It is distinct from the production Cloud service.
+
+Use `main` as the integration branch after the Cloud/desktop integration PR is
+merged. Start further changes from the latest remote `main`, and submit a pull
+request before merging. Release tags identify shipped versions independently of
+branch names. The sections below include historical CLI and preview notes;
+the linked application documents describe the current service contracts.
+
+Cloud remote miner commands remain disabled (`control_available: false`), and
+MFA is not implemented. Automated tests use isolated databases and simulated
+miners; physical-device compatibility still requires verification at the farm.
+
 BeeSky is a small, dependency-free tool for ASIC repair shops. It scans a local
 network for miners, reads their health over whichever API the firmware
 exposes — the classic **cgminer RPC API (TCP 4028)**, the **VNish/HashCore
@@ -198,4 +226,96 @@ packaging/
 .github/workflows/
   build-windows.yml # windows-latest runner: PyInstaller + Inno Setup ->
                     # BeeSky-Windows artifact; Releases on v* tags
+```
+
+### Nhãn, nhóm làm mát và model máy
+
+Xưởng 3D dùng model S21 Hydro/S19 Pro từ hai archive người dùng cung cấp; tải mỗi loại một lần và dùng chung hình học. Model chưa nhận diện dùng khối đơn giản. Trong chi tiết máy có thể chọn model hiển thị mà không sửa model máy báo về.
+
+Mở **Nhãn & nhóm** để tạo nhóm theo bộ tản/đường nước, chọn nhiều máy (lọc riêng máy nước/máy gió), hoặc gắn nhãn từng máy. Bộ lọc và tìm kiếm hỗ trợ nhãn, tên nhóm, bộ tản và đường nước. Nhóm liên kết bằng ID máy, đi qua nhiều kệ/tầng trong một xưởng và giữ nguyên khi đổi vị trí. Xóa nhóm không xóa máy.
+
+Dữ liệu nhóm, nhãn và bố trí hiện chỉ nằm trong phiên duyệt; tải lại trang sẽ mất thay đổi. Liên kết làm mát nhập thủ công, chưa kết nối backend hay điều khiển đường nước/bộ tản.
+
+### Xưởng 3D và xoay kệ
+
+Thanh chọn kệ luôn có **Xoay trái / Xoay phải** theo bước 90°, **Vị trí & tầng**, và hoàn tác. Bật **Bố trí kệ** để kéo trên sàn; R xoay kệ đang chọn khi canvas có focus. Kiểm tra va chạm và giới hạn sàn vẫn áp dụng.
+
+**Toàn xưởng** hiển thị chung hai loại model máy trong nhà xưởng dạng cắt mái, với thông gió, bộ tản minh họa, ống cấp/hồi và lối đi. **Cận kệ** quay lại góc nhìn tập trung vào thiết bị. Thiết bị phụ trợ chỉ minh họa, không tự xác lập kết nối làm mát thực tế.
+
+### Hiệu ứng hoạt động trong xưởng
+
+Nút **Hiệu ứng: Bật/Tắt** điều khiển coin Bitcoin / `+ HASH` nổi lên, dòng hạt nước ở máy hydro và LED hoạt động. Máy offline không phát coin. Hiệu ứng theo máy khi đổi bố trí và theo bộ lọc đang dùng; coin/hash chỉ là trang trí, không phải số dư hay thu nhập thật.
+
+Cảnh giới hạn 30 khung/giây, tối đa 27 sprite coin/hash, dừng vòng vẽ khi tắt hiệu ứng, ra ngoài vùng xem hoặc ẩn tab. Tôn trọng cài đặt giảm chuyển động của hệ thống. Dọn vòng hoạt ảnh và listener khi chuyển tầng, đổi cảnh hoặc đóng 3D.
+
+
+### Sửa model và nhãn kệ
+
+Model hydro loại bỏ phông nền studio đi kèm file gốc và quay mặt kết nối ra phía trước. Hai model giữ nhiều chi tiết hơn, sửa hướng mặt và triangulate khi chuyển đổi. Bỏ cánh quạt trang trí chồng lên quạt gốc. Nhãn kệ dùng lớp chữ trên màn hình, có tên, sức chứa và khu vực; giữ cỡ chữ khi zoom, theo vị trí kệ và giới hạn trong vùng xem.
+
+
+### Xem nhiều tầng và công cụ gọn
+
+Chọn **Tầng → Tất cả tầng · phối cảnh** để xem các tầng cùng lúc theo dạng tách tầng theo chiều cao, sàn trong suốt và đường viền riêng. Chọn một tầng để chỉnh vị trí; mở **Bố trí** tự trở về tầng đang chọn để thao tác an toàn. Nhãn bên trái là danh sách kệ luôn hiện trong cảnh, có thể cuộn; bấm tên để đưa camera tới kệ đó.
+
+Mặc định chỉ hiện thanh chọn tầng và các nút Bố trí, Lọc & nhóm, Tùy chọn, Toàn màn hình. Góc nhìn gom vào một danh sách; công cụ quản lý tầng, xoay kệ và di chuyển máy chỉ xuất hiện khi mở Bố trí. Bộ lọc/nhóm chỉ xuất hiện khi cần.
+
+
+Nhãn kệ hiện là bảng gắn phẳng lên tường sau, gồm tên kệ, sức chứa, tầng và khu vực; không còn danh sách nhãn nổi bên trái. Mỗi tầng có bảng riêng. Bấm bảng để tìm kệ trong chế độ khám phá.
+
+
+### Tháo máy và sửa chữa
+
+Bấm máy → **Tháo khỏi kệ** để trả máy về danh sách chưa xếp, chọn tình trạng và ghi lý do. Có bốn trạng thái thủ công: Sẵn sàng vận hành, Hỏng / chờ sửa, Đang sửa chữa, Hỏng hẳn / ngừng sử dụng. Có thể cập nhật lại từ chi tiết máy hoặc thẻ máy chưa xếp.
+
+Tháo chỉ làm trống ô kệ, giữ ID, serial, nhãn, nhóm và vị trí cuối cùng để đối chiếu. Máy ngừng sử dụng không được xếp lại cho đến khi cập nhật tình trạng; gợi ý xếp theo IP chỉ lấy máy sẵn sàng. Máy đang hỏng/sửa/ngừng sử dụng không phát hiệu ứng đào. Tình trạng nhập thủ công không thay đổi kết nối báo về và không gửi lệnh tới thiết bị. Dữ liệu hiện chỉ lưu trong phiên xem.
+
+### Worker từ máy và danh sách khách sở hữu trên sơ đồ 2D
+
+Mở **Hiển thị trên ô máy** để bật/tắt Worker và Khách sở hữu. Worker chỉ đọc từ trường `worker` hoặc dữ liệu pool `pools` / `POOLS` của máy (ưu tiên pool đang hoạt động), không dùng nhãn nhập tay và không tự tạo từ IP/serial. Bản preview hiện chưa kết nối luồng dữ liệu agent, nên khi thiếu trường này sẽ hiện **Chưa nhận dữ liệu**.
+
+Bấm máy → **Gán khách** → chọn khách có sẵn. Nếu chưa có, chọn **Tạo khách mới**, nhập tên và **Tạo & chọn khách**, sau đó **Lưu gán khách**. Khách được lưu trong danh sách riêng của xưởng, gán bằng ID; bỏ gán không xóa khách. Một khách có thể có nhiều máy, khách trùng tên được chặn để chọn lại khách đã có. Không sửa cấu hình pool hoặc tạo tài khoản đăng nhập cho khách.
+
+Thông tin khách giữ theo ID máy khi tháo/đổi kệ; dữ liệu hiện chỉ lưu trong phiên xem.
+
+## Kế hoạch điện trạm trong bản xem trước
+
+Trang Điện năng nhận model máy đã xếp vào kệ của xưởng, gộp mọi tầng. Hỗ trợ tham chiếu BITMAIN S19 Pro 110T (3250 W), S21 Hyd 335/319/302T (5360/5104/4832 W); tên chưa có biến thể được ghi rõ là dùng bản tham chiếu. Model khác cần nhập W xác nhận theo tem; không đoán từ tên gần giống.
+
+- Công suất tác dụng = kVA × PF (hoặc nhập trực tiếp kW).
+- Tải mục tiêu = công suất tác dụng × mức tải mục tiêu (%).
+- Tải dự kiến = tổng max(W định mức, W máy báo về hợp lệ) × (1 + dự phòng %) / 1000 + phụ tải phụ kW.
+- Số máy thêm = làm tròn xuống phần tải mục tiêu còn lại / tải mỗi máy có dự phòng.
+- Máy chưa xếp không cộng tải; máy offline còn trong kệ vẫn cộng. Model chưa xác nhận định mức chặn đề xuất thêm máy, kể cả có số đo tức thời. Số đo có timestamp quá 10 phút bị loại; số đo không timestamp chưa xác minh được độ mới.
+
+Cấu hình và W xác nhận tách theo xưởng, chỉ lưu trong phiên của bản preview. Chưa nối dữ liệu quét trực tiếp/backend và chưa tính bảo vệ điện, nhánh cấp hay cân pha. Nguồn thông số chính hãng được dẫn ngay trong bảng.
+
+## Điện trạm: lưu dữ liệu, agent và nhánh/pha
+
+Chạy bản giao diện có API thật từ thư mục repository:
+
+```powershell
+python -m tools.serve_preview
+```
+
+Mở `http://127.0.0.1:8790/#/energy`. Có thể đặt `BEESKY_PREVIEW_PORT` để đổi cổng; `BEESKY_CLOUD_PASSWORD` dùng cơ chế đăng nhập quản trị hiện có. Máy chủ bind localhost. SQLite nằm tại `work/beesky-preview.db`; sao lưu file này khi máy chủ đã dừng. Không đưa database/mã agent lên Git.
+
+- Tự lưu trạm, W xác nhận, tủ/nhánh, nguồn cấp, pha từng máy và bố trí kệ trên máy chủ; trình duyệt có bản dự phòng. API `/api/power-plan` dùng revision, từ chối ghi đè khi cửa sổ khác đã sửa (409). Tải lại để đọc bản mới nhất trước khi tiếp tục sửa. Đây là workspace quản trị chung theo cơ chế backend hiện có, chưa phải hệ thống nhiều tenant.
+- Trong **Thiết lập nguồn điện → Kết nối agent**, chọn site của agent hoặc tạo mã agent mới (chỉ hiện một lần). Agent tại LAN chạy theo hướng dẫn `python -m beesky agent <target> --cloud http://<dia-chi-cloud> --key <key> --site <site>`; máy chủ localhost cần được triển khai/bind qua cấu hình cloud phù hợp trước khi agent trên máy khác truy cập. Không tự quét mạng từ trình duyệt.
+- Kết nối source sẽ bỏ máy mẫu khỏi xưởng đó và làm trống các ô tương ứng; kệ được giữ lại. Máy mới đi vào danh sách chưa xếp; xếp đúng kệ để tính tải. API `/api/miners` bổ sung `snapshot_ts` và `agent_id`; cập nhật model, W, nhiệt độ từ bản quét mỗi 30 giây khi app mở. Không suy diễn máy mất kết nối là đã ngắt điện.
+- Cây điện: trạm → tủ (giới hạn tổng kW) → nhánh (giới hạn kW A/B/C) → kệ (pha mặc định) → máy (ghi đè pha riêng). ABC chỉ dành cho tải thực sự đấu 3 pha, chia W đều ba pha. S21 Hydro gán một pha và S19 Pro gán ABC đều được cảnh báo. Nhập giới hạn dựa trên thiết kế điện thực tế; ứng dụng không tự chuyển pha hay điều khiển thiết bị điện.
+- Bảng báo tải dự kiến có dự phòng; lệch tải = độ lệch pha lớn nhất so với trung bình / trung bình. Cảnh báo khi vượt mức trạm/tủ/pha, lệch tải trên 20%, chưa gán nhánh/pha hoặc thiếu định mức. Phụ tải phụ cộng ở trạm, chưa phân bổ vào nhánh, được ghi rõ trên UI.
+- Cảnh báo tăng điện: hai số đo có timestamp mới khác nhau, tăng >20% và ≥100 W; hết hiệu lực sau 10 phút. Cảnh báo trong app đang mở; chưa gửi email/Telegram và chưa có tiến trình cảnh báo khi đóng app.
+
+Đã kiểm tra API ingest bằng dữ liệu giả lập qua cơ chế agent thật, lưu SQLite, cách ly site, gate đăng nhập và xung đột revision; chưa kiểm chứng với máy đào vật lý tại xưởng.
+
+
+## Bảo trì hằng tháng và ảnh minh chứng
+
+Mở `http://127.0.0.1:8790/#/maintenance` sau khi chạy `python -m tools.serve_preview`. Lịch tạo phiếu hoạt động trên máy chủ, không cần mở trình duyệt. Xem [hướng dẫn bảo trì](docs/maintenance.md) về phạm vi, checklist, lưu ảnh và báo cáo PDF.
+
+Kiểm tra phần mới:
+
+```powershell
+python -m unittest discover -s tests -p "test_maintenance*.py" -v
 ```

@@ -475,7 +475,7 @@ void main() {
 
       // History: the entry is there with its counts, expandable to
       // per-device results (the .104 failure included).
-      await tester.tap(find.text('Lịch sử tác vụ'));
+      await tester.tap(find.byTooltip('Lịch sử tác vụ'));
       await tester.pumpAndSettle();
       expect(find.text('Lịch sử tác vụ'), findsWidgets);
       expect(find.textContaining('Khởi động lại — Có lỗi'),
@@ -502,7 +502,7 @@ void main() {
       final store = OpsHistoryStore(primaryDir: tmp, fallbackDir: tmp);
       await tester.runAsync(() => store.save([sampleTask()]));
       await pumpHome(tester, tmp: tmp);
-      await tester.tap(find.text('Lịch sử tác vụ'));
+      await tester.tap(find.byTooltip('Lịch sử tác vụ'));
       await tester.pumpAndSettle();
       expect(find.textContaining('Khởi động lại — Có lỗi'),
           findsOneWidget);
@@ -529,7 +529,7 @@ void main() {
       final records =
           jsonDecode(exports.single.readAsStringSync()) as List<dynamic>;
       expect(records, hasLength(5));
-      await tester.tap(find.text('Lịch sử tác vụ'));
+      await tester.tap(find.byTooltip('Lịch sử tác vụ'));
       await tester.pumpAndSettle();
       expect(find.textContaining('Xuất danh sách — Thành công'),
           findsOneWidget);

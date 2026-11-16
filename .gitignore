@@ -15,3 +15,21 @@ tests/mock_scan.json
 tests/mock_scan_v2.json
 tests/tickets/
 tests/tickets_v2/
+
+# Local workflow editor dependencies
+node_modules/
+
+# Local browser verification artifacts
+.playwright-cli/
+output/playwright/
+
+# Local model conversion inputs and portable tools
+/work/
+/cloud_service/.env
+/cloud_service/collected_static/
+
+/cloud_service/.env.production
+*.dump
+*.dump.partial
+update-signing-key.pem
+*.dpapi

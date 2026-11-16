@@ -91,6 +91,9 @@ from urllib.parse import parse_qs, urlparse
 from ..core.actions import COMMAND_TYPES
 from .pools import DEFAULT_POLL_S, UNIT_TO_THS, PoolPoller
 from .store import CloudStore
+from .maintenance import MaintenanceService, MaintenanceScheduler
+from .maintenance_http import handle_maintenance
+from .mcp import handle_http as handle_mcp
 
 MAX_BODY_BYTES = 16 * 1024 * 1024
 SESSION_COOKIE = "beesky_session"
@@ -105,25 +108,9 @@ _FALLBACK_HTML = """<!DOCTYPE html>
 <a style="color:#F5D800" href="/api/miners">/api/miners</a>.</p>
 </body></html>"""
 
-_LOGIN_HTML = """<!DOCTYPE html>
-<html lang="vi"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BeeSky Cloud — Đăng nhập</title></head>
-<body style="background:#000;color:#fff;font-family:'Segoe UI',system-ui,Arial,sans-serif;
-display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0">
-<form method="post" action="/login" style="background:#141414;border:1px solid #2c2c2c;
-border-top:3px solid #F5D800;border-radius:8px;padding:28px;width:320px">
-<div style="font-size:24px;font-weight:800">Bee<span style="color:#F5D800">Sky</span> Cloud</div>
-<p style="color:#a8a8a8;font-size:13px">Nhập mật khẩu quản trị để xem các trại.</p>
-{error}
-<input type="password" name="password" autofocus placeholder="Mật khẩu"
-style="width:100%;box-sizing:border-box;padding:10px;border-radius:6px;border:1px solid #2c2c2c;
-background:#1d1d1d;color:#fff;margin-bottom:12px">
-<button type="submit" style="width:100%;background:#F5D800;color:#000;border:0;border-radius:6px;
-padding:10px;font-weight:700;cursor:pointer">Đăng nhập</button>
-</form></body></html>"""
+_LOGIN_HTML = """<!DOCTYPE html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>BeeSky Cloud — Đăng nhập</title><script>try{{document.documentElement.dataset.theme=localStorage.getItem('beesky-color-theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light')}}catch{{}}</script><style>:root{{--bg:#f6f7f9;--surface:#fff;--text:#18202e;--muted:#5e697a;--border:#dce1e8}}html[data-theme="dark"]{{--bg:#101113;--surface:#191b1f;--text:#f1f3f5;--muted:#a4abb8;--border:#30343b;color-scheme:dark}}*{{box-sizing:border-box}}body{{margin:0;min-height:100dvh;background:var(--bg);color:var(--text);font:14px Inter,'Segoe UI',sans-serif;display:grid;place-items:center;padding:24px}}form{{width:100%;max-width:380px;background:var(--surface);border:1px solid var(--border);padding:32px;border-radius:12px}}h1{{font-size:22px;letter-spacing:-.5px;margin:24px 0 8px}}.brand{{font-size:19px;font-weight:700}}.mark{{display:inline-grid;place-items:center;background:#facc15;color:#181a20;width:28px;height:28px;border-radius:6px;margin-right:8px}}p{{color:var(--muted);font-size:13px;line-height:1.6}}label{{display:block;font-size:13px;margin:24px 0 8px}}input{{font:inherit;width:100%;padding:10px 12px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px}}button{{width:100%;padding:11px;border:0;border-radius:6px;background:#facc15;color:#181a20;font:600 13px Inter,'Segoe UI',sans-serif;cursor:pointer;margin-top:16px}}:focus-visible{{outline:2px solid #285fca;outline-offset:3px}}.foot{{margin-bottom:0;font-size:11px}}</style></head><body><button type="button" id="login-theme" aria-label="Đổi giao diện sáng tối" style="position:fixed;top:20px;right:20px;width:auto;margin:0;background:var(--surface);color:var(--text);border:1px solid var(--border)">Sáng / Tối</button><form method="post" action="/login"><div class="brand"><span class="mark">B</span>BeeSky Cloud</div><h1>Đăng nhập quản trị</h1><p>Nhập mật khẩu để truy cập dashboard cloud.</p>{error}<label for="cloud-password">Mật khẩu</label><input id="cloud-password" type="password" name="password" autocomplete="current-password" required autofocus><button type="submit">Đăng nhập</button><p class="foot">Phiên bản hiện tại dùng tài khoản quản trị chung.</p></form><script>document.querySelector('#login-theme').addEventListener('click',()=>{{const value=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=value;try{{localStorage.setItem('beesky-color-theme',value)}}catch{{}}}})</script></body></html>"""
 
-_LOGIN_ERROR = ('<p style="color:#d9534f;font-size:13px">'
+_LOGIN_ERROR = ('<p role="alert" style="color:#dc3545;font-size:13px">'
                 'Mật khẩu không đúng — thử lại.</p>')
 
 
@@ -192,6 +179,7 @@ class SessionStore:
 def make_handler(store: CloudStore, dashboard_html: bytes,
                  password: str | None):
     sessions = SessionStore()
+    maintenance = MaintenanceService(store)
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "BeeSkyCloud/0.13"
@@ -276,6 +264,9 @@ def make_handler(store: CloudStore, dashboard_html: bytes,
         def do_GET(self):  # noqa: N802 — stdlib handler API
             parsed = urlparse(self.path)
             path = parsed.path
+            if path == "/mcp":
+                handle_mcp(self, store)
+                return
             if path == "/login":
                 if self._viewer_ok():
                     self._send(302, b"", "text/html", {"Location": "/"})
@@ -295,9 +286,14 @@ def make_handler(store: CloudStore, dashboard_html: bytes,
                 return
             if not self._viewer_gate(path):
                 return
+            if path.startswith("/api/maintenance"):
+                handle_maintenance(self, maintenance)
+                return
             query = parse_qs(parsed.query)
             if path == "/":
                 self._send(200, dashboard_html, "text/html; charset=utf-8")
+            elif path == "/api/power-plan":
+                self._send_json(200, json.loads(store.get_setting("power_plan", '{"revision":0,"data":null}')))
             elif path == "/api/sites":
                 now = time.time()
                 self._send_json(200, {
@@ -425,6 +421,13 @@ def make_handler(store: CloudStore, dashboard_html: bytes,
         def do_POST(self):  # noqa: N802 — stdlib handler API
             parsed = urlparse(self.path)
             path = parsed.path
+            if path.startswith("/api/maintenance"):
+                if self._viewer_gate(path):
+                    handle_maintenance(self, maintenance)
+                return
+            if path == "/mcp":
+                handle_mcp(self, store)
+                return
             result_match = re.fullmatch(r"/api/agent/commands/(\d+)/result",
                                         path)
             if path == "/login":
@@ -442,6 +445,37 @@ def make_handler(store: CloudStore, dashboard_html: bytes,
             elif path == "/api/pool-config":
                 if self._viewer_gate(path):
                     self._handle_upsert_pool_config()
+            elif path == "/api/power-plan":
+                if not self._viewer_gate(path):
+                    return
+                body = self._read_json_body()
+                if body is None:
+                    self._send_json(400, {"error": "invalid JSON body"})
+                    return
+                if not isinstance(body.get("data"), dict) or len(json.dumps(body)) > 2000000:
+                    self._send_json(400, {"error": "Invalid or oversized plan"})
+                    return
+                plan = body["data"]
+                try:
+                    json.dumps(plan, allow_nan=False)
+                    valid = (plan.get("version") == 1 and isinstance(plan.get("stations"), list)
+                             and isinstance(plan.get("farms"), list) and isinstance(plan.get("layout"), dict)
+                             and isinstance(plan["layout"].get("racks"), list)
+                             and isinstance(plan["layout"].get("devices"), list))
+                except (ValueError, TypeError):
+                    valid = False
+                if not valid:
+                    self._send_json(400, {"error": "invalid plan schema"})
+                    return
+                with store._lock, store._db:
+                    row = store._db.execute("SELECT value FROM settings WHERE key = 'power_plan'").fetchone()
+                    current = json.loads(row["value"]) if row else {"revision": 0}
+                    if body.get("revision") != current["revision"]:
+                        self._send_json(409, {"error": "Plan changed; reload before saving"})
+                        return
+                    result = {"revision": current["revision"] + 1, "data": body["data"]}
+                    store._db.execute("INSERT INTO settings(key,value) VALUES('power_plan',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (json.dumps(result, allow_nan=False),))
+                self._send_json(200, result)
             elif path == "/api/settings":
                 if self._viewer_gate(path):
                     self._handle_update_settings()
@@ -760,9 +794,11 @@ def run_cloud_server(store: CloudStore, host: str = "127.0.0.1",
     httpd = ThreadingHTTPServer((host, port),
                                 make_handler(store, dashboard_html, password))
     httpd.daemon_threads = True
+    maintenance_scheduler = MaintenanceScheduler(MaintenanceService(store))
+    maintenance_scheduler.start()
     poller = PoolPoller(store, _pool_poll_interval())
     poller.start()
-    print(f"Pool poller: mỗi {poller.interval_s:g} giây cho các trại "
+    print(f"Pool poller: mỗi {poller.interval_s:g} giây cho các xưởng "
           "đã cấu hình pool (BEESKY_POOL_POLL_S).", flush=True)
     print(f"BeeSky cloud: http://{host}:{port} — db {store.path}", flush=True)
     if password:
@@ -782,6 +818,7 @@ def run_cloud_server(store: CloudStore, host: str = "127.0.0.1",
     except KeyboardInterrupt:
         print("\nbeesky cloud stopped")
     finally:
+        maintenance_scheduler.stop()
         poller.stop()
         httpd.server_close()
         store.close()

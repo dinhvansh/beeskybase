@@ -827,7 +827,7 @@ class GridStore {
         ? Directory('$appData${Platform.pathSeparator}BeeSky')
         : Directory(
             '${Directory.systemTemp.path}${Platform.pathSeparator}BeeSky');
-    return GridStore(primaryDir: exeDir, fallbackDir: fallback);
+    return GridStore(primaryDir: fallback, fallbackDir: exeDir);
   }
 
   static const fileName = 'beesky-grid.json';

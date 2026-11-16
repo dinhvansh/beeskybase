@@ -1,22 +1,3 @@
-"""BeeSky update-channel public key (compile-time constant).
-
-The values here are the PUBLIC half of the RSA-2048 keypair whose
-private half signs ``update-manifest.json`` on every GitHub Release
-(see docs/updating.md). Clients verify release manifests against this
-modulus before trusting a single byte of them.
-
-``UPDATE_RSA_N_HEX is None`` is the "not configured" state: the owner
-has not generated a keypair yet, and the self-update channel is
-disabled (``beesky update`` says so instead of guessing). To enable
-it, the owner runs ``tools/make_update_key.py`` ONCE, which rewrites
-this file with the real modulus, stores the private key as the
-GitHub Actions secret ``UPDATE_SIGNING_KEY`` (never in this repo),
-and commits this file.
-"""
-
-# RSA modulus (hex, no 0x prefix) of the update-signing public key,
-# or None while the channel is not configured.
-UPDATE_RSA_N_HEX: str | None = None
-
-# RSA public exponent. Fixed by tools/make_update_key.py.
+"""Public verification key for BeeSky signed releases. Private key is held in GitHub Actions."""
+UPDATE_RSA_N_HEX = 'bfdad7a15d0665078eb42c7dc65e4867a6bc2cac2942f586c0fbfbbb591cc72a32e23ccb5c1f08f0b80de13ab568ee3454d40c70558cd6974cf22009a070b493a4a2fe0a062efe417b81a58e02e322f7368cd27cb0a18b43250ad9db4ee8fe63e99665003e9e193fad139a0829bdb6c4df7c333c9864d5091348ab96ca529c115fb870930c72ae6bdfbbe3b627b0faa382237fe8d0ebe716048a8708c86c74b54d7f0e8c08e5abdcd1bd6c9098011ef33c982ec8bfab915b8c584b0ba9065d54d7b1801553c9f31191750772040b5765a32c1c89fb41e873b547379f4aa1f97688bf31b017f0d9fc5d1b7f891ea8adba2c69db8b987bbef682fa356212568f1b'
 UPDATE_RSA_E = 65537
