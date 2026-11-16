@@ -66,6 +66,7 @@ void main() {
     await bridge.startAgent('mock/agent-config.json');
     await pump(t, bridge);
     expect(find.text('Dừng Agent'), findsOneWidget);
+    expect(find.text('Agent đang dùng token đã lưu.'), findsOneWidget);
     expect(find.text('Chưa có dữ liệu mới'), findsOneWidget);
     await t.tap(find.text('Dừng Agent'));
     await t.pump();

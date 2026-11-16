@@ -762,7 +762,9 @@ class _AgentConfigPageState extends State<AgentConfigPage> {
                   ? 'Đang kiểm tra token với Mine…'
                   : _connectionError ??
                       (_connection == null
-                          ? 'Chưa kiểm tra token.'
+                          ? bridge.running && !bridge.runtimeUncertain
+                              ? 'Agent đang dùng token đã lưu.'
+                              : 'Chưa kiểm tra token.'
                           : 'Đã kết nối: ${_connection!.siteName} · ${_connection!.organizationName}'),
               style: TextStyle(
                   fontSize: 12,

@@ -287,7 +287,7 @@ class AgentUpdatePanelState extends State<AgentUpdatePanel> {
         if (_info?.previousMessage != null)
           Padding(
               padding: const EdgeInsets.only(top: 6),
-              child: Text(_info!.previousMessage!,
+              child: Text('Lần cập nhật trước: ${_info!.previousMessage!}',
                   style: TextStyle(
                       fontSize: 12,
                       color: _info!.previousFailed
