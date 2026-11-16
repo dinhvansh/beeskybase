@@ -1,6 +1,6 @@
 from django.http import Http404,HttpResponseRedirect
 
-TOOL_VERSION='0.44.0'
+TOOL_VERSION='0.44.1'
 
 def download_tool(request,tool):
     names={'scanner':'BeeSkySetup','agent':'BeeSkyAgentSetup'}

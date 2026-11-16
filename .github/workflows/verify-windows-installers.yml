@@ -5,7 +5,7 @@ on:
       release_tag:
         description: 'Published version to verify'
         required: true
-        default: 'v0.44.0'
+        default: 'v0.44.1'
 permissions:
   contents: read
 jobs:
